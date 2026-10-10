@@ -1327,6 +1327,173 @@ int main(int argc, char** argv)
         CHECK(!doc->selection().isActive());
     });
 
+    addTest("the layers panel shows groups as a tree", [] {
+        MainWindow window;
+        window.resize(1200, 800);
+        window.newDocument(60, 40, Rgba(255, 255, 255, 255));
+        window.show();
+        QApplication::processEvents();
+        Document* doc = window.findChildren<CanvasView*>().last()->document();
+        LayerTree* tree = window.findChild<LayerTree*>();
+        QAction* addGroup = window.findChild<QAction*>(QStringLiteral("addgroup"));
+        CHECK(tree != nullptr);
+        CHECK(addGroup != nullptr);
+        if (!tree || !addGroup)
+            return;
+
+        addGroup->trigger();
+        CHECK(doc->layerCount() == 2);
+        Layer* group = doc->activeNode();
+        CHECK(group != nullptr && group->isGroup());
+        CHECK(tree->topLevelItemCount() == 2);
+
+        // A layer added while the group is active lands inside it, and the
+        // panel draws it as a child row rather than beside the group.
+        window.findChild<QAction*>(QStringLiteral("addlayer"))->trigger();
+        CHECK(doc->activeNode()->parent() == group);
+        CHECK(tree->topLevelItemCount() == 2);
+        QTreeWidgetItem* groupItem = tree->topLevelItem(0);
+        CHECK(groupItem != nullptr);
+        if (!groupItem)
+            return;
+        CHECK(groupItem->text(0) == group->name);
+        CHECK(groupItem->childCount() == 1);
+
+        // Collapsing is remembered on the group itself.
+        groupItem->setExpanded(false);
+        CHECK(!group->expanded);
+        groupItem->setExpanded(true);
+        CHECK(group->expanded);
+
+        // Both steps undo, and the panel follows the document back.
+        QAction* undo = window.findChild<QAction*>(QStringLiteral("undo"));
+        undo->trigger();
+        undo->trigger();
+        CHECK(doc->layerCount() == 1);
+        CHECK(tree->topLevelItemCount() == 1);
+    });
+
+    addTest("the layers panel picks the paint target", [] {
+        MainWindow window;
+        window.resize(1200, 800);
+        window.newDocument(40, 30, Rgba(255, 255, 255, 255));
+        window.show();
+        QApplication::processEvents();
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Document* doc = view->document();
+        LayerTree* tree = window.findChild<LayerTree*>();
+        QAction* addMask = window.findChild<QAction*>(QStringLiteral("addmask"));
+        CHECK(tree != nullptr);
+        CHECK(addMask != nullptr);
+        if (!tree || !addMask)
+            return;
+
+        addMask->trigger();
+        Layer* layer = doc->activeNode();
+        CHECK(layer != nullptr && layer->hasMask());
+        if (!layer || !layer->hasMask())
+            return;
+        // A fresh mask becomes the paint target straight away.
+        CHECK(layer->maskSelected());
+        CHECK(doc->activeLayer() == layer->maskLayer());
+        QApplication::processEvents();
+
+        // The panel shows both thumbnails, and clicking one picks the target.
+        QTreeWidgetItem* item = tree->topLevelItem(0);
+        CHECK(item != nullptr);
+        if (!item)
+            return;
+        CHECK(!item->data(0, LayerRowDelegate::MaskThumbnail).value<QImage>().isNull());
+        const QRect row = tree->visualItemRect(item);
+        CHECK(!row.isEmpty());
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          LayerRowDelegate::thumbnailRect(row).center());
+        CHECK(!layer->maskSelected());
+        CHECK(doc->activeLayer() == layer);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          LayerRowDelegate::maskRect(row).center());
+        CHECK(layer->maskSelected());
+
+        // So a brush stroke now lands in the mask and leaves the pixels alone.
+        const Image before = layer->image;
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        CHECK(brush != nullptr);
+        if (!brush)
+            return;
+        view->setTool(brush);
+        ToolContext context = view->makeContext();
+        brush->press(context, makeEvent(QPointF(20, 15)));
+        brush->release(context, makeEvent(QPointF(20, 15)));
+        CHECK(samePixels(layer->image, before));
+        CHECK(layer->maskImage()->at(20, 15) != Rgba(255, 255, 255, 255));
+        CHECK(view->history()->count() == 2);
+
+        // The stroke in the mask undoes on its own, without the layer pixels
+        // taking part.
+        view->history()->undo();
+        Layer* again = doc->activeNode();
+        CHECK(again->maskImage()->at(20, 15) == Rgba(255, 255, 255, 255));
+        CHECK(samePixels(again->image, before));
+
+        // Applying the mask bakes it and leaves the layer as the only target.
+        QAction* apply = window.findChild<QAction*>(QStringLiteral("applymask"));
+        CHECK(apply != nullptr && apply->isEnabled());
+        apply->trigger();
+        CHECK(!doc->activeNode()->hasMask());
+        CHECK(doc->activeLayer() == doc->activeNode());
+    });
+
+    addTest("dropping a layer on a group puts it inside", [] {
+        MainWindow window;
+        window.resize(1200, 800);
+        window.newDocument(32, 24, Rgba(255, 255, 255, 255));
+        window.show();
+        QApplication::processEvents();
+        Document* doc = window.findChildren<CanvasView*>().last()->document();
+        LayerTree* tree = window.findChild<LayerTree*>();
+        CHECK(tree != nullptr);
+        if (!tree)
+            return;
+        window.findChild<QAction*>(QStringLiteral("addgroup"))->trigger();
+        const int groupUid = doc->activeNode()->uid();
+        CHECK(doc->activeNode()->isGroup());
+        CHECK(tree->topLevelItemCount() == 2);
+
+        QTreeWidgetItem* groupItem = tree->topLevelItem(0);
+        QTreeWidgetItem* backgroundItem = tree->topLevelItem(1);
+        CHECK(groupItem != nullptr && backgroundItem != nullptr);
+        if (!groupItem || !backgroundItem)
+            return;
+        const int backgroundUid =
+            backgroundItem->data(0, LayerRowDelegate::LayerUid).toInt();
+
+        // Dragging itself is Qt's business, so the drop is handed over the way
+        // the tree hands it over.
+        tree->layerDropped(backgroundItem, groupItem, LayerTree::Drop::Into);
+        QApplication::processEvents();
+        CHECK(doc->layerCount() == 2);
+        CHECK(doc->layerByUid(backgroundUid) != nullptr);
+        CHECK(doc->layerByUid(backgroundUid)->parent() == doc->layerByUid(groupUid));
+        CHECK(tree->topLevelItemCount() == 1);
+
+        // The move is a structural edit like any other, so it undoes.
+        window.findChild<QAction*>(QStringLiteral("undo"))->trigger();
+        CHECK(doc->layerByUid(backgroundUid)->parent() == doc->rootGroup());
+        window.findChild<QAction*>(QStringLiteral("redo"))->trigger();
+        CHECK(doc->layerByUid(backgroundUid)->parent() == doc->layerByUid(groupUid));
+
+        // And it can be dragged back out, above the group's own row.
+        QTreeWidgetItem* groupRow = tree->topLevelItem(0);
+        CHECK(groupRow != nullptr && groupRow->childCount() == 1);
+        if (!groupRow || groupRow->childCount() != 1)
+            return;
+        tree->layerDropped(groupRow->child(0), groupRow, LayerTree::Drop::Above);
+        QApplication::processEvents();
+        CHECK(doc->layerByUid(backgroundUid)->parent() == doc->rootGroup());
+        CHECK(doc->layerCount() == 2);
+        CHECK(tree->topLevelItemCount() == 2);
+    });
+
     addTest("clipboard round trip", [] {
         MainWindow window;
         window.newDocument(60, 60, Rgba(10, 120, 240, 255));

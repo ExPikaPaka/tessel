@@ -1,12 +1,14 @@
 #include "ui/Docks.h"
 
 #include <QComboBox>
+#include <QDropEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QToolButton>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
 #include "core/ImageOps.h"
@@ -100,9 +102,17 @@ QRect LayerRowDelegate::thumbnailRect(const QRect& row)
     return QRect(row.left() + 26, row.top() + 3, kThumbWidth, row.height() - 6);
 }
 
-QSize LayerRowDelegate::sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const
+QRect LayerRowDelegate::maskRect(const QRect& row)
 {
-    return QSize(140, kRowHeight);
+    return thumbnailRect(row).translated(kThumbWidth + 4, 0);
+}
+
+QSize LayerRowDelegate::sizeHint(const QStyleOptionViewItem&,
+                                 const QModelIndex& index) const
+{
+    // A row with a mask carries a second thumbnail, so it needs more room.
+    const bool hasMask = !index.data(MaskThumbnail).value<QImage>().isNull();
+    return QSize(hasMask ? 190 : 140, kRowHeight);
 }
 
 void LayerRowDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
@@ -115,10 +125,13 @@ void LayerRowDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     else if (option.state & QStyle::State_MouseOver)
         painter->fillRect(option.rect, theme::panelColor().lighter(112));
 
-    const bool visible = index.data(Qt::UserRole + 1).toBool();
-    const QImage thumbnail = index.data(Qt::UserRole + 2).value<QImage>();
+    const bool visible = index.data(Visible).toBool();
+    const QImage thumbnail = index.data(Thumbnail).value<QImage>();
     const QString name = index.data(Qt::DisplayRole).toString();
-    const QString detail = index.data(Qt::UserRole + 3).toString();
+    const QString detail = index.data(Detail).toString();
+    const QImage maskThumbnail = index.data(MaskThumbnail).value<QImage>();
+    const bool maskSelected = index.data(MaskSelected).toBool();
+    const bool maskEnabled = index.data(MaskEnabled).toBool();
 
     const QColor textColor = selected ? Qt::white : theme::textColor();
     painter->drawPixmap(visibilityRect(option.rect).topLeft(),
@@ -126,22 +139,43 @@ void LayerRowDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
                                               : QStringLiteral("hidden"),
                                       18, textColor));
 
-    const QRect box = thumbnailRect(option.rect);
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(QBrush(icons::checkerPixmap(4)));
-    painter->drawRect(box);
-    if (!thumbnail.isNull()) {
-        const QSize fitted = thumbnail.size().scaled(box.size(), Qt::KeepAspectRatio);
-        const QRect target(box.x() + (box.width() - fitted.width()) / 2,
-                           box.y() + (box.height() - fitted.height()) / 2,
-                           fitted.width(), fitted.height());
-        painter->drawImage(target, thumbnail);
-    }
-    painter->setBrush(Qt::NoBrush);
-    painter->setPen(QPen(theme::gridColor(), 1));
-    painter->drawRect(box);
+    // The thumbnail the paint target points at is ringed, the way a Paint.NET
+    // style editor shows whether a stroke lands in the layer or in its mask.
+    auto drawThumbnail = [&](const QRect& box, const QImage& image, bool target,
+                             bool dimmed) {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QBrush(icons::checkerPixmap(4)));
+        painter->drawRect(box);
+        if (!image.isNull()) {
+            const QSize fitted = image.size().scaled(box.size(), Qt::KeepAspectRatio);
+            const QRect area(box.x() + (box.width() - fitted.width()) / 2,
+                             box.y() + (box.height() - fitted.height()) / 2,
+                             fitted.width(), fitted.height());
+            if (dimmed)
+                painter->setOpacity(0.4);
+            painter->drawImage(area, image);
+            painter->setOpacity(1.0);
+        }
+        painter->setBrush(Qt::NoBrush);
+        if (target) {
+            painter->setPen(QPen(selected ? QColor(Qt::white) : theme::accentColor(), 2));
+            painter->drawRect(box.adjusted(-1, -1, 1, 1));
+        }
+        painter->setPen(QPen(theme::gridColor(), 1));
+        painter->drawRect(box);
+    };
 
-    QRect textArea = option.rect.adjusted(kThumbWidth + 34, 3, -4, -3);
+    const QRect box = thumbnailRect(option.rect);
+    const bool hasMask = !maskThumbnail.isNull();
+    drawThumbnail(box, thumbnail, hasMask && !maskSelected, false);
+    int textLeft = box.right();
+    if (hasMask) {
+        const QRect maskBox = maskRect(option.rect);
+        drawThumbnail(maskBox, maskThumbnail, maskSelected, !maskEnabled);
+        textLeft = maskBox.right();
+    }
+
+    QRect textArea = option.rect.adjusted(textLeft - option.rect.left() + 8, 3, -4, -3);
     painter->setPen(textColor);
     QFont font = option.font;
     painter->setFont(font);
@@ -161,18 +195,56 @@ void LayerRowDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
 
 // ----------------------------------------------------------------- layers panel
 
+// ----------------------------------------------------------------- layer tree
+
+LayerTree::LayerTree(QWidget* parent) : QTreeWidget(parent)
+{
+    setHeaderHidden(true);
+    setColumnCount(1);
+    setRootIsDecorated(true);
+    setExpandsOnDoubleClick(false);
+    setSelectionMode(QAbstractItemView::SingleSelection);
+    setMouseTracking(true);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setIndentation(14);
+    setDragEnabled(true);
+    setAcceptDrops(true);
+    setDropIndicatorShown(true);
+    setDragDropMode(QAbstractItemView::InternalMove);
+}
+
+void LayerTree::dropEvent(QDropEvent* event)
+{
+    QTreeWidgetItem* dragged = selectedItems().isEmpty() ? currentItem()
+                                                         : selectedItems().first();
+    const QPoint pos = event->position().toPoint();
+    QTreeWidgetItem* onto = itemAt(pos);
+    Drop where = Drop::Above;
+    switch (dropIndicatorPosition()) {
+    case OnItem: where = Drop::Into; break;
+    case BelowItem: where = Drop::Below; break;
+    case AboveItem: where = Drop::Above; break;
+    case OnViewport: onto = nullptr; break;
+    }
+    // The document owns the layer order, so the move is only requested here.
+    // The panel is rebuilt from the document once the move has gone through.
+    event->setDropAction(Qt::IgnoreAction);
+    event->accept();
+    if (dragged && dragged != onto)
+        emit layerDropped(dragged, onto, where);
+}
+
+// ----------------------------------------------------------------- layers panel
+
 LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
 {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(4, 4, 4, 4);
     root->setSpacing(4);
 
-    list_ = new QListWidget(this);
+    list_ = new LayerTree(this);
     list_->setItemDelegate(new LayerRowDelegate(list_));
-    list_->setSelectionMode(QAbstractItemView::SingleSelection);
-    list_->setMouseTracking(true);
-    list_->setUniformItemSizes(true);
-    list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     root->addWidget(list_, 1);
 
     auto* buttons = new QHBoxLayout;
@@ -184,6 +256,7 @@ LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
     };
     const ButtonSpec specs[] = {
         {"layer-add", "Add New Layer (Ctrl+Shift+N)", &LayersPanel::addLayerRequested},
+        {"layer", "Add Group (Ctrl+Shift+G)", &LayersPanel::addGroupRequested},
         {"layer-delete", "Delete Layer (Ctrl+Shift+Delete)", &LayersPanel::deleteLayerRequested},
         {"layer-duplicate", "Duplicate Layer (Ctrl+Shift+D)", &LayersPanel::duplicateLayerRequested},
         {"layer-merge", "Merge Layer Down (Ctrl+M)", &LayersPanel::mergeDownRequested},
@@ -204,30 +277,89 @@ LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
     buttons->addStretch(1);
     root->addLayout(buttons);
 
-    connect(list_, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (updating_ || row < 0)
+    connect(list_, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
+                if (updating_ || !current)
+                    return;
+                const int index = layerIndexOfItem(current);
+                if (index >= 0)
+                    emit activeLayerChanged(index);
+            });
+    connect(list_, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem*, int) { emit propertiesRequested(); });
+    // Expanding and collapsing is remembered on the layer itself, so it
+    // survives a rebuild of the panel.
+    auto rememberExpanded = [this](QTreeWidgetItem* item, bool expanded) {
+        if (updating_ || !doc_ || !item)
             return;
-        emit activeLayerChanged(listRowToLayerIndex(row));
-    });
-    connect(list_, &QListWidget::itemDoubleClicked, this,
-            [this](QListWidgetItem*) { emit propertiesRequested(); });
-    // Clicking the eye toggles visibility without changing the selection.
+        const int uid = item->data(0, LayerRowDelegate::LayerUid).toInt();
+        if (Layer* layer = doc_->layerByUid(uid))
+            layer->expanded = expanded;
+    };
+    connect(list_, &QTreeWidget::itemExpanded, this,
+            [rememberExpanded](QTreeWidgetItem* item) { rememberExpanded(item, true); });
+    connect(list_, &QTreeWidget::itemCollapsed, this,
+            [rememberExpanded](QTreeWidgetItem* item) { rememberExpanded(item, false); });
+    connect(list_, &LayerTree::layerDropped, this,
+            [this](QTreeWidgetItem* dragged, QTreeWidgetItem* onto,
+                   LayerTree::Drop where) {
+                if (!doc_ || !dragged)
+                    return;
+                const int uid = dragged->data(0, LayerRowDelegate::LayerUid).toInt();
+                if (!doc_->layerByUid(uid))
+                    return;
+                const Layer* parent = doc_->rootGroup();
+                // Panel rows run top first, the document counts from the
+                // bottom, so the row is turned round at the end.
+                int rowFromTop = list_->topLevelItemCount();
+                Layer* target = onto
+                    ? doc_->layerByUid(onto->data(0, LayerRowDelegate::LayerUid).toInt())
+                    : nullptr;
+                if (target) {
+                    if (where == LayerTree::Drop::Into && target->isGroup()) {
+                        parent = target;
+                        rowFromTop = 0;
+                    } else {
+                        parent = target->parent() ? target->parent() : doc_->rootGroup();
+                        rowFromTop = parent->childCount() - 1 - target->indexInParent();
+                        if (where == LayerTree::Drop::Below)
+                            ++rowFromTop;
+                    }
+                }
+                const int childIndex = parent->childCount() - rowFromTop;
+                emit layerReparented(uid,
+                                     parent == doc_->rootGroup() ? 0 : parent->uid(),
+                                     childIndex);
+            });
+    // Clicking the eye toggles visibility without changing the selection, and
+    // clicking either thumbnail picks what painting lands in.
     list_->viewport()->installEventFilter(this);
 }
 
 bool LayersPanel::eventFilter(QObject* watched, QEvent* event)
 {
-    // A click on the eye toggles that layer without selecting it.
-    if (watched == list_->viewport() && event->type() == QEvent::MouseButtonPress) {
+    if (watched == list_->viewport() && event->type() == QEvent::MouseButtonPress
+        && doc_) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         const QPoint pos = mouse->position().toPoint();
         const QModelIndex index = list_->indexAt(pos);
-        if (index.isValid()) {
+        Layer* layer = index.isValid()
+            ? doc_->layerByUid(index.data(LayerRowDelegate::LayerUid).toInt())
+            : nullptr;
+        if (layer) {
             const QRect row = list_->visualRect(index);
+            const int layerIndex = doc_->indexOfUid(layer->uid());
             if (LayerRowDelegate::visibilityRect(row).contains(pos)) {
-                const int layerIndex = listRowToLayerIndex(index.row());
-                const bool visible = index.data(Qt::UserRole + 1).toBool();
-                emit layerVisibilityToggled(layerIndex, !visible);
+                emit layerVisibilityToggled(layerIndex, !layer->visible);
+                return true;
+            }
+            const bool onMask = layer->hasMask()
+                && LayerRowDelegate::maskRect(row).contains(pos);
+            if (onMask || LayerRowDelegate::thumbnailRect(row).contains(pos)) {
+                layer->setMaskSelected(onMask);
+                if (layerIndex >= 0)
+                    emit activeLayerChanged(layerIndex);
+                refresh();
                 return true;
             }
         }
@@ -235,11 +367,20 @@ bool LayersPanel::eventFilter(QObject* watched, QEvent* event)
     return QWidget::eventFilter(watched, event);
 }
 
-int LayersPanel::listRowToLayerIndex(int row) const
+int LayersPanel::layerIndexOfItem(const QTreeWidgetItem* item) const
 {
-    if (!doc_)
-        return 0;
-    return doc_->layerCount() - 1 - row;
+    if (!doc_ || !item)
+        return -1;
+    return doc_->indexOfUid(item->data(0, LayerRowDelegate::LayerUid).toInt());
+}
+
+QTreeWidgetItem* LayersPanel::itemForUid(int uid) const
+{
+    for (QTreeWidgetItemIterator it(list_); *it; ++it) {
+        if ((*it)->data(0, LayerRowDelegate::LayerUid).toInt() == uid)
+            return *it;
+    }
+    return nullptr;
 }
 
 void LayersPanel::setDocument(Document* doc, History* history)
@@ -249,30 +390,65 @@ void LayersPanel::setDocument(Document* doc, History* history)
     refresh();
 }
 
+void LayersPanel::appendRows(QTreeWidgetItem* parentItem, const Layer* parent)
+{
+    // Top layer first, as in the layer stack itself.
+    for (int i = parent->childCount() - 1; i >= 0; --i) {
+        const Layer* layer = parent->childAt(i);
+        auto* item = parentItem ? new QTreeWidgetItem(parentItem)
+                                : new QTreeWidgetItem(list_);
+        item->setText(0, layer->name);
+        item->setData(0, LayerRowDelegate::LayerUid, layer->uid());
+        item->setData(0, LayerRowDelegate::Visible, layer->visible);
+        item->setData(0, LayerRowDelegate::IsGroup, layer->isGroup());
+        // A group shows what it composites to, which is the only picture of
+        // itself it has.
+        const Image source = layer->isGroup() ? doc_->renderLayer(*layer) : layer->image;
+        item->setData(0, LayerRowDelegate::Thumbnail,
+                      QVariant::fromValue(ops::resize(source, 36, 36, true).toQImage()));
+        const int percent = int(std::lround(layer->opacity / 2.55));
+        QString detail = QStringLiteral("%1%  %2").arg(percent).arg(
+            blendModeName(layer->mode));
+        if (layer->isGroup())
+            detail = QStringLiteral("group  %1").arg(detail);
+        item->setData(0, LayerRowDelegate::Detail, detail);
+        QString tip = QStringLiteral("%1\nOpacity %2%\nBlend mode: %3")
+                          .arg(layer->name)
+                          .arg(percent)
+                          .arg(blendModeName(layer->mode));
+        if (layer->hasMask()) {
+            item->setData(0, LayerRowDelegate::MaskThumbnail,
+                          QVariant::fromValue(
+                              ops::resize(*layer->maskImage(), 36, 36, true).toQImage()));
+            item->setData(0, LayerRowDelegate::MaskSelected, layer->maskSelected());
+            item->setData(0, LayerRowDelegate::MaskEnabled, layer->maskEnabled());
+            tip += layer->maskEnabled() ? QStringLiteral("\nMask on")
+                                        : QStringLiteral("\nMask off");
+            tip += layer->maskSelected() ? QStringLiteral("\nPainting goes to the mask")
+                                         : QStringLiteral("\nPainting goes to the layer");
+        }
+        item->setToolTip(0, tip);
+        Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable
+            | Qt::ItemIsDragEnabled;
+        if (layer->isGroup())
+            flags |= Qt::ItemIsDropEnabled;
+        item->setFlags(flags);
+        if (layer->isGroup()) {
+            appendRows(item, layer);
+            item->setExpanded(layer->expanded);
+        }
+    }
+}
+
 void LayersPanel::refresh()
 {
     updating_ = true;
     list_->clear();
     if (doc_) {
-        // Top layer first, as in the layer stack itself.
-        for (int i = doc_->layerCount() - 1; i >= 0; --i) {
-            const Layer* layer = doc_->layerAt(i);
-            auto* item = new QListWidgetItem(layer->name, list_);
-            item->setData(Qt::UserRole, i);
-            item->setData(Qt::UserRole + 1, layer->visible);
-            const Image thumb = ops::resize(layer->image, 36, 36, true);
-            item->setData(Qt::UserRole + 2, QVariant::fromValue(thumb.toQImage()));
-            QString detail = QStringLiteral("%1%  %2")
-                                 .arg(int(std::lround(layer->opacity / 2.55)))
-                                 .arg(blendModeName(layer->mode));
-            item->setData(Qt::UserRole + 3, detail);
-            item->setToolTip(QStringLiteral("%1\nOpacity %2%\nBlend mode: %3")
-                                 .arg(layer->name)
-                                 .arg(int(std::lround(layer->opacity / 2.55)))
-                                 .arg(blendModeName(layer->mode)));
-        }
-        const int row = doc_->layerCount() - 1 - doc_->activeIndex();
-        list_->setCurrentRow(std::clamp(row, 0, std::max(0, list_->count() - 1)));
+        appendRows(nullptr, doc_->rootGroup());
+        const Layer* active = doc_->activeNode();
+        if (QTreeWidgetItem* item = active ? itemForUid(active->uid()) : nullptr)
+            list_->setCurrentItem(item);
     }
     updating_ = false;
 }
