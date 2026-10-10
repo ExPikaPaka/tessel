@@ -1094,7 +1094,7 @@ int main(int argc, char** argv)
         MainWindow window;
         window.newDocument(160, 120, Rgba(255, 255, 255, 255));
         window.show();
-        QApplication::setActiveWindow(&window);
+        window.activateWindow();
         QApplication::processEvents();
         CanvasView* view = window.findChildren<CanvasView*>().last();
         CHECK(view->tool() != nullptr);
@@ -1136,7 +1136,7 @@ int main(int argc, char** argv)
         MainWindow window;
         window.newDocument(160, 120, Rgba(255, 255, 255, 255));
         window.show();
-        QApplication::setActiveWindow(&window);
+        window.activateWindow();
         QApplication::processEvents();
         CanvasView* view = window.findChildren<CanvasView*>().last();
         CHECK(view->tool()->id() != QLatin1String("transform"));
