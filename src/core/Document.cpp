@@ -450,4 +450,44 @@ const char* anchorName(Anchor anchor)
     }
 }
 
+uint32_t textFingerprint(const Image& image, const Rect& box)
+{
+    if (box.isEmpty() || box.x < 0 || box.y < 0 || box.right() > image.width()
+        || box.bottom() > image.height())
+        return 0;
+    // FNV-1a over the pixels of the box, with the size mixed in so a box of
+    // the same bytes at another size cannot collide.
+    uint32_t hash = 2166136261u;
+    auto mix = [&hash](uint8_t byte) {
+        hash = (hash ^ byte) * 16777619u;
+    };
+    for (int shift = 0; shift < 32; shift += 8) {
+        mix(uint8_t((box.w >> shift) & 0xff));
+        mix(uint8_t((box.h >> shift) & 0xff));
+    }
+    for (int y = box.y; y < box.bottom(); ++y) {
+        const Rgba* line = image.row(y);
+        for (int x = box.x; x < box.right(); ++x) {
+            mix(line[x].r);
+            mix(line[x].g);
+            mix(line[x].b);
+            mix(line[x].a);
+        }
+    }
+    // Zero is reserved for "no fingerprint", so never hand it back.
+    return hash == 0 ? 1u : hash;
+}
+
+bool textItemLive(const Document& doc, const TextItem& item)
+{
+    const int index = doc.indexOfUid(item.layerUid);
+    if (index < 0)
+        return false;
+    const Layer* layer = doc.layerAt(index);
+    if (!layer)
+        return false;
+    const uint32_t current = textFingerprint(layer->image, item.box);
+    return current != 0 && current == item.fingerprint;
+}
+
 } // namespace tessel

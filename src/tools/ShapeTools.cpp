@@ -7,6 +7,7 @@
 #include <QFont>
 #include <QFontMetricsF>
 #include <QKeyEvent>
+#include <QPointer>
 #include <QPolygonF>
 
 #include "core/ImageOps.h"
@@ -851,6 +852,31 @@ private:
 
 // ---------------------------------------------------------------- text
 
+// Forgets the text items whose pixels no longer match, see TextItem for the
+// rule. Returns how many were dropped so the user can be told.
+int pruneStaleText(Document& doc)
+{
+    std::vector<TextItem>& items = doc.textItems();
+    const size_t before = items.size();
+    items.erase(std::remove_if(items.begin(), items.end(),
+                               [&doc](const TextItem& item) {
+                                   return !textItemLive(doc, item);
+                               }),
+                items.end());
+    return int(before - items.size());
+}
+
+QString droppedTextMessage(int count)
+{
+    if (count == 1) {
+        return QStringLiteral("A piece of text is no longer editable: the layer "
+                              "changed under it. The pixels stay as they are.");
+    }
+    return QStringLiteral("%1 pieces of text are no longer editable: the layer "
+                          "changed under them. The pixels stay as they are.")
+        .arg(count);
+}
+
 class TextTool : public InteractiveShapeTool {
 public:
     QString id() const override { return QStringLiteral("text"); }
@@ -860,12 +886,16 @@ public:
     QString hint() const override
     {
         return QStringLiteral("Click and type. Enter adds a line, Ctrl+Enter or a tool "
-                              "change finishes, Escape cancels.");
+                              "change finishes, Escape cancels. Click text in a dashed "
+                              "box to edit it again, drag inside the box to move it.");
     }
     QCursor cursor() const override { return QCursor(Qt::IBeamCursor); }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
+        // Kept so text picked up for editing can put its own font, size and
+        // alignment back on the bar.
+        bar_ = &bar;
         bar.addFontCombo(QStringLiteral("family"), family_);
         bar.addSpin(QStringLiteral("size"), QStringLiteral("Size"), 4, 1000, pointSize_,
                     QStringLiteral(" pt"));
@@ -904,23 +934,41 @@ public:
             align_ = std::clamp(value.toInt(), 0, 2);
         else
             InteractiveShapeTool::optionChanged(key, value);
-        if (editing_ && refresh_)
-            refresh_();
+        // The bar hands over one value at a time with no context of its own,
+        // so the preview is redrawn through the one kept from the last event.
+        if (editing_ && context_.valid())
+            renderPreview(context_);
     }
 
-    void activated(ToolContext& context) override
-    {
-        refresh_ = [this, &context] { renderPreview(context); };
-    }
+    void activated(ToolContext& context) override { context_ = context; }
 
     void press(ToolContext& context, const ToolEvent& event) override
     {
-        if (editing_ && !lines_.isEmpty() && !(lines_.size() == 1 && lines_[0].isEmpty())) {
+        if (!context.valid())
+            return;
+        context_ = context;
+        if (editing_ && hasText()) {
+            // A press inside the block being typed drags it, which is how the
+            // position of a piece of text is changed. The region is the one
+            // the dashed box marks, so what the user sees is what they get.
+            if (shapeBounds().contains(int(std::floor(event.pos.x())),
+                                       int(std::floor(event.pos.y())))) {
+                moving_ = true;
+                moveGrab_ = event.pos;
+                moveFrom_ = anchor_;
+                return;
+            }
             commit(context);
         }
         if (!beginEdit(context))
             return;
         secondary_ = event.isSecondary();
+        const int found = liveItemAt(*context.doc, event.pos);
+        if (found >= 0) {
+            pickUp(context, found);
+            return;
+        }
+        resetPickup();
         anchor_ = event.pos;
         lines_ = {QString()};
         caretLine_ = 0;
@@ -929,10 +977,63 @@ public:
         context.say(hint());
     }
 
+    void move(ToolContext& context, const ToolEvent& event) override
+    {
+        if (!moving_ || !editing_)
+            return;
+        context_ = context;
+        anchor_ = moveFrom_ + (event.pos - moveGrab_);
+        renderPreview(context);
+    }
+
+    void release(ToolContext& context, const ToolEvent& event) override
+    {
+        if (!moving_)
+            return;
+        moving_ = false;
+        context.say(QStringLiteral("Text moved. Ctrl+Enter finishes, Escape cancels."));
+    }
+
+    void commit(ToolContext& context) override
+    {
+        if (!editing_ || !layer_ || !context.valid() || !hasText()) {
+            resetPickup();
+            InteractiveShapeTool::commit(context);
+            return;
+        }
+        // The item has to be built before the base class clears the state it
+        // is made of, and the fingerprint after the glyphs are in the layer.
+        Layer* layer = layer_;
+        const Rect box = shapeBounds().intersected(layer->image.rect());
+        TextItem item = currentItem(context, layerUid_, box);
+        if (!box.isEmpty())
+            item.backdrop = backup_.cropped(box);
+        InteractiveShapeTool::commit(context);
+        resetPickup();
+        if (box.isEmpty())
+            return;
+        item.fingerprint = textFingerprint(layer->image, box);
+        if (item.fingerprint != 0)
+            context.doc->textItems().push_back(std::move(item));
+    }
+
+    void cancel(ToolContext& context) override
+    {
+        if (editing_ && layer_ && hasPicked_ && context.valid()) {
+            // Escape has to leave a piece of text that was picked up exactly
+            // as it was found, both the pixels and the item.
+            backup_.blit(pickedPixels_, picked_.box.x, picked_.box.y);
+            context.doc->textItems().push_back(picked_);
+        }
+        resetPickup();
+        InteractiveShapeTool::cancel(context);
+    }
+
     bool keyPress(ToolContext& context, QKeyEvent* event) override
     {
         if (!editing_)
             return false;
+        context_ = context;
         if (event->key() == Qt::Key_Escape) {
             cancel(context);
             return true;
@@ -998,6 +1099,22 @@ public:
 
     void paintOverlay(QPainter& painter, const ToolContext& context) const override
     {
+        if (context.doc) {
+            // The sweep happens here so the note reaches the status bar as
+            // soon as the canvas is redrawn with the text tool active, which
+            // is the first moment the user can see that a dashed box has gone.
+            const int dropped = pruneStaleText(*context.doc);
+            if (dropped > 0)
+                context.say(droppedTextMessage(dropped));
+            const Layer* active = context.doc->activeLayer();
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(overlayPen(context.zoom, QColor(120, 205, 150, 170), 1.0,
+                                      Qt::DashLine));
+            for (const TextItem& item : context.doc->textItems()) {
+                if (active && item.layerUid == active->uid())
+                    painter.drawRect(item.box.toQRect());
+            }
+        }
         if (!editing_)
             return;
         const QFont font = buildFont();
@@ -1026,7 +1143,7 @@ protected:
         const QFont font = buildFont();
         const QFontMetricsF metrics(font);
         painter.setFont(font);
-        painter.setPen((secondary_ ? context.secondary : context.primary).toQColor());
+        painter.setPen(textColor(context).toQColor());
         const double lineHeight = metrics.height();
         for (int i = 0; i < lines_.size(); ++i) {
             const double offset = alignOffset(metrics, lines_[i]);
@@ -1080,6 +1197,114 @@ private:
         return QRectF(anchor_.x(), anchor_.y(), std::max(widest, 2.0), height);
     }
 
+    bool hasText() const
+    {
+        for (const QString& line : lines_) {
+            if (!line.isEmpty())
+                return true;
+        }
+        return false;
+    }
+
+    // The colour a picked up piece of text was typed in wins over the palette,
+    // otherwise coming back to it to fix a typo would recolour it behind the
+    // user's back. Choosing another colour takes over from that point on.
+    Rgba textColor(const ToolContext& context) const
+    {
+        const Rgba current = secondary_ ? context.secondary : context.primary;
+        if (hasAdoptedColor_ && current == paletteAtPickup_)
+            return adoptedColor_;
+        return current;
+    }
+
+    // Index of the live item under `pos` on the active layer, or -1. Later
+    // items were laid down on top of earlier ones, so the search runs
+    // backwards.
+    int liveItemAt(Document& doc, QPointF pos) const
+    {
+        const Layer* active = doc.activeLayer();
+        if (!active)
+            return -1;
+        const std::vector<TextItem>& items = doc.textItems();
+        for (int i = int(items.size()) - 1; i >= 0; --i) {
+            if (items[i].layerUid != active->uid())
+                continue;
+            if (!items[i].box.contains(int(std::floor(pos.x())),
+                                       int(std::floor(pos.y()))))
+                continue;
+            if (textItemLive(doc, items[i]))
+                return i;
+        }
+        return -1;
+    }
+
+    void pickUp(ToolContext& context, int index)
+    {
+        std::vector<TextItem>& items = context.doc->textItems();
+        picked_ = items[index];
+        items.erase(items.begin() + index);
+        hasPicked_ = true;
+        moving_ = false;
+        pickedPixels_ = layer_->image.cropped(picked_.box);
+        // The glyphs are in the layer already, so hand the preview path the
+        // pixels that were under them and let it draw the text afresh.
+        backup_.blit(picked_.backdrop, picked_.box.x, picked_.box.y);
+        dirty_ = picked_.box;
+        if (!picked_.family.isEmpty())
+            family_ = picked_.family;
+        pointSize_ = std::max(4, int(std::lround(picked_.pointSize)));
+        bold_ = picked_.bold;
+        italic_ = picked_.italic;
+        underline_ = picked_.underline;
+        align_ = picked_.align;
+        opacity_ = picked_.opacity;
+        antialias_ = picked_.antialias;
+        blend_ = picked_.mode;
+        adoptedColor_ = picked_.color;
+        hasAdoptedColor_ = true;
+        paletteAtPickup_ = secondary_ ? context.secondary : context.primary;
+        anchor_ = QPointF(picked_.x, picked_.y);
+        lines_ = picked_.lines;
+        caretLine_ = int(lines_.size()) - 1;
+        caretColumn_ = int(lines_[caretLine_].size());
+        renderPreview(context);
+        if (bar_)
+            bar_->startTool(this);
+        context.say(QStringLiteral("Editing text laid down earlier. Drag inside the "
+                                   "box to move it, Ctrl+Enter finishes, Escape "
+                                   "leaves it as it was."));
+    }
+
+    TextItem currentItem(const ToolContext& context, int layerUid, const Rect& box) const
+    {
+        TextItem item;
+        item.layerUid = layerUid;
+        item.lines = lines_;
+        item.x = anchor_.x();
+        item.y = anchor_.y();
+        item.family = family_;
+        item.pointSize = pointSize_;
+        item.bold = bold_;
+        item.italic = italic_;
+        item.underline = underline_;
+        item.align = align_;
+        item.color = textColor(context);
+        item.opacity = opacity_;
+        item.antialias = antialias_;
+        item.mode = blend_;
+        item.box = box;
+        return item;
+    }
+
+    void resetPickup()
+    {
+        moving_ = false;
+        hasPicked_ = false;
+        hasAdoptedColor_ = false;
+        picked_ = TextItem();
+        pickedPixels_ = Image();
+    }
+
     QString family_ = QStringLiteral("Sans Serif");
     int pointSize_ = 24;
     bool bold_ = false;
@@ -1090,7 +1315,17 @@ private:
     QStringList lines_;
     int caretLine_ = 0;
     int caretColumn_ = 0;
-    std::function<void()> refresh_;
+    ToolContext context_;
+    QPointer<ToolOptionsBar> bar_;
+    bool moving_ = false;
+    QPointF moveGrab_;
+    QPointF moveFrom_;
+    bool hasPicked_ = false;
+    TextItem picked_;
+    Image pickedPixels_;
+    bool hasAdoptedColor_ = false;
+    Rgba adoptedColor_{0, 0, 0, 255};
+    Rgba paletteAtPickup_{0, 0, 0, 255};
 };
 
 } // namespace

@@ -101,6 +101,23 @@ void drag(Tool* tool, ToolContext& context, QPointF from, QPointF to,
     tool->release(context, makeEvent(to, button, modifiers));
 }
 
+// Types a word into a tool one key press at a time.
+void typeInto(Tool* tool, ToolContext& context, const QString& words)
+{
+    for (const QChar letter : words) {
+        QKeyEvent key(QEvent::KeyPress, letter.unicode(), Qt::NoModifier,
+                      QString(letter));
+        tool->keyPress(context, &key);
+    }
+}
+
+void pressKey(Tool* tool, ToolContext& context, int key,
+              Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+{
+    QKeyEvent event(QEvent::KeyPress, key, modifiers);
+    tool->keyPress(context, &event);
+}
+
 // The selection dialogs are modal, so the answer has to be typed in from a
 // timer that fires inside their own nested event loop.
 void answerSelectionDialog(int amount)
@@ -485,6 +502,328 @@ int main(int argc, char** argv)
         text->commit(context);
         CHECK(nonTransparentPixels(view.document()->activeLayer()->image) > 20);
         CHECK(view.history()->count() == 1);
+    });
+
+    addTest("committed text is kept as an editable item", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tes"));
+        pressKey(text, context, Qt::Key_Return);
+        typeInto(text, context, QStringLiteral("sel"));
+        text->commit(context);
+        Document* document = view.document();
+        CHECK(document->textItems().size() == 1);
+        if (document->textItems().empty())
+            return;
+        const TextItem& item = document->textItems().front();
+        CHECK(item.lines == (QStringList{QStringLiteral("Tes"), QStringLiteral("sel")}));
+        CHECK(item.layerUid == document->activeLayer()->uid());
+        CHECK(item.color == Rgba(255, 255, 255, 255));
+        CHECK(nearly(item.x, 10.0) && nearly(item.y, 20.0));
+        CHECK(item.box.contains(10, 20));
+        CHECK(item.backdrop.width() == item.box.w);
+        CHECK(textItemLive(*document, item));
+    });
+
+    addTest("clicking text with the text tool edits it again", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(30, 60, 90, 255));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        const Image committed = view.document()->activeLayer()->image;
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem first = view.document()->textItems().front();
+
+        // A click inside the dashed box picks the text up for editing, which
+        // takes it out of the document until it is committed again.
+        text->press(context, makeEvent(QPointF(first.x + 4, first.y + 6)));
+        CHECK(view.document()->textItems().empty());
+        CHECK(text->isBusy());
+        // Fix a typo and put the letter back: the words, and with them every
+        // pixel, have to end up where they started.
+        pressKey(text, context, Qt::Key_Backspace);
+        CHECK(!samePixels(view.document()->activeLayer()->image, committed));
+        typeInto(text, context, QStringLiteral("l"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem& again = view.document()->textItems().front();
+        CHECK(again.lines == QStringList{QStringLiteral("Tessel")});
+        CHECK(samePixels(view.document()->activeLayer()->image, committed));
+        CHECK(textItemLive(*view.document(), again));
+        // Two edits, two undo steps, and the first one still undoes cleanly.
+        CHECK(view.history()->count() == 2);
+        view.history()->goTo(-1);
+        CHECK(view.document()->activeLayer()->image.at(12, 30)
+              == Rgba(30, 60, 90, 255));
+    });
+
+    addTest("dragging inside the box moves live text", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem first = view.document()->textItems().front();
+        CHECK(first.box.right() < 160);
+
+        text->press(context, makeEvent(QPointF(first.x + 4, first.y + 6)));
+        drag(text, context, QPointF(first.x + 4, first.y + 6),
+             QPointF(first.x + 134, first.y + 6));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem moved = view.document()->textItems().front();
+        CHECK(nearly(moved.x, first.x + 130, 0.001));
+        CHECK(nearly(moved.y, first.y, 0.001));
+        CHECK(moved.lines == QStringList{QStringLiteral("Tessel")});
+        CHECK(textItemLive(*view.document(), moved));
+        // Nothing is left behind where the text used to be.
+        const Image& pixels = view.document()->activeLayer()->image;
+        size_t strays = 0;
+        for (int y = first.box.y; y < first.box.bottom(); ++y)
+            for (int x = first.box.x; x < first.box.right(); ++x)
+                if (pixels.at(x, y).a != 0)
+                    ++strays;
+        CHECK(strays == 0);
+        CHECK(nonTransparentPixels(pixels) > 20);
+    });
+
+    addTest("painting over text drops it back to pixels", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        QString note;
+        QObject::connect(&view, &CanvasView::statusMessage, &view,
+                         [&note](const QString& message) { note = message; });
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        view.setTool(brush);
+        ToolContext brushContext = view.makeContext();
+        drag(brush, brushContext, QPointF(5, 28), QPointF(150, 28));
+        brush->commit(brushContext);
+
+        // The item is only noticed on the way back to the text tool, and the
+        // note has to survive the hint the tool change puts up.
+        view.setTool(text);
+        QImage surface(300, 120, QImage::Format_ARGB32);
+        surface.fill(Qt::black);
+        QPainter painter(&surface);
+        ToolContext overlay = view.makeContext();
+        text->paintOverlay(painter, overlay);
+        painter.end();
+        CHECK(view.document()->textItems().empty());
+        CHECK(note.contains(QStringLiteral("no longer editable")));
+        // The letters themselves stay: nothing of the user's work is lost.
+        CHECK(nonTransparentPixels(view.document()->activeLayer()->image) > 20);
+    });
+
+    addTest("live text is outlined while the text tool is active", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(20, 30)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const Rect box = view.document()->textItems().front().box;
+
+        // The overlay painter maps document to view, which is one to one here.
+        auto litAlongTopEdge = [&view, text, box] {
+            QImage surface(300, 120, QImage::Format_ARGB32);
+            surface.fill(Qt::black);
+            QPainter painter(&surface);
+            ToolContext overlay = view.makeContext();
+            text->paintOverlay(painter, overlay);
+            painter.end();
+            int lit = 0;
+            for (int x = box.x; x < box.right(); ++x) {
+                if (surface.pixelColor(x, box.y) != QColor(Qt::black))
+                    ++lit;
+            }
+            return lit;
+        };
+        CHECK(litAlongTopEdge() > 4);
+
+        // Once the pixels change the box has to go, because it is the only
+        // thing telling the user the text is still live.
+        Image& pixels = view.document()->activeLayer()->image;
+        pixels.setAt(box.x + 2, box.y + 2, Rgba(1, 2, 3, 255));
+        CHECK(litAlongTopEdge() == 0);
+        CHECK(view.document()->textItems().empty());
+    });
+
+    addTest("escape leaves earlier text as it was", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        const Image committed = view.document()->activeLayer()->image;
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem first = view.document()->textItems().front();
+
+        text->press(context, makeEvent(QPointF(first.x + 4, first.y + 6)));
+        typeInto(text, context, QStringLiteral("XYZ"));
+        pressKey(text, context, Qt::Key_Escape);
+        CHECK(!text->isBusy());
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem& back = view.document()->textItems().front();
+        CHECK(back.lines == QStringList{QStringLiteral("Tessel")});
+        CHECK(samePixels(view.document()->activeLayer()->image, committed));
+        CHECK(textItemLive(*view.document(), back));
+        CHECK(view.history()->count() == 1);
+    });
+
+    addTest("re-edited text keeps its colour until another is chosen", [] {
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem first = view.document()->textItems().front();
+        CHECK(first.color == Rgba(255, 255, 255, 255));
+
+        // Picking the text up while another colour sits in the palette must
+        // not recolour it behind the user's back.
+        view.setPrimaryColor(Rgba(255, 0, 0, 255));
+        ToolContext red = view.makeContext();
+        text->press(red, makeEvent(QPointF(first.x + 4, first.y + 6)));
+        typeInto(text, red, QStringLiteral("!"));
+        text->commit(red);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem second = view.document()->textItems().front();
+        CHECK(second.lines == QStringList{QStringLiteral("Tessel!")});
+        CHECK(second.color == Rgba(255, 255, 255, 255));
+
+        // Choosing a colour during the edit does take over.
+        text->press(red, makeEvent(QPointF(second.x + 4, second.y + 6)));
+        view.setPrimaryColor(Rgba(0, 0, 255, 255));
+        ToolContext blue = view.makeContext();
+        typeInto(text, blue, QStringLiteral("?"));
+        text->commit(blue);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        CHECK(view.document()->textItems().front().color == Rgba(0, 0, 255, 255));
+    });
+
+    addTest("the options bar re-renders the text being edited", [] {
+        auto doc = std::make_unique<Document>(300, 160, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        const size_t atTwentyFour =
+            nonTransparentPixels(view.document()->activeLayer()->image);
+        // The bar hands values over one at a time, with no context of its own.
+        text->optionChanged(QStringLiteral("size"), 48);
+        const size_t atFortyEight =
+            nonTransparentPixels(view.document()->activeLayer()->image);
+        CHECK(atFortyEight > atTwentyFour);
+        text->optionChanged(QStringLiteral("align"), 2);
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+        if (view.document()->textItems().empty())
+            return;
+        const TextItem& item = view.document()->textItems().front();
+        CHECK(nearly(item.pointSize, 48.0));
+        CHECK(item.align == 2);
+        CHECK(textItemLive(*view.document(), item));
+        // Put the bar back where the other tests expect it.
+        text->optionChanged(QStringLiteral("size"), 24);
+        text->optionChanged(QStringLiteral("align"), 0);
+    });
+
+    addTest("text items follow the document through save and load", [] {
+        QTemporaryDir dir;
+        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
+        view.setTool(text);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        text->press(context, makeEvent(QPointF(10, 20)));
+        typeInto(text, context, QStringLiteral("Tessel"));
+        text->commit(context);
+        CHECK(view.document()->textItems().size() == 1);
+
+        const QString path = dir.filePath(QStringLiteral("typed.tessel"));
+        QString error;
+        CHECK(io::saveDocument(*view.document(), path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (!loaded || loaded->textItems().empty())
+            return;
+        CHECK(loaded->textItems().size() == 1);
+        CHECK(textItemLive(*loaded, loaded->textItems().front()));
+
+        // A click on the reopened text still picks it up for editing.
+        const TextItem opened = loaded->textItems().front();
+        const Image before = loaded->activeLayer()->image;
+        CanvasView reopened(std::move(loaded));
+        reopened.setTool(text);
+        reopened.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext again = reopened.makeContext();
+        text->press(again, makeEvent(QPointF(opened.x + 4, opened.y + 6)));
+        CHECK(text->isBusy());
+        CHECK(reopened.document()->textItems().empty());
+        text->commit(again);
+        CHECK(reopened.document()->textItems().size() == 1);
+        CHECK(samePixels(reopened.document()->activeLayer()->image, before));
     });
 
     // ------------------------------------------------------------ effects
