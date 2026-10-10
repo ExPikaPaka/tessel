@@ -355,7 +355,13 @@ bool LayersPanel::eventFilter(QObject* watched, QEvent* event)
             }
             const bool onMask = layer->hasMask()
                 && LayerRowDelegate::maskRect(row).contains(pos);
-            if (onMask || LayerRowDelegate::thumbnailRect(row).contains(pos)) {
+            const bool onThumbnail =
+                onMask || LayerRowDelegate::thumbnailRect(row).contains(pos);
+            // A click that would change nothing is left alone, so a drag can
+            // still start on the thumbnail of the layer already being painted.
+            if (onThumbnail
+                && (layer->maskSelected() != onMask
+                    || layerIndex != doc_->activeIndex())) {
                 layer->setMaskSelected(onMask);
                 if (layerIndex >= 0)
                     emit activeLayerChanged(layerIndex);
