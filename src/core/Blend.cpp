@@ -40,9 +40,10 @@ BlendMode blendModeFromName(const QString& name, BlendMode fallback)
 }
 
 void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out,
-                     const Rect& region)
+                     const Rect& region, int outOx, int outOy, bool parallel)
 {
-    const Rect area = region.intersected(out.rect());
+    const Rect area =
+        region.intersected(Rect(outOx, outOy, out.width(), out.height()));
     if (area.isEmpty())
         return;
 
@@ -54,19 +55,21 @@ void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out,
             active.push_back(&layer);
     }
 
-    parallelFor(area.y, area.bottom(), [&](int y0, int y1) {
+    const auto rows = [&](int y0, int y1) {
         for (int y = y0; y < y1; ++y) {
-            Rgba* dstRow = out.row(y) + area.x;
+            Rgba* dstRow = out.row(y - outOy) + (area.x - outOx);
             std::fill(dstRow, dstRow + area.w, Rgba(0, 0, 0, 0));
             bool started = false;
             for (const CompositeLayer* layer : active) {
                 const Image& img = *layer->image;
-                if (y >= img.height())
+                const int srcY = y - layer->oy;
+                const int srcX = area.x - layer->ox;
+                if (srcY < 0 || srcY >= img.height() || srcX < 0)
                     continue;
-                const int cols = std::min(area.w, img.width() - area.x);
+                const int cols = std::min(area.w, img.width() - srcX);
                 if (cols <= 0)
                     continue;
-                const Rgba* srcRow = img.row(y) + area.x;
+                const Rgba* srcRow = img.row(srcY) + srcX;
                 const float scale = layer->opacity * (1.0f / 255.0f);
                 if (!started && layer->mode == BlendMode::Normal) {
                     if (layer->opacity == 255) {
@@ -86,7 +89,11 @@ void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out,
                 started = true;
             }
         }
-    });
+    };
+    if (parallel)
+        parallelFor(area.y, area.bottom(), rows);
+    else
+        rows(area.y, area.bottom());
 }
 
 Image compositeLayers(const std::vector<CompositeLayer>& layers, int width, int height)

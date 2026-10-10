@@ -83,6 +83,150 @@ Image gradient(int w, int h)
     return image;
 }
 
+// A deterministic raster with varied alpha, so the blend arithmetic and the
+// masks have something to chew on rather than flat opaque colour.
+Image noisy(int w, int h, int seed)
+{
+    Image image(w, h);
+    uint32_t state = uint32_t(seed) * 2654435761u + 1u;
+    for (int y = 0; y < h; ++y) {
+        Rgba* line = image.row(y);
+        for (int x = 0; x < w; ++x) {
+            state = state * 1664525u + 1013904223u;
+            line[x] = Rgba(uint8_t(state >> 24), uint8_t(state >> 16),
+                           uint8_t(state >> 8), uint8_t(state >> 2));
+        }
+    }
+    return image;
+}
+
+Image slowRaster(const Layer& layer, int width, int height);
+
+// The composite worked out the slowest, most obvious way: one pixel at a time
+// straight out of the layer tree, with blendOver and the mask arithmetic and
+// none of the fast paths or the tiles the compositor takes. This is what the
+// tiled result has to agree with, pixel for pixel.
+Image slowFlatten(const Layer& parent, int width, int height)
+{
+    Image out(width, height);
+    for (int i = 0; i < parent.childCount(); ++i) {
+        const Layer* child = parent.childAt(i);
+        if (!child->visible || child->opacity == 0)
+            continue;
+        const Image raster = slowRaster(*child, width, height);
+        const float scale = child->opacity * (1.0f / 255.0f);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                out.setAt(x, y, blendOver(out.at(x, y), raster.at(x, y),
+                                          child->mode, scale));
+            }
+        }
+    }
+    return out;
+}
+
+Image slowRaster(const Layer& layer, int width, int height)
+{
+    Image raster(width, height);
+    if (layer.isGroup()) {
+        raster = slowFlatten(layer, width, height);
+    } else {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x)
+                raster.setAt(x, y, layer.image.at(x, y));
+        }
+    }
+    if (layer.hasMask() && layer.maskEnabled()) {
+        const Image* mask = layer.maskImage();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                Rgba pixel = raster.at(x, y);
+                const int value = Layer::maskValue(mask->at(x, y));
+                pixel.a = uint8_t((int(pixel.a) * value + 127) / 255);
+                raster.setAt(x, y, pixel);
+            }
+        }
+    }
+    return raster;
+}
+
+Image slowComposite(const Document& doc)
+{
+    return slowFlatten(*doc.rootGroup(), doc.width(), doc.height());
+}
+
+// The same composite the way it was built before the tiles: every layer
+// rendered at canvas size and flattened in one pass over the whole image.
+Image wholeComposite(const Document& doc)
+{
+    const Layer* root = doc.rootGroup();
+    std::vector<Image> rasters;
+    // Reserved so that the pointers handed to the entries stay valid.
+    rasters.reserve(static_cast<size_t>(root->childCount()));
+    std::vector<CompositeLayer> entries;
+    for (int i = 0; i < root->childCount(); ++i) {
+        const Layer* child = root->childAt(i);
+        if (!child->visible || child->opacity == 0)
+            continue;
+        rasters.push_back(doc.renderLayer(*child));
+        entries.push_back({&rasters.back(), child->opacity, child->mode, true, 0, 0});
+    }
+    return compositeLayers(entries, doc.width(), doc.height());
+}
+
+// A document with something of everything the compositor has to get right:
+// opaque and translucent layers, a hidden one, a layer mask, a mask switched
+// off, a group with a mask and an opacity of its own, and a group inside it.
+std::unique_ptr<Document> layeredDocument(int width, int height, bool masks,
+                                          bool groups)
+{
+    auto doc = std::make_unique<Document>(width, height, Rgba(40, 90, 160, 255));
+    doc->layerAt(0)->image = noisy(width, height, 1);
+
+    Layer* plain = doc->addChild(
+        doc->rootGroup(),
+        std::make_unique<Layer>(noisy(width, height, 2), QStringLiteral("Plain")));
+    plain->opacity = 190;
+    if (masks)
+        doc->setMask(plain, noisy(width, height, 3));
+
+    Layer* hidden = doc->addChild(
+        doc->rootGroup(),
+        std::make_unique<Layer>(noisy(width, height, 4), QStringLiteral("Hidden")));
+    hidden->visible = false;
+
+    Layer* ignored = doc->addChild(
+        doc->rootGroup(),
+        std::make_unique<Layer>(noisy(width, height, 5), QStringLiteral("Mask off")));
+    if (masks) {
+        doc->setMask(ignored, noisy(width, height, 6));
+        ignored->setMaskEnabled(false);
+    }
+
+    if (groups) {
+        Layer* group =
+            doc->addChild(doc->rootGroup(), Layer::makeGroup(QStringLiteral("Set")));
+        group->opacity = 210;
+        Layer* inner = doc->addChild(
+            group,
+            std::make_unique<Layer>(noisy(width, height, 7), QStringLiteral("Inner")));
+        inner->opacity = 140;
+        Layer* nested =
+            doc->addChild(group, Layer::makeGroup(QStringLiteral("Nested")));
+        Layer* deep = doc->addChild(
+            nested,
+            std::make_unique<Layer>(noisy(width, height, 8), QStringLiteral("Deep")));
+        deep->mode = BlendMode::Screen;
+        if (masks) {
+            doc->setMask(group, noisy(width, height, 9));
+            doc->setMask(deep, noisy(width, height, 10));
+        }
+    }
+    doc->setActiveIndex(1);
+    doc->invalidate();
+    return doc;
+}
+
 // A plugin that never left the process, which is how the loader's version gate
 // and its reporting are tested without building a library for every case.
 class FakePlugin : public EffectPlugin {
@@ -731,6 +875,306 @@ int main(int argc, char** argv)
         CHECK(doc.composite().width() == 8);
         doc.flip(true);
         CHECK(doc.width() == 8);
+    });
+
+    // ------------------------------------------------------------ tiles
+    addTest("tiled composite matches whole", [] {
+        const int tile = Document::kTileSize;
+        // The last two sizes are not multiples of the tile size, so the tiles
+        // along the right and bottom edges are partial ones.
+        const std::vector<QSize> sizes = {QSize(1, 1), QSize(tile, tile),
+                                          QSize(tile * 2 + 37, tile + 13),
+                                          QSize(tile - 1, tile * 2 + 1)};
+        for (const QSize& size : sizes) {
+            for (int shape = 0; shape < 4; ++shape) {
+                auto doc = layeredDocument(size.width(), size.height(),
+                                           (shape & 1) != 0, (shape & 2) != 0);
+                for (int m = 0; m < int(BlendMode::Count); ++m) {
+                    // Every layer, group and group child gets the mode, so
+                    // each one is exercised over a backdrop and under one.
+                    for (int i = 1; i < doc->layerCount(); ++i)
+                        doc->layerAt(i)->mode = static_cast<BlendMode>(m);
+                    doc->invalidate();
+                    const Image tiled = doc->composite();
+                    CHECK(samePixels(tiled, slowComposite(*doc)));
+                    CHECK(samePixels(tiled, wholeComposite(*doc)));
+                }
+            }
+        }
+    });
+
+    addTest("tiles follow the changed rectangle", [] {
+        const int tile = Document::kTileSize;
+        auto doc = layeredDocument(tile * 3 + 11, tile * 2 + 5, true, true);
+        CHECK(doc->tileColumns() == 4);
+        CHECK(doc->tileRows() == 3);
+        CHECK(doc->tileCount() == 12);
+        CHECK(doc->dirtyTileCount() == 12);
+        (void)doc->composite();
+        CHECK(doc->tilesRebuilt() == 12);
+        CHECK(doc->dirtyTileCount() == 0);
+        // Nothing changed, so nothing is rebuilt.
+        (void)doc->composite();
+        CHECK(doc->tilesRebuilt() == 0);
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+
+        Layer* target = doc->layerAt(1);
+        // A rectangle inside one tile costs that one tile.
+        const Rect inside(3, 4, 5, 6);
+        ops::fillRegion(target->image, inside, Rgba(255, 0, 0, 255));
+        doc->invalidateLayer(target, inside);
+        CHECK(doc->dirtyTileCount() == 1);
+        (void)doc->composite();
+        CHECK(doc->tilesRebuilt() == 1);
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+
+        // One across a tile corner costs four.
+        const Rect corner(tile - 2, tile - 2, 4, 4);
+        ops::fillRegion(target->image, corner, Rgba(0, 255, 0, 255));
+        doc->invalidateLayer(target, corner);
+        CHECK(doc->dirtyTileCount() == 4);
+        (void)doc->composite();
+        CHECK(doc->tilesRebuilt() == 4);
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+
+        // The partial tile in the far corner.
+        const Rect edge(doc->width() - 3, doc->height() - 3, 3, 3);
+        ops::fillRegion(target->image, edge, Rgba(0, 0, 255, 255));
+        doc->invalidateLayer(target, edge);
+        CHECK(doc->dirtyTileCount() == 1);
+        (void)doc->composite();
+        CHECK(doc->tilesRebuilt() == 1);
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+
+        // Painting into a mask is painting in document coordinates, so it
+        // dirties the tiles under the rectangle just the same.
+        Layer* masked = doc->layerAt(1);
+        CHECK(masked->hasMask());
+        ops::fillRegion(masked->maskLayer()->image, inside, Rgba(0, 0, 0, 255));
+        doc->invalidateLayer(masked->maskLayer(), inside);
+        CHECK(doc->dirtyTileCount() == 1);
+        (void)doc->composite();
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+
+        // A rectangle off the canvas dirties nothing at all, and an empty one
+        // means the whole canvas, the way a tool's repaint does.
+        doc->invalidateLayer(target, Rect(-50, -50, 10, 10));
+        CHECK(doc->dirtyTileCount() == 0);
+        doc->invalidateLayer(target, Rect());
+        CHECK(doc->dirtyTileCount() == doc->tileCount());
+        doc->invalidateRect(Rect(0, 0, tile, tile));
+        CHECK(doc->dirtyTileCount() == doc->tileCount());
+        (void)doc->composite();
+        doc->invalidateRect(Rect(0, 0, tile, tile));
+        CHECK(doc->dirtyTileCount() == 1);
+
+        // The grid position of a rectangle, which is what all of that rests on.
+        const Rect tiles = doc->tilesFor(Rect(tile - 1, 0, 2, 1));
+        CHECK(tiles.x == 0 && tiles.y == 0 && tiles.w == 2 && tiles.h == 1);
+        CHECK(doc->tilesFor(Rect(0, 0, 10000, 10000)).w == doc->tileColumns());
+        CHECK(doc->tilesFor(Rect(-10, -10, 5, 5)).isEmpty());
+
+        // A stroke is many small rectangles in a row, and none of them may
+        // leave the composite behind.
+        for (int i = 0; i < 40; ++i) {
+            const Rect dab(i * 3, (i * 5) % (doc->height() - 4), 4, 4);
+            ops::fillRegion(target->image, dab, Rgba(uint8_t(i), 20, 30, 200));
+            doc->invalidateLayer(target, dab);
+            (void)doc->composite();
+            CHECK(doc->tilesRebuilt() <= 4);
+        }
+        CHECK(samePixels(doc->composite(), slowComposite(*doc)));
+    });
+
+    addTest("every invalidation dirties its tiles", [] {
+        const int tile = Document::kTileSize;
+        auto doc = layeredDocument(tile * 2 + 9, tile + 17, true, true);
+        auto agrees = [&doc] {
+            return samePixels(doc->composite(), slowComposite(*doc));
+        };
+        auto allDirty = [&doc] { return doc->dirtyTileCount() == doc->tileCount(); };
+        CHECK(agrees());
+
+        // Opacity, visibility and the blend mode belong to the whole layer, so
+        // all of the tiles go.
+        Layer* top = doc->layerAt(1);
+        top->opacity = 90;
+        doc->invalidateLayer(top);
+        CHECK(allDirty());
+        CHECK(agrees());
+        top->visible = false;
+        doc->invalidate();
+        CHECK(allDirty());
+        CHECK(agrees());
+        top->visible = true;
+        top->mode = BlendMode::Overlay;
+        doc->invalidate();
+        CHECK(agrees());
+
+        // Reordering.
+        doc->moveLayer(0, 1);
+        CHECK(allDirty());
+        CHECK(agrees());
+        CHECK(doc->reparentLayer(doc->layerAt(0), doc->rootGroup(), 2));
+        CHECK(allDirty());
+        CHECK(agrees());
+
+        // Masks, added, switched off, inverted and dropped again.
+        Layer* bottom = doc->layerAt(0);
+        CHECK(doc->addMask(bottom, false) != nullptr);
+        CHECK(allDirty());
+        CHECK(agrees());
+        bottom->setMaskEnabled(false);
+        doc->invalidate();
+        CHECK(agrees());
+        bottom->setMaskEnabled(true);
+        bottom->invertMask();
+        doc->invalidate();
+        CHECK(agrees());
+        doc->setMask(bottom, noisy(doc->width(), doc->height(), 21));
+        CHECK(allDirty());
+        CHECK(agrees());
+        doc->removeMask(bottom);
+        CHECK(allDirty());
+        CHECK(agrees());
+
+        // Groups, built, filled and taken apart.
+        Layer* group = doc->addGroup(QStringLiteral("Late"));
+        CHECK(allDirty());
+        CHECK(agrees());
+        Layer* adopted = doc->layerAt(0);
+        CHECK(doc->reparentLayer(adopted, group, 0));
+        CHECK(agrees());
+        CHECK(doc->addMask(group, false) != nullptr);
+        CHECK(agrees());
+        group->mode = BlendMode::Multiply;
+        group->opacity = 180;
+        doc->invalidateLayer(group);
+        CHECK(agrees());
+        CHECK(doc->applyMask(group));
+        CHECK(agrees());
+
+        // A selection of the active layer never enters the composite, but it
+        // does invalidate, and the result has to stay the same.
+        Mask region(doc->width(), doc->height(), 0.0f);
+        for (int y = 2; y < 9; ++y) {
+            for (int x = 3; x < 11; ++x)
+                region.setAt(x, y, 1.0f);
+        }
+        doc->selection().setMask(region);
+        doc->invalidate();
+        CHECK(allDirty());
+        CHECK(agrees());
+        doc->selection().clear();
+        doc->invalidate();
+        CHECK(agrees());
+
+        // Undo and redo of a stroke, which only writes back its rectangle.
+        History history(doc.get());
+        Layer* painted = doc->layerAt(0);
+        const Rect box(4, 5, 9, 9);
+        Image before = painted->image.cropped(box);
+        ops::fillRegion(painted->image, box, Rgba(1, 2, 3, 255));
+        Image after = painted->image.cropped(box);
+        history.push(std::make_unique<PixelEdit>(QStringLiteral("Fill"),
+                                                 QStringLiteral("fill"),
+                                                 painted->uid(), box,
+                                                 std::move(before),
+                                                 std::move(after)));
+        (void)doc->composite();
+        CHECK(history.undo());
+        CHECK(doc->dirtyTileCount() == 1);
+        CHECK(agrees());
+        CHECK(history.redo());
+        CHECK(doc->dirtyTileCount() == 1);
+        CHECK(agrees());
+
+        // Canvas operations change the shape of the grid under it.
+        doc->resizeCanvas(tile * 3 + 5, tile * 2, Anchor::Center, false);
+        CHECK(doc->tileColumns() == 4);
+        CHECK(doc->tileRows() == 2);
+        CHECK(allDirty());
+        CHECK(agrees());
+        doc->rotate90(1);
+        CHECK(doc->tileColumns() == 2);
+        CHECK(doc->tileRows() == 4);
+        CHECK(doc->composite().width() == doc->width());
+        CHECK(agrees());
+        doc->flip(true);
+        CHECK(agrees());
+        doc->flip(false);
+        CHECK(agrees());
+        doc->cropTo(Rect(5, 7, tile + 3, tile - 11));
+        CHECK(doc->composite().width() == tile + 3);
+        CHECK(agrees());
+        doc->resizeCanvas(tile, tile, Anchor::TopLeft, true);
+        CHECK(agrees());
+        doc->flatten();
+        CHECK(allDirty());
+        CHECK(agrees());
+
+        // An effect preview stands in for one layer without being an edit, and
+        // it may not be cached: the image behind the pointer can change.
+        auto preview = layeredDocument(tile + 3, tile - 5, true, true);
+        (void)preview->composite();
+        const Image stand = noisy(preview->width(), preview->height(), 31);
+        preview->setModified(false);
+        preview->setPreview(preview->layerAt(1)->uid(), &stand);
+        CHECK(!preview->isModified());
+        CHECK(preview->dirtyTileCount() == preview->tileCount());
+        const Image shown = preview->composite();
+        CHECK(preview->dirtyTileCount() == preview->tileCount());
+        Layer* swapped = preview->layerAt(1);
+        const Image kept = swapped->image;
+        swapped->image = stand;
+        preview->clearPreview();
+        CHECK(samePixels(shown, slowComposite(*preview)));
+        swapped->image = kept;
+        preview->invalidate();
+        CHECK(samePixels(preview->composite(), slowComposite(*preview)));
+    });
+
+    addTest("tiled composite cost", [] {
+        // The case the tiling is for: a large document with eight layers, half
+        // of them masked and two of them in a masked group. The numbers are
+        // printed rather than asserted, bar the shape of them.
+        auto doc = layeredDocument(4000, 3000, true, true);
+        Layer* layer = doc->layerAt(1);
+        QElapsedTimer clock;
+
+        (void)doc->composite();
+        doc->invalidate();
+        clock.start();
+        (void)doc->composite();
+        const double full = double(clock.nsecsElapsed()) / 1e6;
+
+        auto stroke = [&](int dabs, bool wholeDocument) {
+            const Rect box(1700, 1300, 40, 40);
+            clock.restart();
+            for (int i = 0; i < dabs; ++i) {
+                ops::fillRegion(layer->image, box, Rgba(uint8_t(i), 0, 0, 255));
+                if (wholeDocument)
+                    doc->invalidate();
+                else
+                    doc->invalidateLayer(layer, box);
+                (void)doc->composite();
+            }
+            return double(clock.nsecsElapsed()) / 1e6 / dabs;
+        };
+        const double tiled = stroke(50, false);
+        const double whole = stroke(3, true);
+
+        std::printf("    4000x3000, %d layers: rebuild %.1f ms, 40 px dab %.3f ms "
+                    "tiled against %.1f ms whole, cache %.1f MB over %d tiles\n",
+                    doc->layerCount(), full, tiled, whole,
+                    double(doc->tileCacheBytes()) / (1024.0 * 1024.0),
+                    doc->tileCount());
+        // A dab has to cost a fraction of the document, not all of it.
+        CHECK(tiled < full / 10.0);
+        CHECK(tiled < whole / 10.0);
+        // And the cache is one composite, not a copy of every layer.
+        CHECK(doc->tileCacheBytes()
+              < size_t(4000) * 3000 * sizeof(Rgba) + size_t(64) * 1024);
     });
 
     addTest("anchor offsets", [] {

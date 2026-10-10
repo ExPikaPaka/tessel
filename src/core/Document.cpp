@@ -5,6 +5,7 @@
 #include <QFileInfo>
 
 #include "core/ImageOps.h"
+#include "core/Parallel.h"
 #include "core/Units.h"
 
 namespace tessel {
@@ -13,17 +14,30 @@ namespace {
 
 constexpr Rgba kReveal(255, 255, 255, 255);
 
+// The thinnest band one tile is split into when there are too few dirty tiles
+// to fill the thread pool. Only a small rebuild ever splits a tile, so this
+// trades nothing away on a large one: taking it from 24 rows to 8 halves the
+// cost of a brush dab on a 6000 by 4000 document, and below 8 the band stops
+// being worth a worker's while.
+constexpr int kMinBandRows = 8;
+
 // Scales an image's alpha by a grey mask, which is how a layer mask hides and
 // reveals what the layer draws. Anything the mask does not cover is hidden,
 // which only matters for a mask that somehow lost step with the canvas.
-void applyMaskTo(Image& image, const Image& mask)
+// `image` may be a window on the layer rather than the whole of it, in which
+// case (ox, oy) is where its top left pixel sits in the mask.
+void applyMaskTo(Image& image, const Image& mask, int ox = 0, int oy = 0)
 {
     for (int y = 0; y < image.height(); ++y) {
         Rgba* dst = image.row(y);
-        const Rgba* src = y < mask.height() ? mask.row(y) : nullptr;
+        const int maskY = y + oy;
+        const Rgba* src =
+            (maskY >= 0 && maskY < mask.height()) ? mask.row(maskY) : nullptr;
         for (int x = 0; x < image.width(); ++x) {
-            const uint8_t value =
-                (src && x < mask.width()) ? Layer::maskValue(src[x]) : 0;
+            const int maskX = x + ox;
+            const uint8_t value = (src && maskX >= 0 && maskX < mask.width())
+                                      ? Layer::maskValue(src[maskX])
+                                      : 0;
             dst[x].a = static_cast<uint8_t>((int(dst[x].a) * value + 127) / 255);
         }
     }
@@ -642,9 +656,16 @@ bool Document::applyMask(Layer* layer)
 
 // ----------------------------------------------------------------- pixels
 
-const Image* Document::rasterOf(const Layer& layer, std::deque<Image>& owned) const
+const Image* Document::rasterOf(const Layer& layer, const Rect& area,
+                                std::deque<Image>& owned, int* ox, int* oy,
+                                bool parallel) const
 {
+    *ox = 0;
+    *oy = 0;
     const Image* base = nullptr;
+    // True while `base` is a raster this call built, which a mask may then be
+    // applied to in place instead of over a second copy of it.
+    bool ours = false;
     if (layer.isGroup()) {
         std::deque<Image> children;
         std::vector<CompositeLayer> entries;
@@ -652,13 +673,22 @@ const Image* Document::rasterOf(const Layer& layer, std::deque<Image>& owned) co
         for (const auto& child : layer.children_) {
             if (!child->visible || child->opacity == 0)
                 continue;
-            const Image* raster = rasterOf(*child, children);
+            int childX = 0, childY = 0;
+            const Image* raster =
+                rasterOf(*child, area, children, &childX, &childY, parallel);
             if (!raster || raster->isNull())
                 continue;
-            entries.push_back({raster, child->opacity, child->mode, true});
+            entries.push_back(
+                {raster, child->opacity, child->mode, true, childX, childY});
         }
-        owned.push_back(compositeLayers(entries, width_, height_));
+        // The group's own raster covers exactly what was asked for, so a tile
+        // of a group costs a tile and not a canvas.
+        owned.emplace_back(area.w, area.h);
+        compositeRegion(entries, owned.back(), area, area.x, area.y, parallel);
         base = &owned.back();
+        ours = true;
+        *ox = area.x;
+        *oy = area.y;
     } else {
         base = &layer.image;
         if (previewUid_ >= 0 && previewImage_ && layer.uid() == previewUid_)
@@ -669,38 +699,111 @@ const Image* Document::rasterOf(const Layer& layer, std::deque<Image>& owned) co
     const Image* mask = layer.maskImage();
     if (previewUid_ >= 0 && previewImage_ && layer.maskLayer()->uid() == previewUid_)
         mask = previewImage_;
-    owned.push_back(*base);
-    applyMaskTo(owned.back(), *mask);
+    if (ours) {
+        applyMaskTo(owned.back(), *mask, *ox, *oy);
+        return &owned.back();
+    }
+    // The mask only scales alpha, so the copy it needs covers no more than the
+    // part of the layer the caller asked about.
+    const Rect window =
+        area.intersected(Rect(*ox, *oy, base->width(), base->height()));
+    if (window.isEmpty())
+        return nullptr;
+    owned.push_back(base->cropped(
+        Rect(window.x - *ox, window.y - *oy, window.w, window.h)));
+    applyMaskTo(owned.back(), *mask, window.x, window.y);
+    *ox = window.x;
+    *oy = window.y;
     return &owned.back();
 }
 
 Image Document::renderLayer(const Layer& layer) const
 {
     std::deque<Image> owned;
-    const Image* raster = rasterOf(layer, owned);
+    int ox = 0, oy = 0;
+    const Image* raster = rasterOf(layer, rect(), owned, &ox, &oy, true);
     if (!raster || raster->isNull())
         return Image(width_, height_);
-    return *raster;
+    if (ox == 0 && oy == 0 && raster->width() == width_
+        && raster->height() == height_)
+        return *raster;
+    // A layer narrower than the canvas, which only a stale preview image can
+    // be, still renders as a whole canvas.
+    Image out(width_, height_);
+    out.blit(*raster, ox, oy);
+    return out;
 }
 
-const Image& Document::composite() const
+void Document::buildTile(const Rect& region) const
 {
-    if (compositeValid_ && composite_.width() == width_
-        && composite_.height() == height_)
-        return composite_;
     std::deque<Image> owned;
     std::vector<CompositeLayer> entries;
     entries.reserve(root_->children_.size());
     for (const auto& child : root_->children_) {
         if (!child->visible || child->opacity == 0)
             continue;
-        const Image* raster = rasterOf(*child, owned);
+        int ox = 0, oy = 0;
+        const Image* raster = rasterOf(*child, region, owned, &ox, &oy, false);
         if (!raster || raster->isNull())
             continue;
-        entries.push_back({raster, child->opacity, child->mode, true});
+        entries.push_back({raster, child->opacity, child->mode, true, ox, oy});
     }
-    composite_ = compositeLayers(entries, width_, height_);
-    compositeValid_ = previewUid_ < 0;
+    compositeRegion(entries, composite_, region, 0, 0, false);
+}
+
+const Image& Document::composite() const
+{
+    ensureTileGrid();
+    if (composite_.width() != width_ || composite_.height() != height_) {
+        composite_ = Image(width_, height_);
+        dirtyAllTiles();
+    }
+    // Only the box the dirty tiles fall in is worth walking: a brush dab in a
+    // corner would otherwise pay for a sweep of the whole grid.
+    const int columns = tileColumns();
+    const Rect box = dirtyBox_.intersected(Rect(0, 0, columns, tileRows()));
+    std::vector<int> pending;
+    for (int ty = box.y; ty < box.bottom(); ++ty) {
+        for (int tx = box.x; tx < box.right(); ++tx) {
+            const size_t index = static_cast<size_t>(ty) * columns + tx;
+            if (tileDirty_[index]) {
+                tileDirty_[index] = 0;
+                pending.push_back(static_cast<int>(index));
+            }
+        }
+    }
+    dirtyBox_ = Rect();
+    tilesRebuilt_ = static_cast<int>(pending.size());
+
+    // The work goes out as bands of tiles rather than whole tiles, because one
+    // dirty tile has to fill the pool on its own while a full rebuild has
+    // thousands of them and wants no splitting at all. Each band is composited
+    // single threaded: the pool does not nest.
+    if (!pending.empty()) {
+        const int workers = static_cast<int>(hardwareThreads());
+        const int split = std::max(
+            1, (workers + static_cast<int>(pending.size()) - 1)
+                   / static_cast<int>(pending.size()));
+        std::vector<Rect> bands;
+        bands.reserve(pending.size() * static_cast<size_t>(split));
+        for (int index : pending) {
+            const Rect tile = tileRect(index);
+            const int count =
+                std::clamp(split, 1, std::max(1, tile.h / kMinBandRows));
+            const int rows = (tile.h + count - 1) / count;
+            for (int y = tile.y; y < tile.bottom(); y += rows) {
+                bands.push_back(
+                    Rect(tile.x, y, tile.w, std::min(rows, tile.bottom() - y)));
+            }
+        }
+        parallelForEach(static_cast<int>(bands.size()),
+                        [&](int i) { buildTile(bands[static_cast<size_t>(i)]); });
+    }
+
+    // A preview image can change behind the document's back, so nothing built
+    // while one is in place may be kept.
+    if (previewUid_ >= 0)
+        dirtyAllTiles();
     return composite_;
 }
 
@@ -721,29 +824,121 @@ Image Document::thumbnail(int maxSize) const
     return ops::resize(full, w, h, true);
 }
 
+// ----------------------------------------------------------------- tiles
+
+int Document::tileColumns() const
+{
+    return std::max(1, (width_ + kTileSize - 1) / kTileSize);
+}
+
+int Document::tileRows() const
+{
+    return std::max(1, (height_ + kTileSize - 1) / kTileSize);
+}
+
+Rect Document::tilesFor(const Rect& area) const
+{
+    const Rect box = area.intersected(rect());
+    if (box.isEmpty())
+        return Rect();
+    const int x0 = box.x / kTileSize;
+    const int y0 = box.y / kTileSize;
+    const int x1 = (box.right() - 1) / kTileSize;
+    const int y1 = (box.bottom() - 1) / kTileSize;
+    return Rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+}
+
+Rect Document::tileRect(int index) const
+{
+    const int columns = tileColumns();
+    const int x = (index % columns) * kTileSize;
+    const int y = (index / columns) * kTileSize;
+    return Rect(x, y, std::min(kTileSize, width_ - x),
+                std::min(kTileSize, height_ - y));
+}
+
+void Document::ensureTileGrid() const
+{
+    const int columns = tileColumns();
+    const int rows = tileRows();
+    const size_t count = static_cast<size_t>(columns) * static_cast<size_t>(rows);
+    if (gridColumns_ == columns && tileDirty_.size() == count)
+        return;
+    // The canvas changed shape, so the grid says nothing about the new one.
+    gridColumns_ = columns;
+    tileDirty_.assign(count, uint8_t(1));
+    dirtyBox_ = Rect(0, 0, columns, rows);
+}
+
+void Document::markTiles(const Rect& area)
+{
+    ensureTileGrid();
+    const Rect tiles = tilesFor(area);
+    if (tiles.isEmpty())
+        return;
+    const int columns = tileColumns();
+    for (int ty = tiles.y; ty < tiles.bottom(); ++ty) {
+        for (int tx = tiles.x; tx < tiles.right(); ++tx)
+            tileDirty_[static_cast<size_t>(ty) * columns + tx] = 1;
+    }
+    dirtyBox_ = dirtyBox_.united(tiles);
+}
+
+int Document::dirtyTileCount() const
+{
+    ensureTileGrid();
+    int count = 0;
+    for (uint8_t flag : tileDirty_)
+        count += flag ? 1 : 0;
+    return count;
+}
+
+size_t Document::tileCacheBytes() const
+{
+    return composite_.byteCount() + tileDirty_.capacity();
+}
+
+void Document::dirtyAllTiles() const
+{
+    ensureTileGrid();
+    std::fill(tileDirty_.begin(), tileDirty_.end(), uint8_t(1));
+    dirtyBox_ = Rect(0, 0, tileColumns(), tileRows());
+}
+
 void Document::invalidate()
 {
-    compositeValid_ = false;
+    dirtyAllTiles();
     modified_ = true;
 }
 
-void Document::invalidateLayer(Layer*)
+void Document::invalidateRect(const Rect& area)
 {
-    invalidate();
+    if (area.isEmpty()) {
+        invalidate();
+        return;
+    }
+    markTiles(area);
+    modified_ = true;
+}
+
+void Document::invalidateLayer(Layer*, const Rect& area)
+{
+    invalidateRect(area);
 }
 
 void Document::setPreview(int layerUid, const Image* image)
 {
     previewUid_ = layerUid;
     previewImage_ = image;
-    compositeValid_ = false;
+    // A preview is not an edit, so the modified flag is left alone.
+    dirtyAllTiles();
 }
 
 void Document::clearPreview()
 {
     previewUid_ = -1;
     previewImage_ = nullptr;
-    compositeValid_ = false;
+    dirtyAllTiles();
 }
 
 void Document::forEachRaster(const std::function<void(Image&, bool)>& action)

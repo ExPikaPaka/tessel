@@ -147,7 +147,7 @@ protected:
             ops::imageOver(layer_->image, painted, &mask, blend_, area, float(opacity_));
             dirty_ = dirty_.united(area);
         }
-        context.doc->invalidateLayer(layer_);
+        context.doc->invalidateLayer(layer_, restore);
         context.repaint(restore);
     }
 
