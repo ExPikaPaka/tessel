@@ -151,6 +151,16 @@ protected:
         // antialiased instead of turning into stair steps.
         const double falloff = std::max(radius - inner, 0.5);
         const float amount = strength();
+        // Shape of the falloff across that band. A straight ramp, or a
+        // smoothstep, flattens off near the middle and leaves a solid core, so
+        // even the softest setting still painted a hard centre with a thin
+        // fuzzy rim. Raising the ramp to a power bends it the other way: the
+        // coverage drops away immediately from the centre line and trails off,
+        // which is what a soft brush is expected to look like. The exponent is
+        // 1 at full hardness, where the band is only half a pixel wide and the
+        // shape does not matter, and rises to 3 as hardness falls to nothing.
+        const double shape = 1.0 + 2.0 * (1.0 - hard) * (1.0 - hard);
+        const bool straight = shape <= 1.02;
 
         const Rect box = stampBounds(from, to).intersected(coverage_.rect());
         if (box.isEmpty())
@@ -177,10 +187,9 @@ protected:
                     if (coverage <= 0.0)
                         continue;
                     coverage = std::min(1.0, coverage);
-                    // Smoothstep removes the crease a linear ramp leaves where
-                    // it reaches full strength.
-                    const float value =
-                        float(coverage * coverage * (3.0 - 2.0 * coverage)) * amount;
+                    if (!straight)
+                        coverage = std::pow(coverage, shape);
+                    const float value = float(coverage) * amount;
                     if (value > line[x])
                         line[x] = value;
                 }
