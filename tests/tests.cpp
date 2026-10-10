@@ -889,16 +889,30 @@ int main(int argc, char** argv)
             for (int shape = 0; shape < 4; ++shape) {
                 auto doc = layeredDocument(size.width(), size.height(),
                                            (shape & 1) != 0, (shape & 2) != 0);
-                for (int m = 0; m < int(BlendMode::Count); ++m) {
-                    // Every layer, group and group child gets the mode, so
-                    // each one is exercised over a backdrop and under one.
-                    for (int i = 1; i < doc->layerCount(); ++i)
-                        doc->layerAt(i)->mode = static_cast<BlendMode>(m);
-                    doc->invalidate();
-                    const Image tiled = doc->composite();
-                    CHECK(samePixels(tiled, slowComposite(*doc)));
-                    CHECK(samePixels(tiled, wholeComposite(*doc)));
+                auto sweepModes = [&doc] {
+                    for (int m = 0; m < int(BlendMode::Count); ++m) {
+                        // Every layer, group and group child gets the mode, so
+                        // each one is exercised over a backdrop and under one.
+                        for (int i = 1; i < doc->layerCount(); ++i)
+                            doc->layerAt(i)->mode = static_cast<BlendMode>(m);
+                        doc->invalidate();
+                        const Image tiled = doc->composite();
+                        CHECK(samePixels(tiled, slowComposite(*doc)));
+                        CHECK(samePixels(tiled, wholeComposite(*doc)));
+                    }
+                };
+                sweepModes();
+
+                // A selection is no part of the composite and must not become
+                // one, so the whole sweep runs again with one active.
+                Mask region(size.width(), size.height(), 0.0f);
+                for (int y = 0; y < size.height(); y += 2) {
+                    for (int x = 0; x < size.width(); x += 3)
+                        region.setAt(x, y, 0.75f);
                 }
+                doc->selection().setMask(region);
+                CHECK(doc->selection().isActive());
+                sweepModes();
             }
         }
     });
