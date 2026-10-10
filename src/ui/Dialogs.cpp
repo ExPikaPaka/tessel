@@ -14,6 +14,8 @@
 #include <QHash>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QBuffer>
 #include <QImageWriter>
@@ -27,7 +29,9 @@
 
 #include "core/ImageOps.h"
 #include "core/Io.h"
+#include "effects/Effect.h"
 #include "tessel_version.h"
+#include "ui/EffectDialog.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 
@@ -529,6 +533,7 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
     opacityRow->addWidget(opacityValue_);
     form->addRow(QStringLiteral("Opacity"), opacityRow);
     root->addLayout(form);
+    buildEffectsSection(root);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
                                          this);
@@ -551,6 +556,249 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
     setMinimumWidth(340);
 }
 
+void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
+{
+    const Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer)
+        return;
+    auto* box = new QGroupBox(layer->isAdjustment() ? QStringLiteral("Adjustment")
+                                                    : QStringLiteral("Effects"),
+                              this);
+    auto* column = new QVBoxLayout(box);
+    column->setSpacing(6);
+
+    effects_ = new QListWidget(box);
+    effects_->setSelectionMode(QAbstractItemView::SingleSelection);
+    effects_->setMaximumHeight(110);
+    effects_->setToolTip(layer->isAdjustment()
+        ? QStringLiteral("What this adjustment layer applies to everything below "
+                         "it inside its group.")
+        : QStringLiteral("Applied to this layer's pixels while it is composited. "
+                         "The stored pixels are left alone until the stack is "
+                         "flattened."));
+    column->addWidget(effects_);
+
+    auto* buttons = new QHBoxLayout;
+    buttons->setSpacing(2);
+    const auto button = [buttons, box](const QString& icon, const QString& tip) {
+        auto* widget = new QToolButton(box);
+        widget->setIcon(icons::get(icon, 18));
+        widget->setProperty("iconName", icon);
+        widget->setIconSize(QSize(18, 18));
+        widget->setToolTip(tip);
+        widget->setAutoRaise(true);
+        buttons->addWidget(widget);
+        return widget;
+    };
+    if (!layer->isAdjustment()) {
+        auto* add = button(QStringLiteral("layer-add"), QStringLiteral("Add Effect"));
+        add->setPopupMode(QToolButton::InstantPopup);
+        add->setObjectName(QStringLiteral("addEffect"));
+        auto* menu = new QMenu(add);
+        fillEffectMenu(menu, [this](Effect* effect) {
+            const Layer* target = doc_->layerByUid(layerUid_);
+            if (!target)
+                return;
+            std::vector<LayerEffect> next = target->effects();
+            next.push_back({effect->id(), ParamValues::defaults(effect->params()),
+                            true});
+            recordEffects(QStringLiteral("Add Effect"), QStringLiteral("effect"),
+                          next);
+            effects_->setCurrentRow(int(next.size()) - 1);
+            if (!effect->params().empty())
+                editEffectEntry(int(next.size()) - 1);
+        });
+        add->setMenu(menu);
+    }
+    editEffect_ = button(QStringLiteral("settings"), QStringLiteral("Edit Settings"));
+    editEffect_->setObjectName(QStringLiteral("editEffect"));
+    connect(editEffect_, &QToolButton::clicked, this,
+            [this] { editEffectEntry(selectedEffect()); });
+    if (!layer->isAdjustment()) {
+        upEffect_ = button(QStringLiteral("up"), QStringLiteral("Move Effect Up"));
+        downEffect_ = button(QStringLiteral("down"), QStringLiteral("Move Effect Down"));
+        removeEffect_ = button(QStringLiteral("layer-delete"),
+                               QStringLiteral("Remove Effect"));
+        removeEffect_->setObjectName(QStringLiteral("removeEffect"));
+        flattenEffects_ = button(QStringLiteral("flatten"),
+                                 QStringLiteral("Flatten the effects into the pixels"));
+        flattenEffects_->setObjectName(QStringLiteral("flattenEffects"));
+        // The entries run bottom to top, and the list shows them in that same
+        // order, so moving an entry up in the list moves it later in the run.
+        const auto reorder = [this](int delta) {
+            const int index = selectedEffect();
+            const Layer* target = doc_->layerByUid(layerUid_);
+            if (!target || index < 0)
+                return;
+            const int other = index + delta;
+            if (other < 0 || other >= int(target->effects().size()))
+                return;
+            std::vector<LayerEffect> next = target->effects();
+            std::swap(next[size_t(index)], next[size_t(other)]);
+            recordEffects(QStringLiteral("Reorder Effects"), QStringLiteral("effect"),
+                          next);
+            effects_->setCurrentRow(other);
+        };
+        connect(upEffect_, &QToolButton::clicked, this, [reorder] { reorder(1); });
+        connect(downEffect_, &QToolButton::clicked, this, [reorder] { reorder(-1); });
+        connect(removeEffect_, &QToolButton::clicked, this, [this] {
+            const int index = selectedEffect();
+            const Layer* target = doc_->layerByUid(layerUid_);
+            if (!target || index < 0)
+                return;
+            std::vector<LayerEffect> next = target->effects();
+            next.erase(next.begin() + index);
+            recordEffects(QStringLiteral("Remove Effect"),
+                          QStringLiteral("layer-delete"), next);
+        });
+        connect(flattenEffects_, &QToolButton::clicked, this, [this] {
+            Layer* target = doc_->layerByUid(layerUid_);
+            if (!target || target->effects().empty())
+                return;
+            // The pixels change, so this is a snapshot step of its own rather
+            // than a property one, and the fields are committed first so that
+            // the snapshot does not hold values a later Cancel would revoke.
+            commitProperties();
+            const int uid = layerUid_;
+            recordDocumentEdit(*doc_, *history_, QStringLiteral("Flatten Effects"),
+                               QStringLiteral("flatten"), [this, uid] {
+                                   if (Layer* again = doc_->layerByUid(uid))
+                                       doc_->flattenLayerEffects(again);
+                               });
+            refreshEffects();
+            if (repaint_)
+                repaint_();
+        });
+    }
+    buttons->addStretch(1);
+    column->addLayout(buttons);
+    root->addWidget(box);
+
+    connect(effects_, &QListWidget::currentRowChanged, this,
+            [this] { updateEffectButtons(); });
+    connect(effects_, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem* item) {
+                editEffectEntry(effects_->row(item));
+            });
+    connect(effects_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
+        if (updatingEffects_)
+            return;
+        const int index = effects_->row(item);
+        const Layer* target = doc_->layerByUid(layerUid_);
+        if (!target || index < 0 || index >= int(target->effects().size()))
+            return;
+        const bool on = item->checkState() == Qt::Checked;
+        if (on == target->effects()[size_t(index)].enabled)
+            return;
+        std::vector<LayerEffect> next = target->effects();
+        next[size_t(index)].enabled = on;
+        recordEffects(on ? QStringLiteral("Enable Effect")
+                         : QStringLiteral("Disable Effect"),
+                      QStringLiteral("effect"), next);
+    });
+    refreshEffects();
+}
+
+void LayerPropertiesDialog::refreshEffects()
+{
+    if (!effects_)
+        return;
+    const Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer)
+        return;
+    const int keep = effects_->currentRow();
+    updatingEffects_ = true;
+    effects_->clear();
+    EffectRegistry& registry = EffectRegistry::instance();
+    for (const LayerEffect& stored : layer->effects()) {
+        Effect* effect = registry.byId(stored.effectId);
+        auto* item = new QListWidgetItem(
+            effect ? effect->name()
+                   : QStringLiteral("%1 (not installed)").arg(stored.effectId),
+            effects_);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(stored.enabled ? Qt::Checked : Qt::Unchecked);
+        item->setIcon(icons::get(effect && effect->isAdjustment()
+                                     ? QStringLiteral("adjust")
+                                     : QStringLiteral("effect"),
+                                 16));
+    }
+    if (keep >= 0 && keep < effects_->count())
+        effects_->setCurrentRow(keep);
+    else if (effects_->count() > 0)
+        effects_->setCurrentRow(effects_->count() - 1);
+    updatingEffects_ = false;
+    updateEffectButtons();
+}
+
+void LayerPropertiesDialog::updateEffectButtons()
+{
+    const Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer)
+        return;
+    EffectRegistry& registry = EffectRegistry::instance();
+    const int index = selectedEffect();
+    const int count = int(layer->effects().size());
+    Effect* chosen = index >= 0
+        ? registry.byId(layer->effects()[size_t(index)].effectId)
+        : nullptr;
+    if (editEffect_)
+        editEffect_->setEnabled(chosen && !chosen->params().empty());
+    if (upEffect_)
+        upEffect_->setEnabled(index >= 0 && index + 1 < count);
+    if (downEffect_)
+        downEffect_->setEnabled(index > 0);
+    if (removeEffect_)
+        removeEffect_->setEnabled(index >= 0);
+    if (flattenEffects_)
+        flattenEffects_->setEnabled(count > 0);
+}
+
+int LayerPropertiesDialog::selectedEffect() const
+{
+    return effects_ ? effects_->currentRow() : -1;
+}
+
+void LayerPropertiesDialog::recordEffects(const QString& name, const QString& icon,
+                                          std::vector<LayerEffect> after)
+{
+    Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer)
+        return;
+    const std::vector<LayerEffect> before = layer->effects();
+    const int uid = layerUid_;
+    const auto write = [uid](Document& doc, const std::vector<LayerEffect>& list) {
+        if (Layer* target = doc.layerByUid(uid))
+            doc.setLayerEffects(target, list);
+    };
+    doc_->setLayerEffects(layer, after);
+    history_->push(std::make_unique<PropertyEdit>(
+        name, icon, [write, before](Document& doc) { write(doc, before); },
+        [write, after](Document& doc) { write(doc, after); }));
+    refreshEffects();
+    if (repaint_)
+        repaint_();
+}
+
+void LayerPropertiesDialog::editEffectEntry(int index)
+{
+    Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer || index < 0 || index >= int(layer->effects().size()))
+        return;
+    Effect* effect =
+        EffectRegistry::instance().byId(layer->effects()[size_t(index)].effectId);
+    if (!effect || effect->params().empty())
+        return;
+    // Modal on purpose: it edits the entry this dialog is also showing, so the
+    // two must not be driven at the same time.
+    StoredEffectDialog dialog(effect, doc_, history_, layer, index, this);
+    dialog.setRepaintCallback(repaint_);
+    dialog.exec();
+    refreshEffects();
+    if (repaint_)
+        repaint_();
+}
+
 void LayerPropertiesDialog::apply()
 {
     Layer* layer = doc_->layerByUid(layerUid_);
@@ -565,44 +813,58 @@ void LayerPropertiesDialog::apply()
         repaint_();
 }
 
+void LayerPropertiesDialog::commitProperties()
+{
+    Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer)
+        return;
+    const QString newName = name_->text();
+    const bool newVisible = visible_->isChecked();
+    const BlendMode newMode = static_cast<BlendMode>(blend_->currentIndex());
+    const uint8_t newOpacity = static_cast<uint8_t>(opacity_->value());
+    const bool changed = newName != originalName_ || newVisible != originalVisible_
+        || newMode != originalMode_ || newOpacity != originalOpacity_;
+    if (changed) {
+        const int uid = layerUid_;
+        const QString oldName = originalName_;
+        const bool oldVisible = originalVisible_;
+        const BlendMode oldMode = originalMode_;
+        const uint8_t oldOpacity = originalOpacity_;
+        history_->push(std::make_unique<PropertyEdit>(
+            QStringLiteral("Layer Properties"), QStringLiteral("layer-props"),
+            [uid, oldName, oldVisible, oldMode, oldOpacity](Document& doc) {
+                if (Layer* target = doc.layerByUid(uid)) {
+                    target->name = oldName;
+                    target->visible = oldVisible;
+                    target->mode = oldMode;
+                    target->opacity = oldOpacity;
+                    doc.invalidate();
+                }
+            },
+            [uid, newName, newVisible, newMode, newOpacity](Document& doc) {
+                if (Layer* target = doc.layerByUid(uid)) {
+                    target->name = newName;
+                    target->visible = newVisible;
+                    target->mode = newMode;
+                    target->opacity = newOpacity;
+                    doc.invalidate();
+                }
+            }));
+    }
+    // What the fields hold now is what Cancel would go back to, which is what
+    // lets a flatten in the middle of the dialog keep a sound snapshot.
+    originalName_ = newName;
+    originalVisible_ = newVisible;
+    originalMode_ = newMode;
+    originalOpacity_ = newOpacity;
+}
+
 void LayerPropertiesDialog::done(int result)
 {
     Layer* layer = doc_->layerByUid(layerUid_);
     if (layer) {
         if (result == QDialog::Accepted) {
-            const QString newName = name_->text();
-            const bool newVisible = visible_->isChecked();
-            const BlendMode newMode = static_cast<BlendMode>(blend_->currentIndex());
-            const uint8_t newOpacity = static_cast<uint8_t>(opacity_->value());
-            const bool changed = newName != originalName_ || newVisible != originalVisible_
-                || newMode != originalMode_ || newOpacity != originalOpacity_;
-            if (changed) {
-                const int uid = layerUid_;
-                const QString oldName = originalName_;
-                const bool oldVisible = originalVisible_;
-                const BlendMode oldMode = originalMode_;
-                const uint8_t oldOpacity = originalOpacity_;
-                history_->push(std::make_unique<PropertyEdit>(
-                    QStringLiteral("Layer Properties"), QStringLiteral("layer-props"),
-                    [uid, oldName, oldVisible, oldMode, oldOpacity](Document& doc) {
-                        if (Layer* target = doc.layerByUid(uid)) {
-                            target->name = oldName;
-                            target->visible = oldVisible;
-                            target->mode = oldMode;
-                            target->opacity = oldOpacity;
-                            doc.invalidate();
-                        }
-                    },
-                    [uid, newName, newVisible, newMode, newOpacity](Document& doc) {
-                        if (Layer* target = doc.layerByUid(uid)) {
-                            target->name = newName;
-                            target->visible = newVisible;
-                            target->mode = newMode;
-                            target->opacity = newOpacity;
-                            doc.invalidate();
-                        }
-                    }));
-            }
+            commitProperties();
         } else {
             layer->name = originalName_;
             layer->visible = originalVisible_;

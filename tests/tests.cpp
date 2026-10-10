@@ -83,6 +83,27 @@ Image gradient(int w, int h)
     return image;
 }
 
+// How often the counting effect below actually ran, which is how the caching
+// tests tell a recompute from a cache hit.
+int countingRuns = 0;
+
+// A stored effect with a parameter, registered on demand. The registry ignores
+// a second registration of the same id, so calling this from several tests is
+// safe.
+void registerCountingEffect()
+{
+    fx::add(EffectRegistry::instance(), "test_counting", "Counting", "Testing",
+            {ParamSpec::intParam(QStringLiteral("shift"), QStringLiteral("Shift"), 0,
+                                 200, 10)},
+            [](const EffectContext& context, const ParamValues& values) {
+                ++countingRuns;
+                const int shift = values.intValue(QStringLiteral("shift"), 10);
+                return fx::mapPixels(context, [shift](Rgba c, int, int) {
+                    return Rgba(uint8_t(std::min(255, c.r + shift)), c.g, c.b, c.a);
+                });
+            });
+}
+
 // A plugin that never left the process, which is how the loader's version gate
 // and its reporting are tested without building a library for every case.
 class FakePlugin : public EffectPlugin {
@@ -1597,6 +1618,381 @@ int main(int argc, char** argv)
         CHECK(values.pointValue(QStringLiteral("o")) == QPointF(0.5, -0.5));
         CHECK(values.choiceValue(QStringLiteral("ch")) == 1);
         CHECK(values.intValue(QStringLiteral("absent"), 42) == 42);
+    });
+
+    addTest("parameter values round trip through json", [] {
+        QPolygonF curve;
+        curve << QPointF(0, 0) << QPointF(96, 140) << QPointF(255, 255);
+        ParamValues values;
+        values.set(QStringLiteral("count"), 7);
+        values.set(QStringLiteral("amount"), 0.125);
+        values.set(QStringLiteral("on"), true);
+        values.set(QStringLiteral("tint"), Rgba(10, 20, 30, 40).toQColor());
+        values.set(QStringLiteral("centre"), QPointF(-0.25, 0.5));
+        values.set(QStringLiteral("curve"), QVariant::fromValue(curve));
+        const ParamValues back = ParamValues::fromJson(values.toJson());
+        CHECK(back == values);
+        CHECK(back.hash() == values.hash());
+        CHECK(back.intValue(QStringLiteral("count")) == 7);
+        CHECK(back.colorValue(QStringLiteral("tint")) == Rgba(10, 20, 30, 40));
+        CHECK(back.pointValue(QStringLiteral("centre")) == QPointF(-0.25, 0.5));
+        CHECK(back.raw(QStringLiteral("curve")).value<QPolygonF>() == curve);
+        // A different value has to be a different digest, or a cached effect
+        // result would be handed back for controls that have moved.
+        ParamValues moved = values;
+        moved.set(QStringLiteral("count"), 8);
+        CHECK(moved.hash() != values.hash());
+    });
+
+    // ------------------------------------------- adjustment layers and stacks
+    addTest("an adjustment layer applies to what is below it", [] {
+        registerBuiltinEffects();
+        Document doc(8, 8, Rgba(10, 20, 30, 255));
+        Layer* adjustment = doc.addAdjustmentLayer(QStringLiteral("invert_colors"),
+                                                   ParamValues(),
+                                                   QStringLiteral("Invert"));
+        CHECK(adjustment != nullptr);
+        if (!adjustment)
+            return;
+        CHECK(adjustment->isAdjustment());
+        CHECK(doc.layerCount() == 2);
+        CHECK(doc.composite().at(1, 1) == Rgba(245, 235, 225, 255));
+        // It takes part in the tree like any other layer.
+        adjustment->visible = false;
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(10, 20, 30, 255));
+        adjustment->visible = true;
+        adjustment->opacity = 128;
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(128, 128, 128, 255));
+        adjustment->opacity = 255;
+        Layer* mask = doc.addMask(adjustment);
+        ops::fillRegion(mask->image, Rect(0, 0, 4, 8), Rgba(0, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(10, 20, 30, 255));
+        CHECK(doc.composite().at(5, 1) == Rgba(245, 235, 225, 255));
+        // And it has nothing of its own to draw.
+        CHECK(doc.renderLayer(*adjustment).at(1, 1).a == 0);
+    });
+
+    addTest("an adjustment layer stops at its own group", [] {
+        registerBuiltinEffects();
+        Document doc(8, 8, Rgba(10, 20, 30, 255));
+        Layer* group = doc.addGroup(QStringLiteral("Set"));
+        Layer* inside = doc.addChild(
+            group, std::make_unique<Layer>(8, 8, QStringLiteral("Inside")));
+        ops::fillRegion(inside->image, Rect(0, 0, 4, 8), Rgba(100, 100, 100, 255));
+        doc.setActiveIndex(doc.indexOfUid(inside->uid()));
+        Layer* adjustment = doc.addAdjustmentLayer(QStringLiteral("invert_colors"),
+                                                   ParamValues());
+        CHECK(adjustment != nullptr && adjustment->parent() == group);
+        doc.invalidate();
+        // The group's own pixels are inverted; the background below the group
+        // is not, because the adjustment never leaves the group.
+        CHECK(doc.composite().at(1, 1) == Rgba(155, 155, 155, 255));
+        CHECK(doc.composite().at(6, 1) == Rgba(10, 20, 30, 255));
+    });
+
+    addTest("a layer effect stack leaves the stored pixels alone", [] {
+        registerBuiltinEffects();
+        Document doc(8, 8, Rgba(10, 20, 30, 255));
+        Layer* layer = doc.layerAt(0);
+        ParamValues darker;
+        darker.set(QStringLiteral("brightness"), -4);
+        darker.set(QStringLiteral("contrast"), 0);
+        doc.setLayerEffects(layer, {{QStringLiteral("invert_colors"), ParamValues(), true},
+                                    {QStringLiteral("brightness_contrast"), darker, true}});
+        // Invert first, then darken: 10 becomes 245 and then 235.
+        CHECK(doc.composite().at(1, 1) == Rgba(235, 225, 215, 255));
+        CHECK(layer->image.at(1, 1) == Rgba(10, 20, 30, 255));
+
+        // The order of the entries is the order they run in.
+        std::swap(layer->effects()[0], layer->effects()[1]);
+        doc.effectsChanged(layer);
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 245, 235, 255));
+
+        // A disabled entry is skipped without being forgotten.
+        layer->effects()[0].enabled = false;
+        doc.effectsChanged(layer);
+        CHECK(doc.composite().at(1, 1) == Rgba(245, 235, 225, 255));
+        CHECK(layer->effects().size() == 2);
+        layer->effects()[0].enabled = true;
+        doc.effectsChanged(layer);
+
+        // Flattening writes what the stack produced and empties it.
+        const Image expected = doc.composite();
+        CHECK(doc.flattenLayerEffects(layer));
+        CHECK(layer->effects().empty());
+        CHECK(layer->image.at(1, 1) == Rgba(255, 245, 235, 255));
+        CHECK(samePixels(doc.composite(), expected));
+        CHECK(!doc.flattenLayerEffects(layer));
+    });
+
+    addTest("a stack and an adjustment layer are only recomputed when needed", [] {
+        registerCountingEffect();
+        Document doc(64, 64, Rgba(10, 20, 30, 255));
+        Layer* layer = doc.layerAt(0);
+        Layer* above = doc.addEmptyLayer();
+        std::vector<LayerEffect> stack;
+        for (int shift : {5, 10, 20}) {
+            ParamValues values;
+            values.set(QStringLiteral("shift"), shift);
+            stack.push_back({QStringLiteral("test_counting"), values, true});
+        }
+        doc.setLayerEffects(layer, stack);
+
+        countingRuns = 0;
+        doc.composite();
+        CHECK(countingRuns == 3);
+        // A second composite is the cached one.
+        doc.composite();
+        CHECK(countingRuns == 3);
+        // Pixels on another layer have nothing to do with this stack.
+        doc.invalidateLayer(above);
+        doc.composite();
+        CHECK(countingRuns == 3);
+        // Editing the top entry reruns that entry alone.
+        layer->effects()[2].values.set(QStringLiteral("shift"), 21);
+        doc.effectsChanged(layer);
+        doc.composite();
+        CHECK(countingRuns == 4);
+        // Editing the bottom one reruns everything above it as well.
+        layer->effects()[0].values.set(QStringLiteral("shift"), 6);
+        doc.effectsChanged(layer);
+        doc.composite();
+        CHECK(countingRuns == 7);
+        // So does painting on the layer the stack sits on.
+        doc.invalidateLayer(layer);
+        doc.composite();
+        CHECK(countingRuns == 10);
+
+        // An adjustment layer caches the same way, keyed on the backdrop it
+        // was computed from rather than on any one layer's pixels.
+        ParamValues values;
+        values.set(QStringLiteral("shift"), 30);
+        Layer* adjustment = doc.addAdjustmentLayer(QStringLiteral("test_counting"),
+                                                   values);
+        countingRuns = 0;
+        doc.composite();
+        CHECK(countingRuns == 4); // three for the stack, one for the adjustment
+        doc.composite();
+        CHECK(countingRuns == 4);
+        // Its own opacity is applied after the effect, so moving it reuses the
+        // result.
+        adjustment->opacity = 200;
+        doc.effectsChanged(adjustment);
+        doc.composite();
+        CHECK(countingRuns == 4);
+        // Pixels below it are what it works on, so those do rerun it.
+        doc.invalidateLayer(above);
+        doc.composite();
+        CHECK(countingRuns == 5);
+    });
+
+    addTest("stacks and adjustment layers survive undo", [] {
+        registerBuiltinEffects();
+        Document doc(8, 8, Rgba(10, 20, 30, 255));
+        History history(&doc);
+        Layer* layer = doc.layerAt(0);
+        recordDocumentEdit(doc, history, QStringLiteral("Add Effect"),
+                           QStringLiteral("effect"), [&] {
+                               doc.setLayerEffects(
+                                   layer, {{QStringLiteral("invert_colors"),
+                                            ParamValues(), true}});
+                           });
+        CHECK(doc.composite().at(1, 1) == Rgba(245, 235, 225, 255));
+        recordDocumentEdit(doc, history, QStringLiteral("New Adjustment Layer"),
+                           QStringLiteral("adjust"), [&] {
+                               doc.addAdjustmentLayer(
+                                   QStringLiteral("invert_colors"), ParamValues(),
+                                   QStringLiteral("Invert"));
+                           });
+        CHECK(doc.layerCount() == 2);
+        CHECK(doc.composite().at(1, 1) == Rgba(10, 20, 30, 255));
+
+        CHECK(history.undo());
+        CHECK(doc.layerCount() == 1);
+        CHECK(doc.layerAt(0)->effects().size() == 1);
+        CHECK(doc.composite().at(1, 1) == Rgba(245, 235, 225, 255));
+        CHECK(history.undo());
+        CHECK(doc.layerAt(0)->effects().empty());
+        CHECK(doc.composite().at(1, 1) == Rgba(10, 20, 30, 255));
+
+        CHECK(history.redo());
+        CHECK(doc.layerAt(0)->effects().size() == 1);
+        CHECK(doc.layerAt(0)->effects().front().effectId
+              == QStringLiteral("invert_colors"));
+        CHECK(history.redo());
+        CHECK(doc.layerCount() == 2);
+        CHECK(doc.layerAt(1)->isAdjustment());
+        CHECK(doc.layerAt(1)->name == QStringLiteral("Invert"));
+        CHECK(doc.composite().at(1, 1) == Rgba(10, 20, 30, 255));
+    });
+
+    addTest("stacks and adjustment layers round trip files", [] {
+        registerBuiltinEffects();
+        QTemporaryDir dir;
+        Document doc(16, 12, Rgba(10, 20, 30, 255));
+        Layer* bottom = doc.layerAt(0);
+        ParamValues brighter;
+        brighter.set(QStringLiteral("brightness"), 20);
+        brighter.set(QStringLiteral("contrast"), 0);
+        doc.setLayerEffects(bottom,
+                            {{QStringLiteral("invert_colors"), ParamValues(), true},
+                             {QStringLiteral("brightness_contrast"), brighter, false}});
+        Layer* adjustment = doc.addAdjustmentLayer(QStringLiteral("brightness_contrast"),
+                                                   brighter, QStringLiteral("Brighter"));
+        adjustment->opacity = 200;
+        adjustment->mode = BlendMode::Multiply;
+        Layer* mask = doc.addMask(adjustment);
+        ops::fillRegion(mask->image, Rect(0, 0, 8, 12), Rgba(0, 0, 0, 255));
+        doc.invalidate();
+        const Image expected = doc.composite();
+        QString error;
+
+        const QString path = dir.filePath(QStringLiteral("fx.tessel"));
+        CHECK(io::saveDocument(doc, path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (loaded) {
+            CHECK(loaded->layerCount() == 2);
+            const Layer* loadedBottom = loaded->layerAt(0);
+            CHECK(loadedBottom->effects().size() == 2);
+            CHECK(loadedBottom->effects()[0].effectId
+                  == QStringLiteral("invert_colors"));
+            CHECK(loadedBottom->effects()[0].enabled);
+            CHECK(loadedBottom->effects()[1].effectId
+                  == QStringLiteral("brightness_contrast"));
+            CHECK(!loadedBottom->effects()[1].enabled);
+            CHECK(loadedBottom->effects()[1].values.intValue(
+                      QStringLiteral("brightness")) == 20);
+            // The pixels are stored untouched, the stack is what changes them.
+            CHECK(loadedBottom->image.at(1, 1) == Rgba(10, 20, 30, 255));
+            const Layer* loadedAdjustment = loaded->layerAt(1);
+            CHECK(loadedAdjustment->isAdjustment());
+            CHECK(loadedAdjustment->name == QStringLiteral("Brighter"));
+            CHECK(loadedAdjustment->opacity == 200);
+            CHECK(loadedAdjustment->mode == BlendMode::Multiply);
+            CHECK(loadedAdjustment->hasMask());
+            CHECK(loadedAdjustment->effects().size() == 1);
+            CHECK(samePixels(loaded->composite(), expected));
+        }
+
+        // OpenRaster and the flat formats have neither, so both are baked into
+        // the pixels that are written.
+        const QString oraPath = dir.filePath(QStringLiteral("fx.ora"));
+        CHECK(io::saveDocument(doc, oraPath, &error));
+        auto ora = io::openDocument(oraPath, &error);
+        CHECK(ora != nullptr);
+        if (ora) {
+            for (int i = 0; i < ora->layerCount(); ++i) {
+                CHECK(!ora->layerAt(i)->isAdjustment());
+                CHECK(ora->layerAt(i)->effects().empty());
+            }
+            CHECK(samePixels(ora->composite(), expected));
+        }
+        const QString pngPath = dir.filePath(QStringLiteral("fx.png"));
+        CHECK(io::saveDocument(doc, pngPath, &error));
+        auto png = io::openDocument(pngPath, &error);
+        CHECK(png != nullptr);
+        if (png)
+            CHECK(samePixels(png->composite(), expected));
+    });
+
+    addTest("a manifest written before effects existed still opens", [] {
+        registerBuiltinEffects();
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("old.tessel"));
+        {
+            Document doc(8, 8, Rgba(10, 20, 30, 255));
+            QString error;
+            CHECK(io::saveDocument(doc, path, &error));
+        }
+        // Strip every key this change added, which is what a file written by
+        // the previous release looks like.
+        ZipReader reader(path);
+        CHECK(reader.isValid());
+        QJsonObject root =
+            QJsonDocument::fromJson(reader.read(QStringLiteral("document.json"))).object();
+        QJsonArray layers = root.value(QStringLiteral("layers")).toArray();
+        QJsonObject first = layers.at(0).toObject();
+        CHECK(!first.contains(QStringLiteral("effects")));
+        CHECK(!first.contains(QStringLiteral("adjustment")));
+        QString error;
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (loaded) {
+            CHECK(loaded->layerCount() == 1);
+            CHECK(loaded->layerAt(0)->effects().empty());
+            CHECK(!loaded->layerAt(0)->isAdjustment());
+            CHECK(loaded->composite().at(1, 1) == Rgba(10, 20, 30, 255));
+        }
+    });
+
+    addTest("a stack of three effects on a large document", [] {
+        registerBuiltinEffects();
+        Document doc(2000, 1500, Rgba(10, 20, 30, 255));
+        doc.layerAt(0)->image = gradient(2000, 1500);
+        Layer* layer = doc.layerAt(0);
+        ParamValues blur;
+        blur.set(QStringLiteral("radius"), 4.0);
+        ParamValues bright;
+        bright.set(QStringLiteral("brightness"), 15);
+        bright.set(QStringLiteral("contrast"), 10);
+        ParamValues hue;
+        hue.set(QStringLiteral("hue"), 20);
+        hue.set(QStringLiteral("saturation"), 120);
+        hue.set(QStringLiteral("lightness"), 0);
+        doc.setLayerEffects(layer,
+                            {{QStringLiteral("gaussian_blur"), blur, true},
+                             {QStringLiteral("brightness_contrast"), bright, true},
+                             {QStringLiteral("hue_saturation"), hue, true}});
+        doc.invalidate();
+        QElapsedTimer clock;
+        clock.start();
+        doc.composite();
+        const qint64 cold = clock.elapsed();
+        clock.restart();
+        doc.invalidate();
+        doc.composite();
+        const qint64 again = clock.elapsed();
+        // Dragging a slider on the last entry: the two below it are answered
+        // from the cache.
+        clock.restart();
+        layer->effects()[2].values.set(QStringLiteral("hue"), 21);
+        doc.effectsChanged(layer);
+        doc.composite();
+        const qint64 lastEntry = clock.elapsed();
+        clock.restart();
+        layer->effects()[0].values.set(QStringLiteral("radius"), 4.5);
+        doc.effectsChanged(layer);
+        doc.composite();
+        const qint64 firstEntry = clock.elapsed();
+        // An adjustment layer over the same document: dragging its slider
+        // reruns its own effect over the backdrop, and nothing else.
+        ParamValues shift;
+        shift.set(QStringLiteral("brightness"), 10);
+        shift.set(QStringLiteral("contrast"), 0);
+        Layer* adjustment =
+            doc.addAdjustmentLayer(QStringLiteral("brightness_contrast"), shift);
+        doc.composite();
+        clock.restart();
+        adjustment->effects().front().values.set(QStringLiteral("brightness"), 11);
+        doc.effectsChanged(adjustment);
+        doc.composite();
+        const qint64 adjusted = clock.elapsed();
+        std::printf("    2000x1500, three effects: %lld ms cold, %lld ms rebuilt, "
+                    "%lld ms for the last entry, %lld ms for the first, "
+                    "%lld ms for an adjustment layer\n",
+                    static_cast<long long>(cold), static_cast<long long>(again),
+                    static_cast<long long>(lastEntry),
+                    static_cast<long long>(firstEntry),
+                    static_cast<long long>(adjusted));
+        // Rerunning one cheap entry has to cost a fraction of the whole stack,
+        // or no slider could be dragged.
+        CHECK(lastEntry < cold);
+        CHECK(lastEntry <= firstEntry);
+        CHECK(adjusted < cold);
     });
 
     // ------------------------------------------------------------ plugins

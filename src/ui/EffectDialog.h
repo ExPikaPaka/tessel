@@ -21,12 +21,44 @@ class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
+class QMenu;
 class QProgressBar;
 class QPushButton;
 class QSlider;
 class QSpinBox;
 
 namespace tessel {
+
+// The controls for a list of parameters, generated from the declaration alone:
+// one row per spec, in the order the effect declares them. The effect dialog
+// and the dialog that edits an effect stored on a layer share it, so a
+// parameter type is only ever laid out in one place.
+class ParamForm : public QWidget {
+    Q_OBJECT
+
+public:
+    ParamForm(std::vector<ParamSpec> specs, ParamValues values,
+              QWidget* parent = nullptr);
+
+    const ParamValues& values() const { return values_; }
+    void setValues(const ParamValues& values);
+
+signals:
+    void valuesChanged();
+
+private:
+    void addRow(QFormLayout* form, const ParamSpec& spec);
+
+    std::vector<ParamSpec> specs_;
+    ParamValues values_;
+    QHash<QString, QWidget*> editors_;
+};
+
+// Fills `menu` with every adjustment and effect, grouped the way the
+// Adjustments and Effects menus group them, and hands whichever one the user
+// picks to `chosen`. Used by the New Adjustment Layer submenu and by the Add
+// button of a layer's effect stack.
+void fillEffectMenu(QMenu* menu, const std::function<void(Effect*)>& chosen);
 
 // One effect computation handed to a worker thread. The job owns everything
 // the worker writes, so the result can be dropped without touching the
@@ -196,7 +228,6 @@ protected:
 
 private:
     void buildControls();
-    void addParamRow(QFormLayout* form, const ParamSpec& spec);
     void schedulePreview();
 
     Effect* effect_;
@@ -205,11 +236,56 @@ private:
     ParamValues defaults_;
     EffectSession session_;
     std::function<void()> repaint_;
-    QHash<QString, QWidget*> editors_;
+    ParamForm* form_ = nullptr;
     QProgressBar* progress_ = nullptr;
     // Holds the bar back until a pass is slow enough to be worth reporting,
     // so a quick draft does not make the dialog flicker.
     QTimer progressDelay_;
+    bool finishing_ = false;
+};
+
+// Edits the parameters of an effect a layer stores rather than has applied to
+// its pixels: an adjustment layer, or one entry of a layer's effect stack.
+//
+// There is no result to compute and nothing to write into a layer here. The
+// values go straight into the entry and the document composites itself with
+// them, which is both the preview and the final answer, so the dialog can be
+// reopened on the same entry for as long as the entry exists. Cancel puts the
+// values back; OK records the change as one undo step.
+class StoredEffectDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    StoredEffectDialog(Effect* effect, Document* doc, History* history, Layer* layer,
+                       int entryIndex, QWidget* parent = nullptr);
+
+    void setRepaintCallback(std::function<void()> callback)
+    {
+        repaint_ = std::move(callback);
+    }
+    const ParamValues& values() const;
+    // The name the undo step gets, which is what the Layers panel calls the
+    // entry as well.
+    QString effectName() const { return effectName_; }
+
+protected:
+    void done(int result) override;
+
+private:
+    // Null once the layer or the entry has gone, which can happen while the
+    // dialog is open because it is not modal.
+    LayerEffect* entry() const;
+    void apply();
+
+    Effect* effect_;
+    Document* doc_;
+    History* history_;
+    int layerUid_;
+    int entryIndex_;
+    QString effectName_;
+    ParamForm* form_ = nullptr;
+    ParamValues original_;
+    std::function<void()> repaint_;
     bool finishing_ = false;
 };
 

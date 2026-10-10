@@ -12,11 +12,30 @@
 #include <QVBoxLayout>
 
 #include "core/ImageOps.h"
+#include "effects/Effect.h"
 #include "tools/Tool.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 
 namespace tessel {
+
+namespace {
+
+// What a layer's stored effects are called, for the row's detail line and its
+// tooltip. An effect this build does not have is named by its id, which is all
+// that is known about it.
+QString storedEffectNames(const Layer& layer)
+{
+    QStringList names;
+    for (const LayerEffect& entry : layer.effects()) {
+        Effect* effect = EffectRegistry::instance().byId(entry.effectId);
+        const QString name = effect ? effect->name() : entry.effectId;
+        names.append(entry.enabled ? name : QStringLiteral("%1 (off)").arg(name));
+    }
+    return names.join(QStringLiteral(", "));
+}
+
+} // namespace
 
 // ----------------------------------------------------------------- tools palette
 
@@ -286,7 +305,15 @@ LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
                     emit activeLayerChanged(index);
             });
     connect(list_, &QTreeWidget::itemDoubleClicked, this,
-            [this](QTreeWidgetItem*, int) { emit propertiesRequested(); });
+            [this](QTreeWidgetItem* item, int) {
+                const Layer* layer = doc_ && item
+                    ? doc_->layerByUid(item->data(0, LayerRowDelegate::LayerUid).toInt())
+                    : nullptr;
+                if (layer && layer->isAdjustment())
+                    emit editAdjustmentRequested();
+                else
+                    emit propertiesRequested();
+            });
     // Expanding and collapsing is remembered on the layer itself, so it
     // survives a rebuild of the panel.
     auto rememberExpanded = [this](QTreeWidgetItem* item, bool expanded) {
@@ -408,20 +435,37 @@ void LayersPanel::appendRows(QTreeWidgetItem* parentItem, const Layer* parent)
         item->setData(0, LayerRowDelegate::Visible, layer->visible);
         item->setData(0, LayerRowDelegate::IsGroup, layer->isGroup());
         // A group shows what it composites to, which is the only picture of
-        // itself it has.
-        const Image source = layer->isGroup() ? doc_->renderLayer(*layer) : layer->image;
-        item->setData(0, LayerRowDelegate::Thumbnail,
-                      QVariant::fromValue(ops::resize(source, 36, 36, true).toQImage()));
+        // itself it has. An adjustment layer has no picture at all, so it
+        // shows the icon the Adjustments menu uses.
+        QImage thumbnail;
+        if (layer->isAdjustment()) {
+            thumbnail = icons::get(QStringLiteral("adjust"), 36).pixmap(36, 36).toImage();
+        } else {
+            const Image source =
+                layer->isGroup() ? doc_->renderLayer(*layer) : layer->image;
+            thumbnail = ops::resize(source, 36, 36, true).toQImage();
+        }
+        item->setData(0, LayerRowDelegate::Thumbnail, QVariant::fromValue(thumbnail));
         const int percent = int(std::lround(layer->opacity / 2.55));
         QString detail = QStringLiteral("%1%  %2").arg(percent).arg(
             blendModeName(layer->mode));
         if (layer->isGroup())
             detail = QStringLiteral("group  %1").arg(detail);
+        else if (layer->isAdjustment())
+            detail = QStringLiteral("adjust  %1").arg(detail);
+        const QString effectNames = storedEffectNames(*layer);
+        if (!layer->isAdjustment() && !effectNames.isEmpty())
+            detail += QStringLiteral("  fx");
         item->setData(0, LayerRowDelegate::Detail, detail);
         QString tip = QStringLiteral("%1\nOpacity %2%\nBlend mode: %3")
                           .arg(layer->name)
                           .arg(percent)
                           .arg(blendModeName(layer->mode));
+        if (!effectNames.isEmpty()) {
+            tip += layer->isAdjustment()
+                ? QStringLiteral("\nAdjustment: %1").arg(effectNames)
+                : QStringLiteral("\nEffects: %1").arg(effectNames);
+        }
         if (layer->hasMask()) {
             item->setData(0, LayerRowDelegate::MaskThumbnail,
                           QVariant::fromValue(

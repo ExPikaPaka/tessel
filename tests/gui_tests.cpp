@@ -30,6 +30,7 @@
 #include <QTreeWidget>
 #include <QTest>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <QThread>
 #include <QTimer>
 
@@ -1170,6 +1171,275 @@ int main(int argc, char** argv)
         CHECK(image.at(15, 15).r == 55);
         CHECK(image.at(2, 2).r == 200);
         CHECK(image.at(39, 39).r == 200);
+    });
+
+    // -------------------------------------- adjustment layers and effect stacks
+    addTest("the new adjustment layer submenu adds a layer that acts on the rest", [] {
+        MainWindow window;
+        window.newDocument(40, 30, Rgba(10, 20, 30, 255));
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Document* doc = view->document();
+
+        QMenu* menu = window.findChild<QMenu*>(QStringLiteral("newadjustmentmenu"));
+        CHECK(menu != nullptr);
+        if (!menu)
+            return;
+        QAction* invert = nullptr;
+        for (QAction* candidate : menu->actions()) {
+            if (candidate->text() == QStringLiteral("Invert Colors"))
+                invert = candidate;
+        }
+        // The submenu also carries the effects, grouped by category.
+        bool hasBlurs = false;
+        for (QAction* candidate : menu->actions()) {
+            if (candidate->menu() && candidate->menu()->title() == QStringLiteral("Blurs"))
+                hasBlurs = true;
+        }
+        CHECK(invert != nullptr);
+        CHECK(hasBlurs);
+        if (!invert)
+            return;
+
+        invert->trigger();
+        CHECK(doc->layerCount() == 2);
+        const Layer* adjustment = doc->layerAt(1);
+        CHECK(adjustment->isAdjustment());
+        CHECK(adjustment->name == QStringLiteral("Invert Colors"));
+        CHECK(doc->composite().at(2, 2) == Rgba(245, 235, 225, 255));
+        // The pixels below are untouched: the layer is the only change.
+        CHECK(doc->layerAt(0)->image.at(2, 2) == Rgba(10, 20, 30, 255));
+        // And the Layers panel shows it as a row of its own.
+        LayerTree* tree = window.findChild<LayerTree*>();
+        CHECK(tree != nullptr && tree->topLevelItemCount() == 2);
+
+        QAction* undo = window.findChild<QAction*>(QStringLiteral("undo"));
+        CHECK(undo != nullptr);
+        if (undo) {
+            undo->trigger();
+            CHECK(doc->layerCount() == 1);
+            CHECK(doc->composite().at(2, 2) == Rgba(10, 20, 30, 255));
+        }
+    });
+
+    addTest("double clicking an adjustment layer asks for its parameters", [] {
+        // An ordinary row opens the layer properties; an adjustment layer is
+        // its parameters, so that is what a double click asks for instead.
+        // The tree's signal is emitted directly because the offscreen platform
+        // plugin does not turn a synthesised double click into one.
+        MainWindow window;
+        window.resize(1200, 800);
+        window.newDocument(40, 30, Rgba(10, 20, 30, 255));
+        window.show();
+        QApplication::processEvents();
+        Document* doc = window.findChildren<CanvasView*>().last()->document();
+        doc->addAdjustmentLayer(QStringLiteral("invert_colors"), ParamValues(),
+                                QStringLiteral("Invert"));
+        LayersPanel* panel = window.findChild<LayersPanel*>();
+        LayerTree* tree = window.findChild<LayerTree*>();
+        CHECK(panel != nullptr && tree != nullptr);
+        if (!panel || !tree)
+            return;
+        panel->refresh();
+        QApplication::processEvents();
+        CHECK(tree->topLevelItemCount() == 2);
+        if (tree->topLevelItemCount() != 2)
+            return;
+
+        int adjustmentAsked = 0;
+        int propertiesAsked = 0;
+        QObject::connect(panel, &LayersPanel::editAdjustmentRequested, panel,
+                         [&adjustmentAsked] { ++adjustmentAsked; });
+        QObject::connect(panel, &LayersPanel::propertiesRequested, panel,
+                         [&propertiesAsked] { ++propertiesAsked; });
+        // The adjustment layer is on top, which the panel draws first.
+        emit tree->itemDoubleClicked(tree->topLevelItem(0), 0);
+        CHECK(adjustmentAsked == 1);
+        CHECK(propertiesAsked == 0);
+        emit tree->itemDoubleClicked(tree->topLevelItem(1), 0);
+        CHECK(adjustmentAsked == 1);
+        CHECK(propertiesAsked == 1);
+    });
+
+    addTest("an adjustment layer's parameters can be edited again", [] {
+        auto doc = std::make_unique<Document>(40, 30, Rgba(100, 100, 100, 255));
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(
+            QStringLiteral("brightness_contrast"));
+        CHECK(effect != nullptr);
+        if (!effect)
+            return;
+        Layer* layer = doc->addAdjustmentLayer(effect->id(),
+                                               ParamValues::defaults(effect->params()),
+                                               effect->name());
+        CHECK(layer != nullptr && layer->isAdjustment());
+        CHECK(doc->composite().at(2, 2) == Rgba(100, 100, 100, 255));
+
+        auto* dialog = new StoredEffectDialog(effect, doc.get(), &history, layer, 0);
+        // The parameters preview straight through the composite, so moving a
+        // control is all it takes.
+        QSpinBox* brightness = dialog->findChildren<QSpinBox*>().value(0);
+        CHECK(brightness != nullptr);
+        if (brightness) {
+            brightness->setValue(20);
+            CHECK(doc->composite().at(2, 2).r == 151);
+            CHECK(layer->effects().front().values.intValue(
+                      QStringLiteral("brightness")) == 20);
+        }
+        dialog->accept();
+        CHECK(history.canUndo());
+        CHECK(history.undoName() == QStringLiteral("Brightness / Contrast"));
+        CHECK(history.undo());
+        CHECK(layer->effects().front().values.intValue(QStringLiteral("brightness"))
+              == 0);
+        CHECK(doc->composite().at(2, 2) == Rgba(100, 100, 100, 255));
+        CHECK(history.redo());
+        CHECK(doc->composite().at(2, 2).r == 151);
+        delete dialog;
+
+        // Cancel puts the values back instead.
+        auto* second = new StoredEffectDialog(effect, doc.get(), &history, layer, 0);
+        QSpinBox* again = second->findChildren<QSpinBox*>().value(0);
+        if (again)
+            again->setValue(60);
+        second->reject();
+        CHECK(layer->effects().front().values.intValue(QStringLiteral("brightness"))
+              == 20);
+        CHECK(doc->composite().at(2, 2).r == 151);
+        delete second;
+    });
+
+    addTest("painting with an adjustment layer active changes nothing", [] {
+        // An adjustment layer owns no pixels, so the painting tools have
+        // nothing to write into and must come away empty rather than reaching
+        // past the end of an image that is not there.
+        auto doc = std::make_unique<Document>(60, 40, Rgba(10, 20, 30, 255));
+        doc->addAdjustmentLayer(QStringLiteral("invert_colors"), ParamValues(),
+                                QStringLiteral("Invert"));
+        CanvasView view(std::move(doc));
+        Document* document = view.document();
+        const Image expected = document->composite();
+        for (const char* id : {"brush", "pencil", "eraser", "bucket", "gradient"}) {
+            Tool* tool = ToolRegistry::instance().byId(QString::fromLatin1(id));
+            if (!tool)
+                continue;
+            view.setTool(tool);
+            view.setPrimaryColor(Rgba(255, 0, 0, 255));
+            ToolContext context = view.makeContext();
+            drag(tool, context, QPointF(5, 5), QPointF(50, 35));
+            tool->commit(context);
+            document->invalidate();
+            check(samePixels(document->composite(), expected), id, __LINE__);
+        }
+    });
+
+    addTest("the layer properties dialog edits the effect stack", [] {
+        auto doc = std::make_unique<Document>(40, 30, Rgba(10, 20, 30, 255));
+        History history(doc.get());
+        Layer* layer = doc->activeNode();
+        auto* dialog = new LayerPropertiesDialog(doc.get(), &history);
+
+        QToolButton* add = dialog->findChild<QToolButton*>(QStringLiteral("addEffect"));
+        QListWidget* list = dialog->findChild<QListWidget*>();
+        CHECK(add != nullptr);
+        CHECK(list != nullptr);
+        if (!add || !list) {
+            delete dialog;
+            return;
+        }
+        QAction* invert = nullptr;
+        for (QAction* candidate : add->menu()->actions()) {
+            if (candidate->text() == QStringLiteral("Invert Colors"))
+                invert = candidate;
+        }
+        CHECK(invert != nullptr);
+        if (!invert) {
+            delete dialog;
+            return;
+        }
+        invert->trigger();
+        CHECK(layer->effects().size() == 1);
+        CHECK(list->count() == 1);
+        CHECK(list->item(0)->text() == QStringLiteral("Invert Colors"));
+        // The composite shows the effect while the stored pixels do not.
+        CHECK(doc->composite().at(2, 2) == Rgba(245, 235, 225, 255));
+        CHECK(layer->image.at(2, 2) == Rgba(10, 20, 30, 255));
+
+        // Unchecking a row disables that entry without forgetting it.
+        list->item(0)->setCheckState(Qt::Unchecked);
+        CHECK(layer->effects().size() == 1);
+        CHECK(!layer->effects().front().enabled);
+        CHECK(doc->composite().at(2, 2) == Rgba(10, 20, 30, 255));
+        list->item(0)->setCheckState(Qt::Checked);
+        CHECK(doc->composite().at(2, 2) == Rgba(245, 235, 225, 255));
+
+        // Flattening writes the result into the pixels and empties the list.
+        QToolButton* flatten =
+            dialog->findChild<QToolButton*>(QStringLiteral("flattenEffects"));
+        CHECK(flatten != nullptr);
+        if (flatten) {
+            flatten->click();
+            CHECK(layer->effects().empty());
+            CHECK(list->count() == 0);
+            CHECK(layer->image.at(2, 2) == Rgba(245, 235, 225, 255));
+            CHECK(doc->composite().at(2, 2) == Rgba(245, 235, 225, 255));
+        }
+        // Each list action is a step of its own, so the flatten and the entry
+        // can both be taken back.
+        // The undo of a flatten restores the document, so the layer is looked
+        // up again rather than held on to.
+        CHECK(history.undo());
+        CHECK(doc->layerAt(0)->image.at(2, 2) == Rgba(10, 20, 30, 255));
+        CHECK(doc->layerAt(0)->effects().size() == 1);
+        CHECK(doc->composite().at(2, 2) == Rgba(245, 235, 225, 255));
+        delete dialog;
+    });
+
+    addTest("the properties of an adjustment layer show what it holds", [] {
+        auto doc = std::make_unique<Document>(40, 30, Rgba(10, 20, 30, 255));
+        History history(doc.get());
+        doc->addAdjustmentLayer(QStringLiteral("brightness_contrast"), ParamValues(),
+                                QStringLiteral("Brighter"));
+        auto* dialog = new LayerPropertiesDialog(doc.get(), &history);
+        QListWidget* list = dialog->findChild<QListWidget*>();
+        CHECK(list != nullptr);
+        if (list) {
+            CHECK(list->count() == 1);
+            CHECK(list->item(0)->text() == QStringLiteral("Brightness / Contrast"));
+        }
+        // Its one entry cannot be added to, reordered or removed, so those
+        // buttons are not there at all.
+        CHECK(dialog->findChild<QToolButton*>(QStringLiteral("addEffect")) == nullptr);
+        CHECK(dialog->findChild<QToolButton*>(QStringLiteral("removeEffect")) == nullptr);
+        QToolButton* edit = dialog->findChild<QToolButton*>(QStringLiteral("editEffect"));
+        CHECK(edit != nullptr && edit->isEnabled());
+        delete dialog;
+    });
+
+    addTest("a stack entry keeps its own parameters", [] {
+        auto doc = std::make_unique<Document>(40, 30, Rgba(100, 100, 100, 255));
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(
+            QStringLiteral("brightness_contrast"));
+        Layer* layer = doc->activeNode();
+        ParamValues first = ParamValues::defaults(effect->params());
+        first.set(QStringLiteral("brightness"), 10);
+        doc->setLayerEffects(layer, {{QStringLiteral("invert_colors"), ParamValues(), true},
+                                     {effect->id(), first, true}});
+        const int before = doc->composite().at(2, 2).r;
+
+        // The dialog is opened on the second entry, so only that one moves.
+        auto* dialog = new StoredEffectDialog(effect, doc.get(), &history, layer, 1);
+        QSpinBox* brightness = dialog->findChildren<QSpinBox*>().value(0);
+        CHECK(brightness != nullptr);
+        if (brightness) {
+            CHECK(brightness->value() == 10);
+            brightness->setValue(30);
+        }
+        dialog->accept();
+        CHECK(layer->effects()[0].effectId == QStringLiteral("invert_colors"));
+        CHECK(layer->effects()[1].values.intValue(QStringLiteral("brightness")) == 30);
+        CHECK(doc->composite().at(2, 2).r > before);
+        delete dialog;
     });
 
     // ------------------------------------------------------------ regressions

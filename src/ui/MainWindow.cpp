@@ -609,6 +609,8 @@ void MainWindow::createActions()
     make(QStringLiteral("layerprops"), QStringLiteral("Layer &Properties..."),
          QStringLiteral("layer-props"), QKeySequence(QStringLiteral("F4")),
          [this] { showLayerProperties(); });
+    make(QStringLiteral("editadjustment"), QStringLiteral("Edit Ad&justment..."),
+         QStringLiteral("adjust"), QKeySequence(), [this] { editAdjustmentLayer(); });
 
     // ---------------------------------------------------------------- window
     make(QStringLiteral("nextimage"), QStringLiteral("&Next Image"), QString(),
@@ -715,6 +717,12 @@ void MainWindow::createMenus()
     QMenu* layersMenu = menuBar()->addMenu(QStringLiteral("&Layers"));
     add(layersMenu, QStringLiteral("addlayer"));
     add(layersMenu, QStringLiteral("addgroup"));
+    // Every adjustment and effect can be had as a layer of its own, listed the
+    // way the Adjustments and Effects menus list them.
+    QMenu* newAdjustment = layersMenu->addMenu(QStringLiteral("New Ad&justment Layer"));
+    newAdjustment->setObjectName(QStringLiteral("newadjustmentmenu"));
+    newAdjustment->setIcon(icons::get(QStringLiteral("adjust"), 20));
+    fillEffectMenu(newAdjustment, [this](Effect* effect) { addAdjustmentLayer(effect); });
     add(layersMenu, QStringLiteral("deletelayer"));
     add(layersMenu, QStringLiteral("duplicatelayer"));
     add(layersMenu, QStringLiteral("mergedown"));
@@ -743,6 +751,7 @@ void MainWindow::createMenus()
     add(layersMenu, QStringLiteral("gobottom"));
     layersMenu->addSeparator();
     add(layersMenu, QStringLiteral("layerprops"));
+    add(layersMenu, QStringLiteral("editadjustment"));
 
     // Adjustments and effects come straight from the registry.
     QMenu* adjustments = menuBar()->addMenu(QStringLiteral("&Adjustments"));
@@ -1007,6 +1016,8 @@ void MainWindow::createDocks()
     connect(layers_, &LayersPanel::mergeDownRequested, this, &MainWindow::mergeLayerDown);
     connect(layers_, &LayersPanel::propertiesRequested, this,
             &MainWindow::showLayerProperties);
+    connect(layers_, &LayersPanel::editAdjustmentRequested, this,
+            &MainWindow::editAdjustmentLayer);
     connect(layers_, &LayersPanel::moveUpRequested, this, [this] { moveLayer(1); });
     connect(layers_, &LayersPanel::moveDownRequested, this, [this] { moveLayer(-1); });
     connect(layers_, &LayersPanel::activeLayerChanged, this, [this](int index) {
@@ -1537,6 +1548,7 @@ void MainWindow::updateActionStates()
                            ? QStringLiteral("&Paint in Layer")
                            : QStringLiteral("&Paint in Mask"));
     }
+    enable(QStringLiteral("editadjustment"), active && active->isAdjustment());
     enable(QStringLiteral("deletelayer"), manyLayers);
     enable(QStringLiteral("mergedown"), manyLayers && active && active->indexInParent() > 0);
     enable(QStringLiteral("flatten"), manyLayers);
@@ -1668,6 +1680,46 @@ void MainWindow::applyEffect(Effect* effect)
         else
             updateEverything();
     });
+    dialog->show();
+}
+
+void MainWindow::addAdjustmentLayer(Effect* effect)
+{
+    CanvasView* view = currentView();
+    Document* doc = view ? view->document() : nullptr;
+    if (!doc || !effect)
+        return;
+    const QString id = effect->id();
+    const QString name = effect->name();
+    const ParamValues values = ParamValues::defaults(effect->params());
+    structuralEdit(QStringLiteral("New Adjustment Layer"), QStringLiteral("adjust"),
+                   [doc, id, name, values] {
+                       doc->addAdjustmentLayer(id, values, name);
+                   });
+    // Straight on into the parameters, which is what the submenu was picked
+    // for; the layer itself is already there if the dialog is cancelled.
+    if (!effect->params().empty())
+        editAdjustmentLayer();
+}
+
+void MainWindow::editAdjustmentLayer()
+{
+    CanvasView* view = currentView();
+    Document* doc = view ? view->document() : nullptr;
+    Layer* layer = doc ? doc->activeNode() : nullptr;
+    if (!layer || !layer->isAdjustment() || layer->effects().empty())
+        return;
+    Effect* effect =
+        EffectRegistry::instance().byId(layer->effects().front().effectId);
+    if (!effect || effect->params().empty()) {
+        hintLabel_->setText(QStringLiteral("%1 has no settings")
+                                .arg(effect ? effect->name() : layer->name));
+        return;
+    }
+    auto* dialog = new StoredEffectDialog(effect, doc, view->history(), layer, 0, this);
+    dialog->setRepaintCallback([view] { view->refresh(); });
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &QDialog::finished, this, [this] { updateEverything(); });
     dialog->show();
 }
 

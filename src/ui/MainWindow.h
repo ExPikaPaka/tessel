@@ -103,6 +103,10 @@ private:
     void chooseTool(const QString& toolId, bool fromShortcut = false);
     void cycleToolShortcut(const QString& key, int direction = 1);
     void applyEffect(Effect* effect);
+    // Adds an adjustment layer holding `effect` and opens its parameters.
+    void addAdjustmentLayer(Effect* effect);
+    // Reopens the parameters of the adjustment layer that is active.
+    void editAdjustmentLayer();
     void repeatLastEffect();
     void doCopy(bool merged);
     void doCut();

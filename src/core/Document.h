@@ -11,10 +11,25 @@
 
 #include "core/Blend.h"
 #include "core/Image.h"
+#include "core/Params.h"
 #include "core/Selection.h"
 #include "core/Units.h"
 
 namespace tessel {
+
+// One stored effect: the registry id of an effect and the parameters it was
+// last given. It is what an adjustment layer holds instead of pixels, and what
+// one entry of an ordinary layer's non destructive stack is.
+//
+// The id is kept rather than a pointer into the registry so that a document
+// which names an effect this build does not have (a plugin that is not
+// installed) still loads, saves and composites: an unknown entry passes its
+// pixels through untouched instead of dropping them.
+struct LayerEffect {
+    QString effectId;
+    ParamValues values;
+    bool enabled = true;
+};
 
 class Layer {
 public:
@@ -22,6 +37,9 @@ public:
     Layer(int width, int height, QString name, Rgba fill = Rgba(0, 0, 0, 0));
     // An empty group, ready to be handed to Document::addChild.
     static std::unique_ptr<Layer> makeGroup(QString name);
+    // An adjustment layer, ready to be handed to Document::addChild.
+    static std::unique_ptr<Layer> makeAdjustment(QString name, QString effectId,
+                                                 ParamValues values);
 
     Image image;
     QString name;
@@ -70,16 +88,43 @@ public:
     // Grey value of one mask pixel: 0 hides the layer, 255 reveals it.
     static uint8_t maskValue(Rgba pixel);
 
+    // ---------------------------------------------------------- effects
+    // An ordinary layer carries a stack of effects that are applied to its
+    // pixels on the way into the composite, with the stored pixels left alone.
+    // An adjustment layer carries exactly one entry and no pixels of its own:
+    // the group that holds it applies that entry to everything composited
+    // below it, see Document::flattenChildren.
+    //
+    // Editing the entries in place is allowed, but the cached result has to be
+    // dropped afterwards, which is what Document::effectsChanged does.
+    bool isAdjustment() const { return adjustment_; }
+    const std::vector<LayerEffect>& effects() const { return effects_; }
+    std::vector<LayerEffect>& effects() { return effects_; }
+    // True when at least one entry would actually change the pixels.
+    bool hasActiveEffects() const;
+
 private:
     friend class Document;
     int uid_ = 0;
     bool group_ = false;
+    bool adjustment_ = false;
     bool maskEnabled_ = true;
     bool maskSelected_ = false;
+    // Bumped whenever the pixels change, so a cached effect result can tell
+    // that it was computed from an older version of them.
+    uint32_t revision_ = 0;
     Layer* parent_ = nullptr;
     std::unique_ptr<Layer> mask_;
     std::vector<std::unique_ptr<Layer>> children_;
+    std::vector<LayerEffect> effects_;
+    // One cached image per effect entry, holding the result of the entries up
+    // to and including that one, with the key it was computed for. Keeping the
+    // intermediate steps is what lets a dragged slider on the last entry of a
+    // stack rerun that entry alone.
+    mutable std::vector<Image> fxCache_;
+    mutable std::vector<uint64_t> fxKeys_;
     void setUid(int uid) { uid_ = uid; }
+    void dropEffectCache() const;
 };
 
 // A snapshot of the whole document, used by structural undo entries.
@@ -96,6 +141,8 @@ struct DocumentState {
         BlendMode mode = BlendMode::Normal;
         int uid = 0;
         bool group = false;
+        bool adjustment = false;
+        std::vector<LayerEffect> effects;
         bool expanded = true;
         bool hasMask = false;
         bool maskEnabled = true;
@@ -212,6 +259,24 @@ public:
     bool reparentLayer(Layer* layer, Layer* parent, int childIndex);
     bool canReparent(const Layer* layer, const Layer* parent) const;
 
+    // ---------------------------------------------------------- effects
+    // A new adjustment layer holding `effectId`, above the active layer, the
+    // same way addLayer places an ordinary one.
+    Layer* addAdjustmentLayer(const QString& effectId, const ParamValues& values,
+                              const QString& name = QString(), int index = -1);
+    // Replaces a layer's effect stack as one step.
+    void setLayerEffects(Layer* layer, std::vector<LayerEffect> effects);
+    // Drops the result cached for a layer's stack, which has to happen after
+    // its entries are edited through Layer::effects().
+    void effectsChanged(Layer* layer);
+    // Writes the result of a layer's stack into its pixels and empties the
+    // stack. The composite does not change; what was non destructive simply
+    // stops being undoable without the history.
+    bool flattenLayerEffects(Layer* layer);
+    // Runs one stored effect over `source`. Unknown ids pass the pixels
+    // through, see LayerEffect.
+    Image runLayerEffect(const LayerEffect& entry, const Image& source) const;
+
     // ---------------------------------------------------------- masks
     // `reveal` starts the mask white, which shows the layer unchanged.
     Layer* addMask(Layer* layer, bool reveal = true);
@@ -227,6 +292,12 @@ public:
     // What one layer contributes to the composite: the flattened children for
     // a group, the pixels for a layer, with its mask already applied.
     Image renderLayer(const Layer& layer) const;
+    // The children of `parent` flattened into one image, with the adjustment
+    // layers among them already applied to what lies below them. `count` is
+    // how many children from the bottom to take, -1 for all of them. The
+    // formats that have no adjustment layers of their own use it to bake them
+    // into the pixels they write.
+    Image flattenChildren(const Layer& parent, int count = -1) const;
     void invalidate();
     void invalidateLayer(Layer* layer);
 
@@ -272,6 +343,17 @@ private:
     // Rasters that have to be built for the call are parked in `owned`, which
     // is a deque so that the pointers handed out stay valid.
     const Image* rasterOf(const Layer& layer, std::deque<Image>& owned) const;
+    // Applies a layer's effect stack to `base`, which `baseKey` identifies:
+    // the layer's own pixels for a stack, the backdrop for an adjustment
+    // layer. The result is cached per entry on the layer, so only the entries
+    // at and above a change are recomputed. Returns `base` itself when there
+    // is nothing enabled to run.
+    const Image* applyEffects(const Layer& layer, const Image& base,
+                              uint64_t baseKey) const;
+    // The identity of the pixels a layer starts from, before its own stack.
+    uint64_t sourceKey(const Layer& layer) const;
+    // The identity of what a layer contributes to its parent, stack included.
+    uint64_t contributionKey(const Layer& layer) const;
     const std::vector<Layer*>& flat() const;
     // Every raster the document owns: layer pixels and mask pixels, but not
     // the empty images of groups.
@@ -295,6 +377,9 @@ private:
     QString title_ = QStringLiteral("Untitled");
     bool modified_ = false;
 
+    // Bumped by invalidate(), which says that pixels somewhere changed without
+    // saying where, so every cached effect result has to be rebuilt.
+    uint32_t pixelEpoch_ = 1;
     mutable std::vector<Layer*> flat_;
     mutable bool flatValid_ = false;
     mutable Image composite_;

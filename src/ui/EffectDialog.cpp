@@ -14,6 +14,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
@@ -23,6 +24,7 @@
 #include <QVBoxLayout>
 
 #include "core/ImageOps.h"
+#include "ui/CurveWidget.h"
 #include "ui/Icons.h"
 
 namespace tessel {
@@ -60,6 +62,18 @@ constexpr int kRefineMaxMs = 250;
 // A full resolution pass this quick already feels immediate, so there is
 // nothing to gain from resampling the image twice to draft it.
 constexpr double kDraftWorthwhileMs = 150.0;
+
+// The control points a curve parameter holds, or the straight line through
+// them when it holds nothing yet.
+QPolygonF curvePoints(const ParamValues& values, const QString& id)
+{
+    const QPolygonF points = values.raw(id).value<QPolygonF>();
+    if (points.size() >= 2)
+        return points;
+    QPolygonF identity;
+    identity << QPointF(0, 0) << QPointF(255, 255);
+    return identity;
+}
 
 Rect effectRegion(const Document& doc)
 {
@@ -418,6 +432,193 @@ bool EffectSession::waitUntilIdle(int timeoutMs)
     return false;
 }
 
+// ----------------------------------------------------------------- param form
+
+ParamForm::ParamForm(std::vector<ParamSpec> specs, ParamValues values, QWidget* parent)
+    : QWidget(parent), specs_(std::move(specs)), values_(std::move(values))
+{
+    auto* form = new QFormLayout(this);
+    form->setContentsMargins(0, 0, 0, 0);
+    form->setSpacing(8);
+    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    for (const ParamSpec& spec : specs_)
+        addRow(form, spec);
+}
+
+void ParamForm::setValues(const ParamValues& values)
+{
+    values_ = values;
+    for (const ParamSpec& spec : specs_) {
+        QWidget* editor = editors_.value(spec.id);
+        if (!editor)
+            continue;
+        if (auto* spin = qobject_cast<QSpinBox*>(editor))
+            spin->setValue(values_.intValue(spec.id, int(spec.defaultValue)));
+        else if (auto* dspin = qobject_cast<QDoubleSpinBox*>(editor))
+            dspin->setValue(values_.doubleValue(spec.id, spec.defaultValue));
+        else if (auto* box = qobject_cast<QCheckBox*>(editor))
+            box->setChecked(values_.boolValue(spec.id, spec.defaultValue != 0.0));
+        else if (auto* combo = qobject_cast<QComboBox*>(editor))
+            combo->setCurrentIndex(values_.choiceValue(spec.id, int(spec.defaultValue)));
+        else if (auto* curve = qobject_cast<CurveEditor*>(editor))
+            curve->setPoints(curvePoints(values_, spec.id));
+    }
+}
+
+void ParamForm::addRow(QFormLayout* form, const ParamSpec& spec)
+{
+    const QString key = spec.id;
+    switch (spec.type) {
+    case ParamType::Int: {
+        auto* spin = new QSpinBox(this);
+        spin->setRange(int(spec.minimum), int(spec.maximum));
+        spin->setValue(values_.intValue(key, int(spec.defaultValue)));
+        spin->setSuffix(spec.suffix);
+        spin->setKeyboardTracking(false);
+        auto* slider = new QSlider(Qt::Horizontal, this);
+        slider->setRange(int(spec.minimum), int(spec.maximum));
+        slider->setValue(spin->value());
+        connect(slider, &QSlider::valueChanged, spin, &QSpinBox::setValue);
+        connect(spin, &QSpinBox::valueChanged, this, [this, slider, key](int value) {
+            if (slider->value() != value)
+                slider->setValue(value);
+            values_.set(key, value);
+            emit valuesChanged();
+        });
+        editors_.insert(key, spin);
+        form->addRow(spec.label, sliderRow(this, spin, slider));
+        break;
+    }
+    case ParamType::Double:
+    case ParamType::Angle: {
+        auto* spin = new QDoubleSpinBox(this);
+        spin->setRange(spec.minimum, spec.maximum);
+        spin->setDecimals(spec.decimals);
+        spin->setSingleStep(spec.step);
+        spin->setValue(values_.doubleValue(key, spec.defaultValue));
+        spin->setSuffix(spec.suffix);
+        spin->setKeyboardTracking(false);
+        auto* slider = new QSlider(Qt::Horizontal, this);
+        const double scale = 100.0;
+        slider->setRange(int(spec.minimum * scale), int(spec.maximum * scale));
+        slider->setValue(int(spin->value() * scale));
+        connect(slider, &QSlider::valueChanged, this, [spin, scale](int value) {
+            const double next = value / scale;
+            if (std::abs(spin->value() - next) > 1.0e-9)
+                spin->setValue(next);
+        });
+        connect(spin, &QDoubleSpinBox::valueChanged, this,
+                [this, slider, scale, key](double value) {
+                    const int ticks = int(std::lround(value * scale));
+                    if (slider->value() != ticks)
+                        slider->setValue(ticks);
+                    values_.set(key, value);
+                    emit valuesChanged();
+                });
+        editors_.insert(key, spin);
+        form->addRow(spec.label, sliderRow(this, spin, slider));
+        break;
+    }
+    case ParamType::Bool: {
+        auto* box = new QCheckBox(this);
+        box->setChecked(values_.boolValue(key, spec.defaultValue != 0.0));
+        connect(box, &QCheckBox::toggled, this, [this, key](bool value) {
+            values_.set(key, value);
+            emit valuesChanged();
+        });
+        editors_.insert(key, box);
+        form->addRow(spec.label, box);
+        break;
+    }
+    case ParamType::Choice: {
+        auto* combo = new QComboBox(this);
+        combo->addItems(spec.choices);
+        combo->setCurrentIndex(values_.choiceValue(key, int(spec.defaultValue)));
+        connect(combo, &QComboBox::currentIndexChanged, this, [this, key](int index) {
+            values_.set(key, index);
+            emit valuesChanged();
+        });
+        editors_.insert(key, combo);
+        form->addRow(spec.label, combo);
+        break;
+    }
+    case ParamType::Color: {
+        auto* button = new QPushButton(this);
+        button->setMinimumHeight(24);
+        const Rgba initial = values_.colorValue(key, spec.color);
+        auto paintButton = [button](Rgba color) {
+            button->setIcon(icons::colorSwatch(color, 18));
+            button->setText(QStringLiteral("#%1%2%3")
+                                .arg(color.r, 2, 16, QLatin1Char('0'))
+                                .arg(color.g, 2, 16, QLatin1Char('0'))
+                                .arg(color.b, 2, 16, QLatin1Char('0'))
+                                .toUpper());
+        };
+        paintButton(initial);
+        connect(button, &QPushButton::clicked, this, [this, key, button, paintButton] {
+            const Rgba current = values_.colorValue(key);
+            const QColor chosen = QColorDialog::getColor(
+                current.toQColor(), this, QStringLiteral("Select colour"),
+                QColorDialog::ShowAlphaChannel);
+            if (!chosen.isValid())
+                return;
+            values_.set(key, chosen);
+            paintButton(Rgba::fromQColor(chosen));
+            emit valuesChanged();
+        });
+        editors_.insert(key, button);
+        form->addRow(spec.label, button);
+        break;
+    }
+    case ParamType::Curve: {
+        // The Curves adjustment has a dialog of its own for the destructive
+        // path, but a curve stored on a layer is edited through this form, so
+        // the row has to be here as well.
+        auto* curve = new CurveEditor(this);
+        curve->setPoints(curvePoints(values_, key));
+        connect(curve, &CurveEditor::curveChanged, this, [this, key, curve] {
+            values_.set(key, QVariant::fromValue(curve->points()));
+            emit valuesChanged();
+        });
+        editors_.insert(key, curve);
+        form->addRow(spec.label, curve);
+        break;
+    }
+    case ParamType::Offset: {
+        auto* row = new QWidget(this);
+        auto* layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 0, 0, 0);
+        const QPointF initial = values_.pointValue(key, QPointF(spec.defaultValue,
+                                                               spec.defaultValue2));
+        auto* spinX = new QDoubleSpinBox(row);
+        auto* spinY = new QDoubleSpinBox(row);
+        for (QDoubleSpinBox* spin : {spinX, spinY}) {
+            spin->setRange(-1.0, 1.0);
+            spin->setSingleStep(0.02);
+            spin->setDecimals(3);
+            spin->setKeyboardTracking(false);
+        }
+        spinX->setValue(initial.x());
+        spinY->setValue(initial.y());
+        const auto update = [this, key, spinX, spinY] {
+            values_.set(key, QPointF(spinX->value(), spinY->value()));
+            emit valuesChanged();
+        };
+        connect(spinX, &QDoubleSpinBox::valueChanged, this, update);
+        connect(spinY, &QDoubleSpinBox::valueChanged, this, update);
+        layout->addWidget(new QLabel(QStringLiteral("X"), row));
+        layout->addWidget(spinX, 1);
+        layout->addWidget(new QLabel(QStringLiteral("Y"), row));
+        layout->addWidget(spinY, 1);
+        editors_.insert(key, row);
+        form->addRow(spec.label, row);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 // ----------------------------------------------------------------- dialog
 
 EffectDialog::EffectDialog(Effect* effect, Document* doc, History* history, Rgba primary,
@@ -463,15 +664,12 @@ void EffectDialog::buildControls()
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    auto* form = new QFormLayout;
-    form->setSpacing(8);
-    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    for (const ParamSpec& spec : effect_->params()) {
-        if (spec.type == ParamType::Curve)
-            continue; // curves have their own dialog
-        addParamRow(form, spec);
-    }
-    root->addLayout(form);
+    form_ = new ParamForm(effect_->params(), values_, this);
+    connect(form_, &ParamForm::valuesChanged, this, [this] {
+        values_ = form_->values();
+        schedulePreview();
+    });
+    root->addWidget(form_);
 
     if (effect_->params().empty())
         root->addWidget(new QLabel(QStringLiteral("This effect has no settings."), this));
@@ -494,162 +692,11 @@ void EffectDialog::buildControls()
     setMinimumWidth(360);
 }
 
-void EffectDialog::addParamRow(QFormLayout* form, const ParamSpec& spec)
-{
-    const QString key = spec.id;
-    switch (spec.type) {
-    case ParamType::Int: {
-        auto* spin = new QSpinBox(this);
-        spin->setRange(int(spec.minimum), int(spec.maximum));
-        spin->setValue(values_.intValue(key, int(spec.defaultValue)));
-        spin->setSuffix(spec.suffix);
-        spin->setKeyboardTracking(false);
-        auto* slider = new QSlider(Qt::Horizontal, this);
-        slider->setRange(int(spec.minimum), int(spec.maximum));
-        slider->setValue(spin->value());
-        connect(slider, &QSlider::valueChanged, spin, &QSpinBox::setValue);
-        connect(spin, &QSpinBox::valueChanged, this, [this, slider, key](int value) {
-            if (slider->value() != value)
-                slider->setValue(value);
-            values_.set(key, value);
-            schedulePreview();
-        });
-        editors_.insert(key, spin);
-        form->addRow(spec.label, sliderRow(this, spin, slider));
-        break;
-    }
-    case ParamType::Double:
-    case ParamType::Angle: {
-        auto* spin = new QDoubleSpinBox(this);
-        spin->setRange(spec.minimum, spec.maximum);
-        spin->setDecimals(spec.decimals);
-        spin->setSingleStep(spec.step);
-        spin->setValue(values_.doubleValue(key, spec.defaultValue));
-        spin->setSuffix(spec.suffix);
-        spin->setKeyboardTracking(false);
-        auto* slider = new QSlider(Qt::Horizontal, this);
-        const double scale = 100.0;
-        slider->setRange(int(spec.minimum * scale), int(spec.maximum * scale));
-        slider->setValue(int(spin->value() * scale));
-        connect(slider, &QSlider::valueChanged, this, [spin, scale](int value) {
-            const double next = value / scale;
-            if (std::abs(spin->value() - next) > 1.0e-9)
-                spin->setValue(next);
-        });
-        connect(spin, &QDoubleSpinBox::valueChanged, this,
-                [this, slider, scale, key](double value) {
-                    const int ticks = int(std::lround(value * scale));
-                    if (slider->value() != ticks)
-                        slider->setValue(ticks);
-                    values_.set(key, value);
-                    schedulePreview();
-                });
-        editors_.insert(key, spin);
-        form->addRow(spec.label, sliderRow(this, spin, slider));
-        break;
-    }
-    case ParamType::Bool: {
-        auto* box = new QCheckBox(this);
-        box->setChecked(values_.boolValue(key, spec.defaultValue != 0.0));
-        connect(box, &QCheckBox::toggled, this, [this, key](bool value) {
-            values_.set(key, value);
-            schedulePreview();
-        });
-        editors_.insert(key, box);
-        form->addRow(spec.label, box);
-        break;
-    }
-    case ParamType::Choice: {
-        auto* combo = new QComboBox(this);
-        combo->addItems(spec.choices);
-        combo->setCurrentIndex(values_.choiceValue(key, int(spec.defaultValue)));
-        connect(combo, &QComboBox::currentIndexChanged, this, [this, key](int index) {
-            values_.set(key, index);
-            schedulePreview();
-        });
-        editors_.insert(key, combo);
-        form->addRow(spec.label, combo);
-        break;
-    }
-    case ParamType::Color: {
-        auto* button = new QPushButton(this);
-        button->setMinimumHeight(24);
-        const Rgba initial = values_.colorValue(key, spec.color);
-        auto paintButton = [button](Rgba color) {
-            button->setIcon(icons::colorSwatch(color, 18));
-            button->setText(QStringLiteral("#%1%2%3")
-                                .arg(color.r, 2, 16, QLatin1Char('0'))
-                                .arg(color.g, 2, 16, QLatin1Char('0'))
-                                .arg(color.b, 2, 16, QLatin1Char('0'))
-                                .toUpper());
-        };
-        paintButton(initial);
-        connect(button, &QPushButton::clicked, this, [this, key, button, paintButton] {
-            const Rgba current = values_.colorValue(key);
-            const QColor chosen = QColorDialog::getColor(
-                current.toQColor(), this, QStringLiteral("Select colour"),
-                QColorDialog::ShowAlphaChannel);
-            if (!chosen.isValid())
-                return;
-            values_.set(key, chosen);
-            paintButton(Rgba::fromQColor(chosen));
-            schedulePreview();
-        });
-        editors_.insert(key, button);
-        form->addRow(spec.label, button);
-        break;
-    }
-    case ParamType::Offset: {
-        auto* row = new QWidget(this);
-        auto* layout = new QHBoxLayout(row);
-        layout->setContentsMargins(0, 0, 0, 0);
-        const QPointF initial = values_.pointValue(key, QPointF(spec.defaultValue,
-                                                               spec.defaultValue2));
-        auto* spinX = new QDoubleSpinBox(row);
-        auto* spinY = new QDoubleSpinBox(row);
-        for (QDoubleSpinBox* spin : {spinX, spinY}) {
-            spin->setRange(-1.0, 1.0);
-            spin->setSingleStep(0.02);
-            spin->setDecimals(3);
-            spin->setKeyboardTracking(false);
-        }
-        spinX->setValue(initial.x());
-        spinY->setValue(initial.y());
-        const auto update = [this, key, spinX, spinY] {
-            values_.set(key, QPointF(spinX->value(), spinY->value()));
-            schedulePreview();
-        };
-        connect(spinX, &QDoubleSpinBox::valueChanged, this, update);
-        connect(spinY, &QDoubleSpinBox::valueChanged, this, update);
-        layout->addWidget(new QLabel(QStringLiteral("X"), row));
-        layout->addWidget(spinX, 1);
-        layout->addWidget(new QLabel(QStringLiteral("Y"), row));
-        layout->addWidget(spinY, 1);
-        editors_.insert(key, row);
-        form->addRow(spec.label, row);
-        break;
-    }
-    default:
-        break;
-    }
-}
-
 void EffectDialog::setValues(const ParamValues& values)
 {
     values_ = values;
-    for (const ParamSpec& spec : effect_->params()) {
-        QWidget* editor = editors_.value(spec.id);
-        if (!editor)
-            continue;
-        if (auto* spin = qobject_cast<QSpinBox*>(editor))
-            spin->setValue(values_.intValue(spec.id, int(spec.defaultValue)));
-        else if (auto* dspin = qobject_cast<QDoubleSpinBox*>(editor))
-            dspin->setValue(values_.doubleValue(spec.id, spec.defaultValue));
-        else if (auto* box = qobject_cast<QCheckBox*>(editor))
-            box->setChecked(values_.boolValue(spec.id, spec.defaultValue != 0.0));
-        else if (auto* combo = qobject_cast<QComboBox*>(editor))
-            combo->setCurrentIndex(values_.choiceValue(spec.id, int(spec.defaultValue)));
-    }
+    if (form_)
+        form_->setValues(values_);
     schedulePreview();
 }
 
@@ -683,6 +730,153 @@ bool EffectDialog::applyDirect(Effect* effect, Document* doc, History* history,
         return false;
     EffectSession session(effect, doc, history, primary, secondary);
     return session.commit(values, uiParent);
+}
+
+// ----------------------------------------------------------------- chooser
+
+void fillEffectMenu(QMenu* menu, const std::function<void(Effect*)>& chosen)
+{
+    // The same grouping and the same fixed order the Adjustments and Effects
+    // menus use: the adjustments on their own, then one submenu per effect
+    // category, with anything a plugin declared at the end.
+    static const QStringList builtin = {
+        QStringLiteral("Artistic"), QStringLiteral("Blurs"), QStringLiteral("Color"),
+        QStringLiteral("Distort"), QStringLiteral("Noise"), QStringLiteral("Object"),
+        QStringLiteral("Photo"), QStringLiteral("Render"), QStringLiteral("Stylize"),
+    };
+    EffectRegistry& registry = EffectRegistry::instance();
+    const auto addEntries = [&chosen](QMenu* target, const std::vector<Effect*>& list) {
+        for (Effect* effect : list) {
+            QAction* action = target->addAction(effect->name());
+            QObject::connect(action, &QAction::triggered, target,
+                             [chosen, effect] { chosen(effect); });
+        }
+    };
+    addEntries(menu, registry.inCategory(QStringLiteral("Adjustments")));
+    QStringList categories = builtin;
+    for (const QString& category : registry.categories()) {
+        if (category == QStringLiteral("Adjustments") || categories.contains(category))
+            continue;
+        categories.append(category);
+    }
+    bool separated = false;
+    for (const QString& category : categories) {
+        const std::vector<Effect*> list = registry.inCategory(category);
+        if (list.empty())
+            continue;
+        if (!separated) {
+            menu->addSeparator();
+            separated = true;
+        }
+        QMenu* submenu = menu->addMenu(category);
+        submenu->setIcon(icons::get(QStringLiteral("effect"), 20));
+        addEntries(submenu, list);
+    }
+}
+
+// ----------------------------------------------------------------- stored effect
+
+StoredEffectDialog::StoredEffectDialog(Effect* effect, Document* doc, History* history,
+                                       Layer* layer, int entryIndex, QWidget* parent)
+    : QDialog(parent), effect_(effect), doc_(doc), history_(history),
+      layerUid_(layer ? layer->uid() : 0), entryIndex_(entryIndex),
+      effectName_(effect ? effect->name() : QString())
+{
+    setWindowTitle(effectName_);
+    setWindowIcon(icons::get(effect_ && effect_->isAdjustment()
+                                 ? QStringLiteral("adjust")
+                                 : QStringLiteral("effect"),
+                             22));
+    setModal(false);
+    if (const LayerEffect* stored = entry())
+        original_ = stored->values;
+
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
+    form_ = new ParamForm(effect_ ? effect_->params() : std::vector<ParamSpec>(),
+                          original_, this);
+    connect(form_, &ParamForm::valuesChanged, this, [this] { apply(); });
+    root->addWidget(form_);
+    if (!effect_ || effect_->params().empty()) {
+        root->addWidget(new QLabel(QStringLiteral("This effect has no settings."),
+                                   this));
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel
+                                             | QDialogButtonBox::Reset,
+                                         this);
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Reset), &QPushButton::clicked, this,
+            [this] {
+                form_->setValues(ParamValues::defaults(
+                    effect_ ? effect_->params() : std::vector<ParamSpec>()));
+                apply();
+            });
+    root->addWidget(buttons);
+    setMinimumWidth(360);
+}
+
+LayerEffect* StoredEffectDialog::entry() const
+{
+    Layer* layer = doc_->layerByUid(layerUid_);
+    if (!layer || entryIndex_ < 0
+        || entryIndex_ >= int(layer->effects().size()))
+        return nullptr;
+    return &layer->effects()[size_t(entryIndex_)];
+}
+
+const ParamValues& StoredEffectDialog::values() const { return form_->values(); }
+
+void StoredEffectDialog::apply()
+{
+    LayerEffect* stored = entry();
+    if (!stored)
+        return;
+    stored->values = form_->values();
+    doc_->effectsChanged(doc_->layerByUid(layerUid_));
+    if (repaint_)
+        repaint_();
+}
+
+void StoredEffectDialog::done(int result)
+{
+    if (finishing_) {
+        QDialog::done(result);
+        return;
+    }
+    finishing_ = true;
+    LayerEffect* stored = entry();
+    if (stored) {
+        if (result == QDialog::Accepted) {
+            const ParamValues after = form_->values();
+            if (after != original_) {
+                const int uid = layerUid_;
+                const int index = entryIndex_;
+                const ParamValues before = original_;
+                const auto write = [uid, index](Document& doc,
+                                                const ParamValues& values) {
+                    Layer* target = doc.layerByUid(uid);
+                    if (!target || index < 0 || index >= int(target->effects().size()))
+                        return;
+                    target->effects()[size_t(index)].values = values;
+                    doc.effectsChanged(target);
+                };
+                history_->push(std::make_unique<PropertyEdit>(
+                    effectName_,
+                    effect_ && effect_->isAdjustment() ? QStringLiteral("adjust")
+                                                       : QStringLiteral("effect"),
+                    [write, before](Document& doc) { write(doc, before); },
+                    [write, after](Document& doc) { write(doc, after); }));
+            }
+        } else {
+            stored->values = original_;
+            doc_->effectsChanged(doc_->layerByUid(layerUid_));
+        }
+    }
+    if (repaint_)
+        repaint_();
+    QDialog::done(result);
 }
 
 } // namespace tessel

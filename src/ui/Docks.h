@@ -109,6 +109,9 @@ signals:
     void duplicateLayerRequested();
     void mergeDownRequested();
     void propertiesRequested();
+    // Double clicking an adjustment layer opens its parameters rather than the
+    // layer properties, because the parameters are what it is.
+    void editAdjustmentRequested();
     void moveUpRequested();
     void moveDownRequested();
     void activeLayerChanged(int index);
