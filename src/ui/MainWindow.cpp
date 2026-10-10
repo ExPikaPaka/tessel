@@ -392,17 +392,9 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
-    make(QStringLiteral("rotatezoom"), QStringLiteral("&Rotate / Zoom Layer..."),
-         QStringLiteral("rotate-cw"), QKeySequence(QStringLiteral("Ctrl+Shift+Z")), [this] {
-             CanvasView* view = currentView();
-             if (!view)
-                 return;
-             auto* dialog = new RotateZoomDialog(view->document(), view->history(), this);
-             dialog->setRepaintCallback([view] { view->refresh(); });
-             dialog->setAttribute(Qt::WA_DeleteOnClose);
-             connect(dialog, &QDialog::finished, this, [this] { updateEverything(); });
-             dialog->show();
-         });
+    make(QStringLiteral("rotatezoom"), QStringLiteral("&Rotate / Zoom Layer"),
+         QStringLiteral("rotate-cw"), QKeySequence(QStringLiteral("Ctrl+Shift+Z")),
+         [this] { chooseTool(QStringLiteral("transform")); });
     make(QStringLiteral("layerup"), QStringLiteral("Move Layer &Up"), QStringLiteral("up"),
          QKeySequence(), [this] { moveLayer(1); });
     make(QStringLiteral("layerdown"), QStringLiteral("Move Layer &Down"),

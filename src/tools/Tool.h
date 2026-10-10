@@ -143,6 +143,7 @@ void registerPaintTools(ToolRegistry& registry);
 void registerSelectTools(ToolRegistry& registry);
 void registerShapeTools(ToolRegistry& registry);
 void registerMiscTools(ToolRegistry& registry);
+void registerTransformTools(ToolRegistry& registry);
 
 // The row of tool specific controls under the main toolbar.
 class ToolOptionsBar : public QWidget {

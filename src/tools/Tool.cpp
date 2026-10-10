@@ -105,6 +105,7 @@ void registerBuiltinTools()
     registerPaintTools(registry);
     registerShapeTools(registry);
     registerMiscTools(registry);
+    registerTransformTools(registry);
 }
 
 // ----------------------------------------------------------------- options bar

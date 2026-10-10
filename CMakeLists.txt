@@ -93,6 +93,7 @@ qt_add_library(tessel_ui STATIC
   src/tools/PaintTools.cpp
   src/tools/SelectTools.cpp
   src/tools/ShapeTools.cpp
+  src/tools/TransformTool.cpp
   src/tools/MiscTools.cpp
 )
 target_link_libraries(tessel_ui PUBLIC tessel_core Qt6::Widgets Qt6::PrintSupport)

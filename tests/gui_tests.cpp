@@ -141,10 +141,15 @@ int main(int argc, char** argv)
         for (const QString& id : order)
             check(ToolRegistry::instance().byId(id) != nullptr,
                   id.toLocal8Bit().constData(), __LINE__);
-        // Every registered tool appears exactly once in the palette.
-        for (Tool* tool : ToolRegistry::instance().all())
-            check(order.count(tool->id()) == 1, tool->id().toLocal8Bit().constData(),
-                  __LINE__);
+        // Every registered tool appears exactly once in the palette, apart from
+        // the ones reached from a menu instead. Rotate / Zoom is one of those:
+        // it is a layer command on Ctrl+Shift+Z, not a palette entry.
+        const QStringList menuOnly = {QStringLiteral("transform")};
+        for (Tool* tool : ToolRegistry::instance().all()) {
+            const int expected = menuOnly.contains(tool->id()) ? 0 : 1;
+            check(order.count(tool->id()) == expected,
+                  tool->id().toLocal8Bit().constData(), __LINE__);
+        }
     });
 
     // ------------------------------------------------------------ canvas view
@@ -610,6 +615,53 @@ int main(int argc, char** argv)
         CHECK(view.document()->selection().isActive());
         QApplication::sendEvent(&view, &escape);
         CHECK(!view.document()->selection().isActive());
+    });
+
+    addTest("rotate and zoom gizmo transforms the layer", [] {
+        auto doc = std::make_unique<Document>(120, 90, Rgba(0, 0, 0, 0));
+        // A mark off centre, so a rotation is detectable.
+        ops::fillRegion(doc->activeLayer()->image, Rect(10, 10, 20, 15),
+                        Rgba(255, 0, 0, 255));
+        doc->invalidate();
+        CanvasView view(std::move(doc));
+        Tool* transform = ToolRegistry::instance().byId(QStringLiteral("transform"));
+        CHECK(transform != nullptr);
+        if (!transform)
+            return;
+        const Image before = view.document()->activeLayer()->image;
+
+        view.setTool(transform);               // activating arms the gizmo
+        transform->optionChanged(QStringLiteral("angle"), 90.0);
+        ToolContext context = view.makeContext();
+        transform->press(context, makeEvent(QPointF(60, 45)));
+        ToolEvent move = makeEvent(QPointF(60, 45));
+        move.button = Qt::NoButton;
+        transform->move(context, move);
+        transform->commit(context);
+
+        const Image& after = view.document()->activeLayer()->image;
+        CHECK(nonTransparentPixels(after) > 0);
+        // A quarter turn about the centre moves the mark to a different corner.
+        CHECK(after.at(20, 17).a != before.at(20, 17).a);
+        CHECK(view.history()->count() == 1);
+        view.history()->undo();
+        CHECK(view.document()->activeLayer()->image.at(20, 17).a == before.at(20, 17).a);
+    });
+
+    addTest("rotate and zoom gizmo can be abandoned", [] {
+        auto doc = std::make_unique<Document>(80, 60, Rgba(0, 0, 0, 0));
+        ops::fillRegion(doc->activeLayer()->image, Rect(5, 5, 10, 10),
+                        Rgba(0, 255, 0, 255));
+        doc->invalidate();
+        CanvasView view(std::move(doc));
+        Tool* transform = ToolRegistry::instance().byId(QStringLiteral("transform"));
+        const Image before = view.document()->activeLayer()->image;
+        view.setTool(transform);
+        transform->optionChanged(QStringLiteral("angle"), 33.0);
+        ToolContext context = view.makeContext();
+        transform->cancel(context);
+        CHECK(view.document()->activeLayer()->image.at(8, 8) == before.at(8, 8));
+        CHECK(view.history()->count() == 0);
     });
 
     // ------------------------------------------------------------ main window
