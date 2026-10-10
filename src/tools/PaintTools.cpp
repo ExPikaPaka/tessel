@@ -48,6 +48,8 @@ public:
         layerUid_ = layer->uid();
         backup_ = layer->image;
         coverage_ = Mask(layer->width(), layer->height());
+        touch_.assign(size_t(layer->width()) * layer->height(), -1.0e9f);
+        travelled_ = 0.0;
         dirty_ = Rect();
         secondary_ = event.isSecondary();
         busy_ = true;
@@ -137,11 +139,18 @@ protected:
     //
     // This used to stamp a dab every few pixels and take the maximum. The
     // maximum of two offset cones dips between their centres, so a soft brush
-    // laid down a visible string of beads: at 15 percent spacing a 40 pixel
-    // brush rippled between full strength and about 85 percent along its own
-    // centre line. A swept distance field has no such ripple, and because each
-    // segment's field is exact and the segments share endpoints, taking the
-    // maximum across them stays smooth at the joints too.
+    // laid down a visible string of beads. A swept distance field has no such
+    // ripple.
+    //
+    // How a segment joins what is already there depends on how far back along
+    // the stroke that was. Consecutive segments overlap heavily around their
+    // shared joint, so they are combined with a maximum: taking the union there
+    // would pile coverage up at every joint. But where a stroke loops back over
+    // ground it covered much earlier, a maximum leaves a crease along the line
+    // where the two passes are equidistant, which on a soft brush shows up as a
+    // bright streak through the crossing. Those revisits are combined as a
+    // union instead, so a crossing grows smoothly denser the way a second pass
+    // of paint would, with no seam.
     void accumulateSegment(QPointF from, QPointF to)
     {
         const double radius = std::max(0.5, diameter() / 2.0);
@@ -155,24 +164,29 @@ protected:
         // smoothstep, flattens off near the middle and leaves a solid core, so
         // even the softest setting still painted a hard centre with a thin
         // fuzzy rim. Raising the ramp to a power bends it the other way: the
-        // coverage drops away immediately from the centre line and trails off,
-        // which is what a soft brush is expected to look like. The exponent is
-        // 1 at full hardness, where the band is only half a pixel wide and the
-        // shape does not matter, and rises to 3 as hardness falls to nothing.
+        // coverage drops away immediately from the centre line and trails off.
         const double shape = 1.0 + 2.0 * (1.0 - hard) * (1.0 - hard);
         const bool straight = shape <= 1.02;
 
         const Rect box = stampBounds(from, to).intersected(coverage_.rect());
-        if (box.isEmpty())
-            return;
-
         const double abx = to.x() - from.x();
         const double aby = to.y() - from.y();
         const double lengthSq = abx * abx + aby * aby;
+        const double length = std::sqrt(lengthSq);
+        const double arcStart = travelled_;
+        travelled_ += length;
+        if (box.isEmpty())
+            return;
+
+        // Anything laid down within a brush width of here counts as the same
+        // pass rather than a revisit.
+        const float window = float(std::max(2.0 * radius, 4.0));
+        const int width = coverage_.width();
 
         parallelFor(box.y, box.bottom(), [&](int y0, int y1) {
             for (int y = y0; y < y1; ++y) {
                 float* line = coverage_.row(y);
+                float* touch = touch_.data() + size_t(y) * width;
                 for (int x = box.x; x < box.right(); ++x) {
                     const double px = x + 0.5 - from.x();
                     const double py = y + 0.5 - from.y();
@@ -190,8 +204,18 @@ protected:
                     if (!straight)
                         coverage = std::pow(coverage, shape);
                     const float value = float(coverage) * amount;
-                    if (value > line[x])
+                    const float here = float(arcStart + along * length);
+                    const float previous = line[x];
+                    if (previous <= 0.0f) {
                         line[x] = value;
+                    } else if (std::abs(here - touch[x]) <= window) {
+                        if (value <= previous)
+                            continue;
+                        line[x] = value;
+                    } else {
+                        line[x] = previous + value * (1.0f - previous);
+                    }
+                    touch[x] = here;
                 }
             }
         }, 32);
@@ -285,6 +309,8 @@ private:
     int layerUid_ = 0;
     Image backup_;
     Mask coverage_;
+    std::vector<float> touch_;   // arc length at which each pixel was covered
+    double travelled_ = 0.0;
     QPointF last_;
     Rect dirty_;
     bool busy_ = false;
