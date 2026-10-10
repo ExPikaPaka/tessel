@@ -69,8 +69,11 @@ ToolsPalette::ToolsPalette(QWidget* parent) : QWidget(parent)
         }
     }
     grid->setRowStretch(row + 1, 1);
+    // Two columns of 30 px buttons plus the grid margins. A little slack on
+    // top of that, so the dock title bar has room for its name beside the
+    // float and close buttons instead of eliding it away.
     setMinimumWidth(72);
-    setMaximumWidth(96);
+    setMaximumWidth(118);
 }
 
 void ToolsPalette::setCurrentTool(const QString& toolId)

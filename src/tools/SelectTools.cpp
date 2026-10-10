@@ -294,8 +294,8 @@ public:
     {
         SelectionToolBase::buildOptions(bar);
         bar.addSeparator();
-        bar.addSpin(QStringLiteral("tolerance"), QStringLiteral("Tolerance"), 0, 100,
-                    int(std::lround(tolerance_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+                       int(std::lround(tolerance_ * 100.0)), 0, 100);
         bar.addCombo(QStringLiteral("fill"), QStringLiteral("Flood mode"),
                      {QStringLiteral("Contiguous"), QStringLiteral("Global")},
                      contiguous_ ? 0 : 1);

@@ -23,6 +23,7 @@ class QFontComboBox;
 class QHBoxLayout;
 class QKeyEvent;
 class QLabel;
+class QSlider;
 class QSpinBox;
 class QToolButton;
 
@@ -169,6 +170,10 @@ public:
 
     QSpinBox* addSpin(const QString& key, const QString& label, int minimum,
                       int maximum, int value, const QString& suffix = QString());
+    // A slider with its value beside it, for the settings that are a
+    // percentage of something.
+    QSlider* addPercent(const QString& key, const QString& label, int value,
+                        int minimum = 1, int maximum = 100);
     QDoubleSpinBox* addDouble(const QString& key, const QString& label, double minimum,
                               double maximum, double value, double step = 0.1,
                               int decimals = 2, const QString& suffix = QString());

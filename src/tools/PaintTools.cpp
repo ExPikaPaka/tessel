@@ -271,8 +271,8 @@ protected:
     {
         bar.addSpin(QStringLiteral("width"), QStringLiteral("Width"), 1, 2000,
                     int(std::lround(width_)), QStringLiteral(" px"));
-        bar.addSpin(QStringLiteral("opacity"), QStringLiteral("Opacity"), 1, 100,
-                    int(std::lround(opacity_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+                       int(std::lround(opacity_ * 100.0)));
         bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
                      antialias_);
         if (withBlendMode) {
@@ -332,8 +332,8 @@ public:
     {
         buildCommonOptions(bar);
         bar.addSeparator();
-        bar.addSpin(QStringLiteral("hardness"), QStringLiteral("Hardness"), 1, 100,
-                    int(std::lround(hardness_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
+                       int(std::lround(hardness_ * 100.0)));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -413,8 +413,8 @@ public:
     {
         buildCommonOptions(bar, false);
         bar.addSeparator();
-        bar.addSpin(QStringLiteral("hardness"), QStringLiteral("Hardness"), 1, 100,
-                    int(std::lround(hardness_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
+                       int(std::lround(hardness_ * 100.0)));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -550,8 +550,8 @@ public:
     {
         buildCommonOptions(bar, false);
         bar.addSeparator();
-        bar.addSpin(QStringLiteral("tolerance"), QStringLiteral("Tolerance"), 0, 100,
-                    int(std::lround(tolerance_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+                       int(std::lround(tolerance_ * 100.0)), 0, 100);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -611,10 +611,10 @@ public:
         bar.addCombo(QStringLiteral("mode"), QStringLiteral("Fill"),
                      {QStringLiteral("Contiguous"), QStringLiteral("Global")},
                      contiguous_ ? 0 : 1);
-        bar.addSpin(QStringLiteral("tolerance"), QStringLiteral("Tolerance"), 0, 100,
-                    int(std::lround(tolerance_ * 100.0)), QStringLiteral("%"));
-        bar.addSpin(QStringLiteral("opacity"), QStringLiteral("Opacity"), 1, 100,
-                    int(std::lround(opacity_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+                       int(std::lround(tolerance_ * 100.0)), 0, 100);
+        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+                       int(std::lround(opacity_ * 100.0)));
         bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
                      antialias_);
         bar.addCheck(QStringLiteral("merged"), QStringLiteral("Sample merged"), merged_);
@@ -701,8 +701,8 @@ public:
         bar.addCombo(QStringLiteral("channel"), QStringLiteral("Mode"),
                      {QStringLiteral("Colour"), QStringLiteral("Transparency")},
                      transparencyMode_ ? 1 : 0);
-        bar.addSpin(QStringLiteral("opacity"), QStringLiteral("Opacity"), 1, 100,
-                    int(std::lround(opacity_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+                       int(std::lround(opacity_ * 100.0)));
         bar.addCheck(QStringLiteral("dither"), QStringLiteral("Dither"), dither_);
         bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
                      blendModeNames(), int(blend_));

@@ -10,6 +10,7 @@
 #include "ui/Icons.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
+#include "ui/WheelFilter.h"
 
 int main(int argc, char** argv)
 {
@@ -48,6 +49,9 @@ int main(int argc, char** argv)
             != QStringLiteral("light");
     tessel::theme::apply(app, dark ? tessel::theme::Mode::Dark : tessel::theme::Mode::Light);
     QApplication::setWindowIcon(tessel::icons::appIcon());
+
+    // Wheel over a value field lowers it when pushed forward.
+    app.installEventFilter(new tessel::WheelFilter(&app));
 
     tessel::MainWindow window;
     window.show();

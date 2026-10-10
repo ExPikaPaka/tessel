@@ -160,8 +160,8 @@ protected:
         }
         bar.addSpin(QStringLiteral("width"), QStringLiteral("Width"), 1, 500,
                     int(std::lround(penWidth_)), QStringLiteral(" px"));
-        bar.addSpin(QStringLiteral("opacity"), QStringLiteral("Opacity"), 1, 100,
-                    int(std::lround(opacity_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+                       int(std::lround(opacity_ * 100.0)));
         bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
                      antialias_);
         bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
@@ -880,8 +880,8 @@ public:
                       QStringLiteral("Right")},
                      align_);
         bar.addSeparator();
-        bar.addSpin(QStringLiteral("opacity"), QStringLiteral("Opacity"), 1, 100,
-                    int(std::lround(opacity_ * 100.0)), QStringLiteral("%"));
+        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+                       int(std::lround(opacity_ * 100.0)));
         bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
                      antialias_);
         bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),

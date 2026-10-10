@@ -9,6 +9,7 @@
 #include <QMenu>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QSlider>
 #include <QSpinBox>
 #include <QImage>
 #include <QToolButton>
@@ -255,6 +256,38 @@ QSpinBox* ToolOptionsBar::addSpin(const QString& key, const QString& label, int 
             [this, key](int next) { publish(key, next); });
     addWidget(spin);
     return spin;
+}
+
+QSlider* ToolOptionsBar::addPercent(const QString& key, const QString& label,
+                                    int value, int minimum, int maximum)
+{
+    if (!label.isEmpty())
+        addLabel(label);
+    auto* slider = new QSlider(Qt::Horizontal, this);
+    slider->setRange(minimum, maximum);
+    slider->setValue(value);
+    slider->setMinimumWidth(96);
+    slider->setMaximumWidth(140);
+    auto* readout = new QSpinBox(this);
+    readout->setRange(minimum, maximum);
+    readout->setValue(value);
+    readout->setSuffix(QStringLiteral("%"));
+    readout->setKeyboardTracking(false);
+    readout->setMinimumWidth(64);
+    values_[key] = value;
+
+    connect(slider, &QSlider::valueChanged, this, [this, key, readout](int next) {
+        if (readout->value() != next)
+            readout->setValue(next);
+        publish(key, next);
+    });
+    connect(readout, &QSpinBox::valueChanged, this, [slider](int next) {
+        if (slider->value() != next)
+            slider->setValue(next);
+    });
+    addWidget(slider);
+    addWidget(readout);
+    return slider;
 }
 
 QDoubleSpinBox* ToolOptionsBar::addDouble(const QString& key, const QString& label,

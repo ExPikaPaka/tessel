@@ -57,7 +57,7 @@ constexpr int kMaxRecentFiles = 10;
 
 // Bump this whenever the default panel arrangement changes, so saved layouts
 // from older builds are ignored rather than restored into the wrong places.
-constexpr int kLayoutVersion = 2;
+constexpr int kLayoutVersion = 3;
 
 const QStringList& effectCategoryOrder()
 {
@@ -770,17 +770,21 @@ void MainWindow::createDocks()
     layers_ = new LayersPanel(this);
     layersDock_ = makeDock(QStringLiteral("Layers"), layers_, QStringLiteral("layersDock"));
 
-    // Splitting is explicit so the arrangement never depends on the order the
-    // docks happened to be added in: Tools over Colors on the left, History
-    // over Layers on the right.
+    // A dock area is as wide as its widest panel, so pairing the narrow tool
+    // palette with the Colors panel made the entire left column as wide as the
+    // colour wheel and wasted most of it. The palette now has the left edge to
+    // itself, sized to its two columns of buttons, and the other three share
+    // the right. All four remain floatable, so any of them can be pulled off
+    // into a window of its own.
     addDockWidget(Qt::LeftDockWidgetArea, toolsDock_);
     addDockWidget(Qt::RightDockWidgetArea, historyDock_);
-    splitDockWidget(toolsDock_, colorsDock_, Qt::Vertical);
     splitDockWidget(historyDock_, layersDock_, Qt::Vertical);
+    splitDockWidget(layersDock_, colorsDock_, Qt::Vertical);
 
-    resizeDocks({toolsDock_, colorsDock_}, {210, 300}, Qt::Vertical);
-    resizeDocks({historyDock_, layersDock_}, {260, 300}, Qt::Vertical);
-    resizeDocks({toolsDock_, historyDock_}, {86, 240}, Qt::Horizontal);
+    resizeDocks({toolsDock_}, {104}, Qt::Horizontal);
+    resizeDocks({historyDock_}, {248}, Qt::Horizontal);
+    resizeDocks({historyDock_, layersDock_, colorsDock_}, {200, 220, 330},
+                Qt::Vertical);
 
     // The menu bar icons mirror whether each panel is showing.
     const std::pair<QToolButton*, QDockWidget*> panels[] = {
@@ -1804,11 +1808,12 @@ void MainWindow::showSettings()
         }
         addDockWidget(Qt::LeftDockWidgetArea, toolsDock_);
         addDockWidget(Qt::RightDockWidgetArea, historyDock_);
-        splitDockWidget(toolsDock_, colorsDock_, Qt::Vertical);
         splitDockWidget(historyDock_, layersDock_, Qt::Vertical);
-        resizeDocks({toolsDock_, colorsDock_}, {210, 300}, Qt::Vertical);
-        resizeDocks({historyDock_, layersDock_}, {260, 300}, Qt::Vertical);
-        resizeDocks({toolsDock_, historyDock_}, {86, 240}, Qt::Horizontal);
+        splitDockWidget(layersDock_, colorsDock_, Qt::Vertical);
+        resizeDocks({toolsDock_}, {104}, Qt::Horizontal);
+        resizeDocks({historyDock_}, {248}, Qt::Horizontal);
+        resizeDocks({historyDock_, layersDock_, colorsDock_}, {200, 220, 330},
+                    Qt::Vertical);
     }
     updateEverything();
 }

@@ -90,6 +90,8 @@ qt_add_library(tessel_ui STATIC
   src/ui/Icons.h
   src/ui/Theme.cpp
   src/ui/Theme.h
+  src/ui/WheelFilter.cpp
+  src/ui/WheelFilter.h
   src/tools/Tool.cpp
   src/tools/Tool.h
   src/tools/PaintTools.cpp
