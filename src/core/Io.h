@@ -23,6 +23,10 @@ std::unique_ptr<Layer> openAsLayer(const Document& doc, const QString& path,
 Image openFlattened(const QString& path, QString* error);
 bool saveDocument(const Document& doc, const QString& path, QString* error,
                   int quality = 92);
+// The native format without the merged image and the thumbnail previews, both
+// of which cost a full composite. Used for autosaved recovery copies, which
+// only Tessel itself ever reads back.
+bool saveRecoveryCopy(const Document& doc, const QString& path, QString* error);
 
 bool isLayeredFormat(const QString& path);
 bool flattensLayers(const QString& path);

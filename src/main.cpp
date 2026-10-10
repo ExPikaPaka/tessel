@@ -77,12 +77,21 @@ int main(int argc, char** argv)
         if (info.exists())
             paths.append(info.absoluteFilePath());
     }
-    if (paths.isEmpty())
-        window.newDocument(800, 600, tessel::Rgba(255, 255, 255, 255));
-    else
-        window.openPaths(paths);
+    // A screenshot run answers no questions: a modal recovery or reopen offer
+    // would hold the grab up for ever.
+    const bool screenshot = parser.isSet(shotOption);
+    if (screenshot) {
+        if (paths.isEmpty())
+            window.newDocument(800, 600, tessel::Rgba(255, 255, 255, 255));
+        else
+            window.openPaths(paths);
+    } else {
+        // Recovery files from a run that did not finish, then the reopen
+        // offer, then whatever was named on the command line.
+        window.startSession(paths);
+    }
 
-    if (parser.isSet(shotOption)) {
+    if (screenshot) {
         const QString target = parser.value(shotOption);
         const int delay = parser.value(shotDelayOption).toInt();
         QTimer::singleShot(delay, &app, [&window, target] {
