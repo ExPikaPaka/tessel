@@ -4,6 +4,7 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -51,6 +52,7 @@
 #include "ui/Dialogs.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
+#include "ui/RecoveryDialog.h"
 #include "ui/Theme.h"
 
 namespace tessel {
@@ -134,6 +136,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     createStatusBar();
     installToolShortcuts();
     restoreSettings();
+    setupAutosave();
 
     lastDirectory_ = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     chooseTool(QStringLiteral("brush"));
@@ -1234,6 +1237,7 @@ bool MainWindow::saveView(int index, bool saveAs)
     doc->setFilePath(path);
     doc->setTitle(QFileInfo(path).fileName());
     view->history()->markSaved();
+    dropRecoveryFile(view);
     lastDirectory_ = QFileInfo(path).absolutePath();
     recentFiles_.removeAll(path);
     recentFiles_.prepend(path);
@@ -1249,6 +1253,7 @@ bool MainWindow::closeView(int index)
     if (!promptToSave(index))
         return false;
     CanvasView* view = viewAt(index);
+    dropRecoveryFile(view);
     stack_->removeWidget(view);
     view->deleteLater();
     if (stack_->count() == 0) {
@@ -1850,6 +1855,35 @@ void MainWindow::showSettings()
     historyForm->addRow(QStringLiteral("Memory budget"), memory);
     root->addWidget(historyBox);
 
+    auto* savingBox = new QGroupBox(QStringLiteral("Saving work"), &dialog);
+    auto* savingForm = new QFormLayout(savingBox);
+    auto* autosave = new QCheckBox(
+        QStringLiteral("Keep a recovery copy of every changed image"), savingBox);
+    autosave->setObjectName(QStringLiteral("autosave"));
+    autosave->setChecked(recoveryOptions_.autosave);
+    auto* autosaveMinutes = new QSpinBox(savingBox);
+    autosaveMinutes->setObjectName(QStringLiteral("autosaveMinutes"));
+    autosaveMinutes->setRange(recovery::kMinAutosaveMinutes,
+                              recovery::kMaxAutosaveMinutes);
+    autosaveMinutes->setValue(recoveryOptions_.autosaveMinutes);
+    autosaveMinutes->setSuffix(QStringLiteral(" min"));
+    autosaveMinutes->setEnabled(recoveryOptions_.autosave);
+    connect(autosave, &QCheckBox::toggled, autosaveMinutes, &QWidget::setEnabled);
+    auto* restoreSession = new QCheckBox(
+        QStringLiteral("Offer to reopen the images from the last session"), savingBox);
+    restoreSession->setObjectName(QStringLiteral("restoreSession"));
+    restoreSession->setChecked(recoveryOptions_.restoreSession);
+    auto* keepDays = new QSpinBox(savingBox);
+    keepDays->setObjectName(QStringLiteral("keepDays"));
+    keepDays->setRange(recovery::kMinKeepDays, recovery::kMaxKeepDays);
+    keepDays->setValue(recoveryOptions_.keepDays);
+    keepDays->setSuffix(QStringLiteral(" days"));
+    savingForm->addRow(autosave);
+    savingForm->addRow(QStringLiteral("Autosave every"), autosaveMinutes);
+    savingForm->addRow(restoreSession);
+    savingForm->addRow(QStringLiteral("Keep recovery files for"), keepDays);
+    root->addWidget(savingBox);
+
     auto* layoutBox = new QGroupBox(QStringLiteral("Window"), &dialog);
     auto* layoutRow = new QHBoxLayout(layoutBox);
     auto* resetLayout = new QPushButton(QStringLiteral("Reset panel layout"), layoutBox);
@@ -1884,6 +1918,15 @@ void MainWindow::showSettings()
     settings.setValue(QStringLiteral("newHeight"), height->value());
     settings.setValue(QStringLiteral("historySteps"), steps->value());
     settings.setValue(QStringLiteral("historyMemory"), memory->value());
+    recoveryOptions_.autosave = autosave->isChecked();
+    recoveryOptions_.autosaveMinutes = autosaveMinutes->value();
+    recoveryOptions_.restoreSession = restoreSession->isChecked();
+    recoveryOptions_.keepDays = keepDays->value();
+    recovery::storeOptions(settings, recoveryOptions_);
+    if (autosaver_) {
+        autosaver_->setIntervalMinutes(recoveryOptions_.autosaveMinutes);
+        autosaver_->setEnabled(recoveryOptions_.autosave);
+    }
     defaultWidth_ = width->value();
     defaultHeight_ = height->value();
     for (int i = 0; i < stack_->count(); ++i) {
@@ -2257,12 +2300,190 @@ void MainWindow::showLayerProperties()
     dialog->show();
 }
 
+// ----------------------------------------------------------------- recovery
+
+void MainWindow::setupAutosave()
+{
+    autosaver_ = std::make_unique<recovery::Autosaver>(this);
+    autosaver_->setSource([this] {
+        std::vector<recovery::Autosaver::Request> requests;
+        for (int i = 0; i < stack_->count(); ++i) {
+            CanvasView* view = viewAt(i);
+            if (!view || !view->document()->isModified())
+                continue; // a saved document has nothing to lose
+            Document* doc = view->document();
+            History* history = view->history();
+            recovery::Autosaver::Request request;
+            request.key = recoveryKey(view);
+            request.originalPath = doc->filePath();
+            request.title = doc->displayName();
+            // The length of the history together with the position in it moves
+            // on every edit, and on an undo back to a state that was already
+            // written as well.
+            request.revision = (qint64(history->count()) << 32)
+                | qint64(uint32_t(history->currentIndex() + 1));
+            request.snapshot = [doc] { return doc->snapshot(); };
+            requests.push_back(std::move(request));
+        }
+        return requests;
+    });
+    // The status bar rather than a message box: autosaving is a background
+    // courtesy, and a modal error in the middle of a brush stroke would be
+    // worse than the failure it reports.
+    connect(autosaver_.get(), &recovery::Autosaver::failed, this,
+            [this](const QString& message) {
+                if (hintLabel_)
+                    hintLabel_->setText(message);
+            });
+    autosaver_->setIntervalMinutes(recoveryOptions_.autosaveMinutes);
+    autosaver_->setEnabled(recoveryOptions_.autosave);
+}
+
+int MainWindow::recoveryKey(CanvasView* view)
+{
+    const auto known = recoveryKeys_.constFind(view);
+    if (known != recoveryKeys_.constEnd())
+        return known.value();
+    const int key = ++recoveryCounter_;
+    recoveryKeys_.insert(view, key);
+    return key;
+}
+
+void MainWindow::dropRecoveryFile(CanvasView* view)
+{
+    if (!autosaver_ || !view)
+        return;
+    const auto known = recoveryKeys_.constFind(view);
+    if (known == recoveryKeys_.constEnd())
+        return;
+    autosaver_->forget(known.value());
+    recoveryKeys_.remove(view);
+}
+
+void MainWindow::autosaveNow()
+{
+    if (!autosaver_)
+        return;
+    autosaver_->saveNow();
+    autosaver_->waitForIdle();
+}
+
+recovery::OpenDocuments MainWindow::captureOpenDocuments() const
+{
+    recovery::OpenDocuments documents;
+    const int current = stack_->currentIndex();
+    for (int i = 0; i < stack_->count(); ++i) {
+        CanvasView* view = viewAt(i);
+        if (!view || view->document()->filePath().isEmpty())
+            continue; // an unnamed document is the recovery case, not this one
+        if (i == current)
+            documents.current = static_cast<int>(documents.paths.size());
+        documents.paths.append(view->document()->filePath());
+    }
+    return documents;
+}
+
+bool MainWindow::openRecovered(const recovery::Entry& entry)
+{
+    QString error;
+    std::unique_ptr<Document> doc = io::openDocument(entry.path, &error);
+    if (!doc) {
+        QMessageBox::warning(this, QStringLiteral("Cannot recover image"), error);
+        return false;
+    }
+    // openDocument names a document after the file it read, which here is the
+    // recovery copy. The document is given back its own path instead, and is
+    // left modified, so that saving it cannot touch the copy and closing it
+    // cannot happen without a prompt.
+    doc->setFilePath(entry.originalPath);
+    doc->setTitle(QStringLiteral("Recovered %1").arg(untitledCounter_++));
+    doc->setModified(true);
+    addView(new CanvasView(std::move(doc), this));
+    hintLabel_->setText(QStringLiteral("Recovered %1").arg(entry.displayName()));
+    return true;
+}
+
+void MainWindow::offerRecovery()
+{
+    recovery::pruneOlderThan(recoveryOptions_.keepDays);
+    std::vector<recovery::Abandoned> abandoned = recovery::findAbandoned();
+    std::vector<recovery::Entry> entries = recovery::allEntries(abandoned);
+    if (entries.empty()) {
+        recovery::discard(abandoned); // directories with nothing in them
+        return;
+    }
+    RecoveryDialog dialog(entries, this);
+    dialog.exec();
+    switch (dialog.choice()) {
+    case RecoveryDialog::Choice::Recover: {
+        bool all = true;
+        for (const recovery::Entry& entry : entries)
+            all = openRecovered(entry) && all;
+        // A copy that could not be read is kept, so there is still something
+        // to try again with or to look at by hand.
+        if (all)
+            recovery::discard(abandoned);
+        break;
+    }
+    case RecoveryDialog::Choice::Discard:
+        recovery::discard(abandoned);
+        break;
+    case RecoveryDialog::Choice::Later:
+        break; // left alone, and offered again next time
+    }
+}
+
+void MainWindow::offerLastSession()
+{
+    if (!recoveryOptions_.restoreSession)
+        return;
+    const recovery::OpenDocuments last = recovery::existingOnly(lastSession_);
+    if (last.paths.isEmpty())
+        return;
+    const QString question = last.paths.size() == 1
+        ? QStringLiteral("Reopen %1 from the last session?")
+              .arg(QFileInfo(last.paths.first()).fileName())
+        : QStringLiteral("Reopen the %1 images from the last session?")
+              .arg(last.paths.size());
+    if (QMessageBox::question(this, QStringLiteral("Reopen last session?"), question,
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)
+        != QMessageBox::Yes) {
+        return;
+    }
+    openPaths(last.paths);
+    if (last.current < 0 || last.current >= last.paths.size())
+        return;
+    const QString front = last.paths.at(last.current);
+    for (int i = 0; i < stack_->count(); ++i) {
+        if (viewAt(i)->document()->filePath() == front) {
+            setCurrentView(i);
+            break;
+        }
+    }
+}
+
+void MainWindow::startSession(const QStringList& paths)
+{
+    // Crashed work first: it is the only thing here that cannot be opened
+    // again from somewhere else.
+    offerRecovery();
+    // Files named on the command line are what the user asked for just now,
+    // so they replace the reopen offer rather than queueing behind it.
+    if (paths.isEmpty())
+        offerLastSession();
+    openPaths(paths);
+    if (stack_->count() == 0)
+        newDocument(defaultWidth_, defaultHeight_, Rgba(255, 255, 255, 255));
+}
+
 // ----------------------------------------------------------------- settings
 
 void MainWindow::restoreSettings()
 {
     QSettings settings;
     recentFiles_ = settings.value(QStringLiteral("recentFiles")).toStringList();
+    recoveryOptions_ = recovery::loadOptions(settings);
+    lastSession_ = recovery::loadOpenDocuments(settings);
     defaultWidth_ = settings.value(QStringLiteral("newWidth"), 800).toInt();
     defaultHeight_ = settings.value(QStringLiteral("newHeight"), 600).toInt();
     const QByteArray geometry = settings.value(QStringLiteral("geometry")).toByteArray();
@@ -2295,12 +2516,17 @@ void MainWindow::storeSettings()
     settings.setValue(QStringLiteral("rulers"),
                       actions_.value(QStringLiteral("rulers"))->isChecked());
     settings.setValue(QStringLiteral("unit"), units::unitId(unit_));
+    recovery::storeOptions(settings, recoveryOptions_);
+    recovery::storeOpenDocuments(
+        settings, recoveryOptions_.restoreSession ? lastSession_
+                                                  : recovery::OpenDocuments());
 }
 
 // ----------------------------------------------------------------- events
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    lastSession_ = captureOpenDocuments();
     while (stack_->count() > 0) {
         const int index = stack_->count() - 1;
         if (!promptToSave(index)) {
@@ -2312,6 +2538,10 @@ void MainWindow::closeEvent(QCloseEvent* event)
         delete view;
     }
     storeSettings();
+    // Reached only once every document is dealt with, which is what makes the
+    // leftover files at the next startup mean "this run did not finish".
+    if (autosaver_)
+        autosaver_->discardAll();
     event->accept();
 }
 

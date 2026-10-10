@@ -500,7 +500,12 @@ bool writeFlat(const Image& image, double resolution, const QString& path,
     return true;
 }
 
-bool writeTessel(const Document& doc, const QString& path, QString* error)
+// `previews` writes the merged image and the thumbnail, which only other
+// programs and file browsers look at. The autosave path leaves them out: both
+// are a full composite of the document, and a recovery copy is read back by
+// Tessel alone.
+bool writeTessel(const Document& doc, const QString& path, QString* error,
+                 bool previews = true)
 {
     const QString temp = path + QStringLiteral(".tesselpart");
     {
@@ -546,8 +551,10 @@ bool writeTessel(const Document& doc, const QString& path, QString* error)
         root[QStringLiteral("layers")] = layerArray;
         zip.add(QStringLiteral("document.json"),
                 QJsonDocument(root).toJson(QJsonDocument::Indented));
-        zip.add(QStringLiteral("mergedimage.png"), encodePng(doc.composite()));
-        zip.add(QStringLiteral("thumbnail.png"), encodePng(doc.thumbnail(256)));
+        if (previews) {
+            zip.add(QStringLiteral("mergedimage.png"), encodePng(doc.composite()));
+            zip.add(QStringLiteral("thumbnail.png"), encodePng(doc.thumbnail(256)));
+        }
         if (const Mask* mask = doc.selection().clipMask()) {
             Image grey(mask->width(), mask->height());
             for (int y = 0; y < mask->height(); ++y) {
@@ -849,6 +856,11 @@ std::unique_ptr<Layer> openAsLayer(const Document& doc, const QString& path,
         pixels = std::move(sized);
     }
     return std::make_unique<Layer>(std::move(pixels), QFileInfo(path).completeBaseName());
+}
+
+bool saveRecoveryCopy(const Document& doc, const QString& path, QString* error)
+{
+    return writeTessel(doc, path, error, false);
 }
 
 bool saveDocument(const Document& doc, const QString& path, QString* error,

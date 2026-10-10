@@ -52,6 +52,8 @@ add_library(tessel_core STATIC
   src/core/History.cpp
   src/core/Zip.cpp
   src/core/Io.cpp
+  src/core/Recovery.cpp
+  src/core/Recovery.h
   src/core/Palette.cpp
   src/core/Units.cpp
   src/effects/Effect.cpp
@@ -88,6 +90,8 @@ qt_add_library(tessel_ui STATIC
   src/ui/ColorPanel.h
   src/ui/Dialogs.cpp
   src/ui/Dialogs.h
+  src/ui/RecoveryDialog.cpp
+  src/ui/RecoveryDialog.h
   src/ui/EffectDialog.cpp
   src/ui/EffectDialog.h
   src/ui/CurveWidget.cpp

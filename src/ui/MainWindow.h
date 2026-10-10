@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include "core/Document.h"
+#include "core/Recovery.h"
 #include "core/Units.h"
 #include "effects/Effect.h"
 #include "ui/CanvasView.h"
@@ -40,6 +41,18 @@ public:
     bool openPath(const QString& path);
     void openPaths(const QStringList& paths);
 
+    // The startup sequence: offer whatever a crashed run left behind, offer
+    // the documents that were open last time, then open `paths`. Ends with at
+    // least one document, so the window is never empty.
+    void startSession(const QStringList& paths);
+    // Opens a recovery copy as a new document: modified, pointing back at the
+    // file it was made from and never at the recovery copy itself, so saving
+    // it cannot overwrite the copy or pass unnoticed.
+    bool openRecovered(const recovery::Entry& entry);
+    // One autosave pass, start to finish. The timer does the same thing
+    // without waiting; this waits, which is what the tests need.
+    void autosaveNow();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -57,6 +70,14 @@ private:
     void installToolShortcuts();
     void restoreSettings();
     void storeSettings();
+    void setupAutosave();
+    // A stable number per view, so the autosaver can name its files without
+    // knowing what a window or a view is.
+    int recoveryKey(CanvasView* view);
+    void dropRecoveryFile(CanvasView* view);
+    recovery::OpenDocuments captureOpenDocuments() const;
+    void offerRecovery();
+    void offerLastSession();
 
     // ---------------------------------------------------------- documents
     CanvasView* currentView() const;
@@ -152,6 +173,13 @@ private:
     int defaultWidth_ = 800;
     int defaultHeight_ = 600;
     Unit unit_ = Unit::Pixels;
+    std::unique_ptr<recovery::Autosaver> autosaver_;
+    recovery::Options recoveryOptions_;
+    QHash<CanvasView*, int> recoveryKeys_;
+    int recoveryCounter_ = 0;
+    // The open documents as they were before the close started, because
+    // closeEvent empties the window before the settings are written.
+    recovery::OpenDocuments lastSession_;
 };
 
 } // namespace tessel

@@ -12,6 +12,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QComboBox>
+#include <QDirIterator>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
@@ -19,9 +20,11 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QSettings>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 #include <QTest>
 #include <QTextBrowser>
 #include <QThread>
@@ -32,6 +35,7 @@
 #include "effects/EffectPluginHost.h"
 #include "core/Io.h"
 #include "core/Palette.h"
+#include "core/Recovery.h"
 #include "tools/Tool.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
@@ -42,6 +46,7 @@
 #include "ui/Icons.h"
 #include "ui/KeyLayoutFilter.h"
 #include "ui/MainWindow.h"
+#include "ui/RecoveryDialog.h"
 #include "ui/Theme.h"
 
 using namespace tessel;
@@ -2344,6 +2349,246 @@ int main(int argc, char** argv)
 
         // The report is process wide, so leave it as it was found.
         report = saved;
+    });
+
+    // ------------------------------------------------------------ recovery
+    addTest("autosave writes a recovery copy and a save drops it", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        {
+            QSettings settings;
+            settings.setValue(QStringLiteral("recovery/autosave"), true);
+            settings.setValue(QStringLiteral("recovery/autosaveMinutes"), 2);
+            settings.setValue(QStringLiteral("recovery/restoreSession"), false);
+        }
+        auto copies = [&dir] {
+            QStringList found;
+            QDirIterator walk(dir.filePath(QStringLiteral("recovery")),
+                              QStringList{QStringLiteral("*.tessel")},
+                              QDir::Files, QDirIterator::Subdirectories);
+            while (walk.hasNext())
+                found.append(walk.next());
+            found.sort();
+            return found;
+        };
+
+        MainWindow window;
+        window.newDocument(40, 30, Rgba(255, 255, 255, 255));
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Document* doc = view->document();
+        // An unchanged document has nothing worth writing.
+        window.autosaveNow();
+        CHECK(copies().isEmpty());
+
+        doc->activeLayer()->image.setAt(5, 6, Rgba(9, 8, 7, 255));
+        doc->invalidate();
+        doc->setModified(true);
+        window.autosaveNow();
+        CHECK(copies().size() == 1);
+        QString error;
+        std::unique_ptr<Document> copy = io::openDocument(copies().first(), &error);
+        CHECK(copy != nullptr);
+        if (copy) {
+            CHECK(copy->width() == 40 && copy->height() == 30);
+            CHECK(copy->activeLayer()->image.at(5, 6) == Rgba(9, 8, 7, 255));
+        }
+
+        // Saving the document properly leaves nothing to recover.
+        const QString target = dir.filePath(QStringLiteral("saved.tessel"));
+        doc->setFilePath(target);
+        QAction* save = nullptr;
+        for (QAction* action : window.findChildren<QAction*>()) {
+            if (action->text() == QStringLiteral("&Save"))
+                save = action;
+        }
+        CHECK(save != nullptr);
+        if (save)
+            save->trigger();
+        CHECK(QFileInfo::exists(target));
+        CHECK(!doc->isModified());
+        CHECK(copies().isEmpty());
+        recovery::setRoot(QString());
+    });
+
+    addTest("a recovered document opens modified and unnamed", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        const QString original = dir.filePath(QStringLiteral("sketch.tessel"));
+
+        Document source(24, 18, Rgba(1, 2, 3, 255));
+        source.activeLayer()->image.setAt(2, 3, Rgba(40, 50, 60, 255));
+        {
+            recovery::Session session;
+            CHECK(session.isOpen());
+            CHECK(session.write(4, source.snapshot(), original,
+                                QStringLiteral("sketch.tessel"), nullptr));
+        }
+        std::vector<recovery::Abandoned> abandoned = recovery::findAbandoned();
+        CHECK(abandoned.size() == 1);
+        const std::vector<recovery::Entry> entries = recovery::allEntries(abandoned);
+        CHECK(entries.size() == 1);
+
+        MainWindow window;
+        CHECK(window.openRecovered(entries.front()));
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Document* doc = view->document();
+        // Modified, so closing it asks; pointing back at the file it came from,
+        // never at the recovery copy.
+        CHECK(doc->isModified());
+        CHECK(doc->filePath() == original);
+        CHECK(doc->title().startsWith(QStringLiteral("Recovered")));
+        CHECK(doc->activeLayer()->image.at(2, 3) == Rgba(40, 50, 60, 255));
+
+        recovery::discard(abandoned);
+        recovery::setRoot(QString());
+    });
+
+    addTest("the recovery dialog lists what was found", [] {
+        std::vector<recovery::Entry> entries;
+        recovery::Entry saved;
+        saved.path = QStringLiteral("/recovery/doc-1.tessel");
+        saved.originalPath = QStringLiteral("/pictures/beach.png");
+        saved.title = QStringLiteral("beach.png");
+        saved.size = 2048;
+        saved.savedAt = QDateTime::currentDateTime().addSecs(-600);
+        entries.push_back(saved);
+        recovery::Entry unnamed;
+        unnamed.path = QStringLiteral("/recovery/doc-2.tessel");
+        unnamed.title = QStringLiteral("Untitled 3");
+        unnamed.size = 100000;
+        unnamed.savedAt = QDateTime::currentDateTime().addDays(-1);
+        entries.push_back(unnamed);
+
+        RecoveryDialog dialog(entries);
+        auto* list = dialog.findChild<QTreeWidget*>(QStringLiteral("recoveryList"));
+        CHECK(list != nullptr);
+        if (list) {
+            CHECK(list->topLevelItemCount() == 2);
+            CHECK(list->topLevelItem(0)->text(0) == QStringLiteral("beach.png"));
+            CHECK(!list->topLevelItem(0)->text(1).isEmpty());
+            CHECK(list->topLevelItem(0)->text(2) == QStringLiteral("10 minutes ago"));
+            CHECK(list->topLevelItem(0)->toolTip(0).endsWith(QStringLiteral("beach.png")));
+            CHECK(list->topLevelItem(1)->text(0) == QStringLiteral("Untitled 3"));
+            CHECK(list->topLevelItem(1)->toolTip(0).contains(QStringLiteral("Never saved")));
+        }
+        CHECK(RecoveryDialog::describe(saved).contains(QStringLiteral("beach.png")));
+        CHECK(RecoveryDialog::describe(saved).contains(QStringLiteral("10 minutes ago")));
+
+        // Nothing is chosen until a button is pressed, and only recovering and
+        // discarding accept.
+        CHECK(dialog.choice() == RecoveryDialog::Choice::Later);
+        dialog.chooseRecover();
+        CHECK(dialog.choice() == RecoveryDialog::Choice::Recover);
+        CHECK(dialog.result() == QDialog::Accepted);
+        RecoveryDialog discarding(entries);
+        discarding.chooseDiscard();
+        CHECK(discarding.choice() == RecoveryDialog::Choice::Discard);
+        CHECK(discarding.result() == QDialog::Accepted);
+        RecoveryDialog later(entries);
+        later.chooseLater();
+        CHECK(later.choice() == RecoveryDialog::Choice::Later);
+        CHECK(later.result() == QDialog::Rejected);
+    });
+
+    addTest("a clean close remembers the open images", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        const QString first = dir.filePath(QStringLiteral("one.tessel"));
+        const QString second = dir.filePath(QStringLiteral("two.tessel"));
+        QString error;
+        Document a(10, 10, Rgba(255, 0, 0, 255));
+        Document b(12, 8, Rgba(0, 255, 0, 255));
+        CHECK(io::saveDocument(a, first, &error));
+        CHECK(io::saveDocument(b, second, &error));
+        {
+            QSettings settings;
+            settings.setValue(QStringLiteral("recovery/restoreSession"), true);
+            settings.remove(QStringLiteral("session/openDocuments"));
+        }
+
+        {
+            MainWindow window;
+            CHECK(window.openPath(first));
+            CHECK(window.openPath(second));
+            // Nothing is modified, so the close needs no prompt.
+            window.close();
+        }
+        QSettings settings;
+        const recovery::OpenDocuments stored = recovery::loadOpenDocuments(settings);
+        CHECK(stored.paths.size() == 2);
+        if (stored.paths.size() == 2) {
+            CHECK(stored.paths.at(0) == first);
+            CHECK(stored.paths.at(1) == second);
+        }
+        CHECK(stored.current == 1);
+        // Closing cleanly also means there is nothing to recover.
+        CHECK(recovery::findAbandoned().empty());
+        settings.remove(QStringLiteral("session/openDocuments"));
+        settings.remove(QStringLiteral("session/current"));
+        recovery::setRoot(QString());
+    });
+
+    addTest("the startup offer recovers what a crash left behind", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        {
+            QSettings settings;
+            settings.setValue(QStringLiteral("recovery/restoreSession"), false);
+        }
+        Document source(16, 12, Rgba(7, 7, 7, 255));
+        {
+            recovery::Session session;
+            CHECK(session.isOpen());
+            CHECK(session.write(1, source.snapshot(), QString(),
+                                QStringLiteral("Untitled 1"), nullptr));
+        }
+
+        MainWindow window;
+        // The offer is modal, so it is answered from inside the nested event
+        // loop it runs, the way a person would answer it.
+        QTimer::singleShot(0, &window, [&window] {
+            for (RecoveryDialog* dialog : window.findChildren<RecoveryDialog*>())
+                dialog->chooseRecover();
+        });
+        // A backstop, so a dialog that was never found cannot wedge the suite.
+        QTimer::singleShot(3000, &window, [] {
+            if (QWidget* modal = QApplication::activeModalWidget())
+                modal->close();
+        });
+        window.startSession(QStringList());
+
+        const QList<CanvasView*> views = window.findChildren<CanvasView*>();
+        CHECK(views.size() == 1);
+        if (views.size() == 1) {
+            Document* doc = views.last()->document();
+            CHECK(doc->isModified());
+            CHECK(doc->filePath().isEmpty()); // it had no file of its own
+            CHECK(doc->width() == 16 && doc->height() == 12);
+            CHECK(doc->activeLayer()->image.at(1, 1) == Rgba(7, 7, 7, 255));
+        }
+        // Recovering the files consumes them, so the next start is quiet.
+        CHECK(recovery::findAbandoned().empty());
+        recovery::setRoot(QString());
+    });
+
+    addTest("the startup sequence always leaves an image open", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        {
+            QSettings settings;
+            settings.setValue(QStringLiteral("recovery/restoreSession"), false);
+        }
+        // Nothing to recover and no reopen offer, so this asks nothing and
+        // still ends with a document to draw on.
+        MainWindow window;
+        window.startSession(QStringList());
+        CHECK(window.findChildren<CanvasView*>().size() == 1);
+        recovery::setRoot(QString());
     });
 
     // ------------------------------------------------------------ run

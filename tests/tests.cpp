@@ -8,11 +8,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTransform>
 
@@ -23,6 +25,7 @@
 #include "core/ImageOps.h"
 #include "core/Io.h"
 #include "core/Palette.h"
+#include "core/Recovery.h"
 #include "core/Selection.h"
 #include "core/Units.h"
 #include "core/Zip.h"
@@ -1614,6 +1617,327 @@ int main(int argc, char** argv)
         for (int i = 0; i < Palette::kMaxColors + 32; ++i)
             capped.append(Rgba(1, 2, 3, 255));
         CHECK(capped.size() == Palette::kMaxColors);
+    });
+
+    // ------------------------------------------------------------ recovery
+    addTest("recovery options round trip", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        const QString file = dir.filePath(QStringLiteral("settings.ini"));
+        {
+            QSettings settings(file, QSettings::IniFormat);
+            const recovery::Options defaults = recovery::loadOptions(settings);
+            CHECK(defaults.autosave);
+            CHECK(defaults.restoreSession);
+            CHECK(defaults.autosaveMinutes == 2);
+            CHECK(defaults.keepDays == 14);
+
+            recovery::Options options;
+            options.autosave = false;
+            options.autosaveMinutes = 9;
+            options.restoreSession = false;
+            options.keepDays = 3;
+            recovery::storeOptions(settings, options);
+        }
+        QSettings settings(file, QSettings::IniFormat);
+        const recovery::Options options = recovery::loadOptions(settings);
+        CHECK(!options.autosave);
+        CHECK(options.autosaveMinutes == 9);
+        CHECK(!options.restoreSession);
+        CHECK(options.keepDays == 3);
+
+        // Nonsense in the file is clamped rather than taken literally, because
+        // a zero interval would mean a timer that never fires.
+        settings.setValue(QStringLiteral("recovery/autosaveMinutes"), 100000);
+        settings.setValue(QStringLiteral("recovery/keepDays"), 0);
+        const recovery::Options fixed = recovery::loadOptions(settings);
+        CHECK(fixed.autosaveMinutes == recovery::kMaxAutosaveMinutes);
+        CHECK(fixed.keepDays == recovery::kMinKeepDays);
+    });
+
+    addTest("the session list drops files that went away", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        const QString present = dir.filePath(QStringLiteral("a.tessel"));
+        Document doc(4, 4, Rgba(1, 2, 3, 255));
+        QString error;
+        CHECK(io::saveDocument(doc, present, &error));
+
+        recovery::OpenDocuments open;
+        open.paths = QStringList{dir.filePath(QStringLiteral("gone.tessel")), present};
+        open.current = 1;
+        const QString file = dir.filePath(QStringLiteral("settings.ini"));
+        {
+            QSettings settings(file, QSettings::IniFormat);
+            recovery::storeOpenDocuments(settings, open);
+        }
+        QSettings settings(file, QSettings::IniFormat);
+        const recovery::OpenDocuments loaded = recovery::loadOpenDocuments(settings);
+        CHECK(loaded.paths.size() == 2);
+        CHECK(loaded.current == 1);
+
+        const recovery::OpenDocuments kept = recovery::existingOnly(loaded);
+        CHECK(kept.paths.size() == 1);
+        CHECK(kept.paths.first() == present);
+        CHECK(kept.current == 0);
+
+        // An empty list stays empty, with nothing in front.
+        CHECK(recovery::existingOnly(recovery::OpenDocuments()).paths.isEmpty());
+        CHECK(recovery::existingOnly(recovery::OpenDocuments()).current == -1);
+    });
+
+    addTest("a recovery copy outlives its session", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+
+        Document doc(20, 12, Rgba(255, 255, 255, 255));
+        doc.addEmptyLayer();
+        doc.layerAt(1)->image.setAt(3, 4, Rgba(10, 20, 30, 255));
+        doc.layerAt(1)->name = QStringLiteral("Sketch");
+
+        QString written;
+        {
+            recovery::Session session;
+            CHECK(session.isOpen());
+            CHECK(session.write(7, doc.snapshot(),
+                                QStringLiteral("/pictures/sketch.png"),
+                                QStringLiteral("sketch.png"), nullptr));
+            written = session.pathFor(7);
+            CHECK(QFileInfo::exists(written));
+            // A session that is still going is never offered for recovery.
+            CHECK(recovery::findAbandoned().empty());
+        }
+
+        std::vector<recovery::Abandoned> abandoned = recovery::findAbandoned();
+        CHECK(abandoned.size() == 1);
+        const std::vector<recovery::Entry> entries = recovery::allEntries(abandoned);
+        CHECK(entries.size() == 1);
+        CHECK(entries.front().path == written);
+        CHECK(entries.front().originalPath == QStringLiteral("/pictures/sketch.png"));
+        CHECK(entries.front().title == QStringLiteral("sketch.png"));
+        CHECK(entries.front().displayName() == QStringLiteral("sketch.png"));
+        CHECK(entries.front().size > 0);
+        CHECK(entries.front().savedAt.isValid());
+
+        QString error;
+        std::unique_ptr<Document> read = io::openDocument(entries.front().path, &error);
+        CHECK(read != nullptr);
+        if (read) {
+            CHECK(read->width() == 20 && read->height() == 12);
+            CHECK(read->layerCount() == 2);
+            CHECK(read->layerAt(1)->name == QStringLiteral("Sketch"));
+            CHECK(read->layerAt(1)->image.at(3, 4) == Rgba(10, 20, 30, 255));
+        }
+
+        recovery::discard(abandoned);
+        CHECK(abandoned.empty());
+        CHECK(!QFileInfo::exists(written));
+        CHECK(recovery::findAbandoned().empty());
+        recovery::setRoot(QString());
+    });
+
+    addTest("a dropped recovery copy takes its session with it", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        Document doc(8, 8, Rgba(0, 0, 0, 255));
+        QString written;
+        QString directory;
+        {
+            recovery::Session session;
+            CHECK(session.write(1, doc.snapshot(), QString(),
+                                QStringLiteral("Untitled 1"), nullptr));
+            written = session.pathFor(1);
+            directory = session.directory();
+            CHECK(QFileInfo::exists(written));
+            session.drop(1);
+            CHECK(!QFileInfo::exists(written));
+        }
+        // Nothing was left to recover, so the directory went as well and the
+        // next startup has nothing to offer.
+        CHECK(!QFileInfo::exists(directory));
+        CHECK(recovery::findAbandoned().empty());
+
+        // An empty document is refused rather than written as a broken file.
+        recovery::Session session;
+        DocumentState empty;
+        QString error;
+        CHECK(!session.write(2, empty, QString(), QStringLiteral("Broken"), &error));
+        CHECK(!error.isEmpty());
+        recovery::setRoot(QString());
+    });
+
+    addTest("the autosaver writes only what changed", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+
+        Document doc(64, 48, Rgba(255, 255, 255, 255));
+        int snapshots = 0;
+        qint64 revision = 1;
+        int written = 0;
+        QString failure;
+        recovery::Autosaver saver;
+        QObject::connect(&saver, &recovery::Autosaver::wrote,
+                         [&written](int count) { written += count; });
+        QObject::connect(&saver, &recovery::Autosaver::failed,
+                         [&failure](const QString& message) { failure = message; });
+        saver.setSource([&] {
+            recovery::Autosaver::Request request;
+            request.key = 3;
+            request.title = QStringLiteral("Untitled 1");
+            request.revision = revision;
+            request.snapshot = [&] {
+                ++snapshots;
+                return doc.snapshot();
+            };
+            return std::vector<recovery::Autosaver::Request>{request};
+        });
+
+        // The way the timer does it: start the write and let the event loop
+        // deliver the end of it.
+        saver.saveNow();
+        QElapsedTimer clock;
+        clock.start();
+        while (saver.isBusy() && clock.elapsed() < 10000)
+            QCoreApplication::processEvents();
+        CHECK(!saver.isBusy());
+        CHECK(failure.isEmpty());
+        CHECK(written == 1);
+        CHECK(snapshots == 1);
+        CHECK(saver.session() != nullptr);
+        const QString path = saver.session() ? saver.session()->pathFor(3) : QString();
+        CHECK(QFileInfo::exists(path));
+
+        // Unchanged, so nothing is written and not even a snapshot is taken.
+        saver.saveNow();
+        saver.waitForIdle();
+        CHECK(written == 1);
+        CHECK(snapshots == 1);
+
+        ++revision;
+        saver.saveNow();
+        saver.waitForIdle();
+        CHECK(written == 2);
+        CHECK(snapshots == 2);
+
+        saver.forget(3);
+        CHECK(!QFileInfo::exists(path));
+        // Forgetting is not final: the document is still open and changed, so
+        // the next pass writes it again.
+        saver.saveNow();
+        saver.waitForIdle();
+        CHECK(QFileInfo::exists(path));
+        CHECK(written == 3);
+
+        saver.discardAll();
+        CHECK(!QFileInfo::exists(path));
+        CHECK(recovery::findAbandoned().empty());
+        recovery::setRoot(QString());
+    });
+
+    addTest("the autosave timer follows the interval setting", [] {
+        recovery::Autosaver saver;
+        // On by default, because losing work is the expensive mistake here.
+        CHECK(saver.isEnabled());
+        CHECK(saver.intervalMinutes() == 2);
+        // A coarse timer may round the interval up a little, so the bound is
+        // the interval with some room above it.
+        CHECK(saver.millisecondsToNextWrite() > 60 * 1000);
+        CHECK(saver.millisecondsToNextWrite() <= 3 * 60 * 1000);
+        saver.setIntervalMinutes(5);
+        CHECK(saver.intervalMinutes() == 5);
+        CHECK(saver.millisecondsToNextWrite() > 4 * 60 * 1000);
+        CHECK(saver.millisecondsToNextWrite() <= 6 * 60 * 1000);
+        // Out of range values are clamped rather than turning the timer off.
+        saver.setIntervalMinutes(0);
+        CHECK(saver.intervalMinutes() == recovery::kMinAutosaveMinutes);
+        CHECK(saver.millisecondsToNextWrite() > 0);
+        saver.setEnabled(false);
+        CHECK(!saver.isEnabled());
+        CHECK(saver.millisecondsToNextWrite() == -1);
+        saver.setEnabled(true);
+        CHECK(saver.millisecondsToNextWrite() > 0);
+    });
+
+    addTest("autosaving a large image hardly stops the caller", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        Document doc(2000, 1500, Rgba(10, 20, 30, 255));
+        doc.layerAt(0)->image = gradient(2000, 1500);
+        doc.invalidate();
+
+        recovery::Autosaver saver;
+        saver.setSource([&doc] {
+            recovery::Autosaver::Request request;
+            request.key = 1;
+            request.title = QStringLiteral("Big");
+            request.revision = 1;
+            request.snapshot = [&doc] { return doc.snapshot(); };
+            return std::vector<recovery::Autosaver::Request>{request};
+        });
+        QElapsedTimer clock;
+        clock.start();
+        saver.saveNow();
+        const qint64 blocked = clock.elapsed();
+        saver.waitForIdle();
+        const qint64 total = clock.elapsed();
+        std::printf("    2000x1500 autosave: %lld ms on the caller, %lld ms in all\n",
+                    static_cast<long long>(blocked), static_cast<long long>(total));
+        // The caller only copies the pixels; encoding and writing them is the
+        // worker's business.
+        CHECK(blocked <= total);
+        CHECK(blocked < 500);
+        CHECK(saver.session() != nullptr);
+        CHECK(QFileInfo::exists(saver.session()->pathFor(1)));
+        saver.discardAll();
+        recovery::setRoot(QString());
+    });
+
+    addTest("stale recovery copies are swept up", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        recovery::setRoot(dir.filePath(QStringLiteral("recovery")));
+        Document doc(6, 6, Rgba(0, 0, 0, 255));
+        {
+            recovery::Session session;
+            CHECK(session.write(1, doc.snapshot(), QString(),
+                                QStringLiteral("Untitled 1"), nullptr));
+        }
+        std::vector<recovery::Abandoned> found = recovery::findAbandoned();
+        CHECK(found.size() == 1);
+        const QString directory = found.empty() ? QString() : found.front().directory;
+        found.clear(); // releases the claim, so the sweep can take it over
+
+        // Backdate what the sidecar says, which is both what the dialog shows
+        // and what the sweep goes by.
+        QFile meta(QDir(directory).filePath(QStringLiteral("doc-1.json")));
+        CHECK(meta.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QJsonObject object;
+        object[QStringLiteral("originalPath")] = QString();
+        object[QStringLiteral("title")] = QStringLiteral("Untitled 1");
+        object[QStringLiteral("savedAt")] =
+            QDateTime::currentDateTime().addDays(-30).toString(Qt::ISODate);
+        meta.write(QJsonDocument(object).toJson());
+        meta.close();
+        CHECK(recovery::findAbandoned().size() == 1);
+        CHECK(recovery::pruneOlderThan(14) == 1);
+        CHECK(recovery::findAbandoned().empty());
+        CHECK(!QFileInfo::exists(directory));
+
+        // Something written just now is left alone.
+        {
+            recovery::Session session;
+            CHECK(session.write(2, doc.snapshot(), QString(),
+                                QStringLiteral("Untitled 2"), nullptr));
+        }
+        CHECK(recovery::pruneOlderThan(14) == 0);
+        std::vector<recovery::Abandoned> left = recovery::findAbandoned();
+        CHECK(left.size() == 1);
+        recovery::discard(left);
+        recovery::setRoot(QString());
     });
 
     // ------------------------------------------------------------ run
