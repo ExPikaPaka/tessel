@@ -575,6 +575,26 @@ int main(int argc, char** argv)
         CHECK(samePixels(doc->activeLayer()->image, expected));
     });
 
+    addTest("a cheap effect stops waiting a quarter second to sharpen", [] {
+        // The full resolution pass used to be held back by a fixed 250 ms
+        // whatever it cost, which is what still felt slow once the work itself
+        // had been made fast. The wait now follows the measured cost.
+        auto doc = gradientDocument(256, 192);
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("brightness_contrast"));
+        CHECK(effect != nullptr);
+        ParamValues values = ParamValues::defaults(effect->params());
+        EffectSession session(effect, doc.get(), &history, kPrimary, kSecondary);
+        const int before = session.refineDelayMs();
+        CHECK(before == 250);       // the cautious starting point
+
+        session.requestPreview(values);
+        CHECK(session.waitUntilIdle());
+        const int after = session.refineDelayMs();
+        CHECK(after < before);      // a cheap pass earns a short wait
+        CHECK(after >= 60);         // but never a wait of nothing at all
+    });
+
     addTest("large previews draft first and refine to full resolution", [] {
         auto doc = gradientDocument(192, 144);
         History history(doc.get());

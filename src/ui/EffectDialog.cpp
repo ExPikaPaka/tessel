@@ -1,5 +1,6 @@
 #include "ui/EffectDialog.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <QCheckBox>
@@ -46,7 +47,15 @@ QWidget* sliderRow(QWidget* parent, Spin* spin, QSlider* slider)
 // debounce, so a slow drag keeps getting fresh previews instead of waiting for
 // the user to stop.
 constexpr int kDraftIntervalMs = 40;
-constexpr int kRefineIntervalMs = 250;
+// The wait before the full resolution pass is there to keep an expensive
+// effect from being started over at every pixel of a drag. A fixed quarter of
+// a second spent that budget on effects that do not need it, and the sharp
+// image arriving a beat after the drag stopped was the one thing that still
+// felt slow. The wait now follows what the last full pass actually cost, so a
+// cheap effect sharpens up as fast as the draft and only a genuinely heavy one
+// keeps the long leash.
+constexpr int kRefineMinMs = 60;
+constexpr int kRefineMaxMs = 250;
 
 // A full resolution pass this quick already feels immediate, so there is
 // nothing to gain from resampling the image twice to draft it.
@@ -85,7 +94,7 @@ EffectSession::EffectSession(Effect* effect, Document* doc, History* history,
     connect(&draftTimer_, &QTimer::timeout, this, &EffectSession::onDraftTick);
 
     refineTimer_.setSingleShot(true);
-    refineTimer_.setInterval(kRefineIntervalMs);
+    refineTimer_.setInterval(kRefineMaxMs);
     connect(&refineTimer_, &QTimer::timeout, this, &EffectSession::onRefineTick);
 
     pollTimer_.setInterval(60);
@@ -257,8 +266,13 @@ void EffectSession::jobFinished(std::shared_ptr<EffectJob> job)
     running_.reset();
     pollTimer_.stop();
     if (finished && !job->progress.isCancelled()) {
-        if (!job->draft)
+        if (!job->draft) {
             lastFullMs_ = double(jobClock_.nsecsElapsed()) / 1.0e6;
+            // Wait about as long as the pass costs: that is enough to stop a
+            // drag from queueing a pass per pixel, and no longer.
+            refineTimer_.setInterval(std::clamp(int(lastFullMs_ + 0.5),
+                                                kRefineMinMs, kRefineMaxMs));
+        }
         deliver(*job);
         emit progressChanged(1.0);
     }

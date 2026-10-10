@@ -88,6 +88,10 @@ public:
     // Regions larger than this are previewed at reduced resolution first.
     void setDraftPixelBudget(size_t pixels) { draftBudget_ = pixels; }
 
+    // The wait before a full resolution pass, which follows what the last one
+    // cost. Exposed so the tests can check the pacing rather than the clock.
+    int refineDelayMs() const { return refineTimer_.interval(); }
+
     // Spins the event loop until nothing is running or owed. Used by the
     // tests, which have no user to wait for.
     bool waitUntilIdle(int timeoutMs = 30000);
