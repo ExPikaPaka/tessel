@@ -18,6 +18,9 @@ jobs:
   build:
     name: Build and test (MSVC x64)
     runs-on: windows-latest
+    # A build that stops to show a dialog would otherwise hold a runner for
+    # six hours. Qt install plus a cold build is around twenty minutes.
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -80,12 +83,35 @@ jobs:
           & "$env:QT_ROOT_DIR\bin\windeployqt.exe" `
             --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
             --dir staging staging/tessel.exe
+          # windeployqt only brings the platform plugins it thinks are needed.
+          # The offscreen one lets the binary start without a desktop, which is
+          # how the smoke test below runs it.
+          Copy-Item "$env:QT_ROOT_DIR\plugins\platforms\qoffscreen.dll" `
+            staging/platforms/ -Force
 
+      # Starts the deployed binary, has it render its window to a file and
+      # quit. That covers the Qt runtime beside the exe, not just the exe.
+      # It runs under a watchdog: a build that puts a dialog on screen instead
+      # of exiting would otherwise sit here until the job times out, which is
+      # exactly what `--version` did, since Qt answers it with a message box on
+      # a Windows GUI application.
       - name: Smoke test the deployed binary
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          & ./staging/tessel.exe --version
+          $run = Start-Process -FilePath ./staging/tessel.exe -PassThru -NoNewWindow `
+            -ArgumentList '--screenshot', 'smoke.png', '--screenshot-delay', '1500'
+          if (-not $run.WaitForExit(120000)) {
+            $run.Kill()
+            throw "tessel.exe did not exit within two minutes"
+          }
+          if ($run.ExitCode -ne 0) {
+            throw "tessel.exe exited with $($run.ExitCode)"
+          }
+          if (-not (Test-Path smoke.png)) {
+            throw "tessel.exe wrote no screenshot"
+          }
+          Remove-Item smoke.png
 
       - name: Package
         run: |

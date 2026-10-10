@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
+#include <QTest>
 #include <QThread>
 #include <QTimer>
 
@@ -35,6 +36,7 @@
 #include "ui/CurveWidget.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
+#include "ui/KeyLayoutFilter.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 
@@ -887,6 +889,81 @@ int main(int argc, char** argv)
         brush->optionChanged(QStringLiteral("hardness"), 75);
     });
 
+    addTest("one stroke lays down one coat, however it crosses itself", [] {
+        // Where a stroke passes back over ground it has already covered, the
+        // paint must come out the same as on a straight run. Adding the second
+        // visit to the first darkened a patch whose edge showed as a crescent.
+        auto doc = std::make_unique<Document>(200, 200, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(0, 0, 0, 255));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 20);
+
+        ToolContext context = view.makeContext();
+        const QList<QPointF> path = {QPointF(40, 100), QPointF(160, 100),
+                                     QPointF(100, 40), QPointF(100, 160)};
+        brush->press(context, makeEvent(path.first()));
+        for (int i = 1; i < path.size(); ++i) {
+            ToolEvent step = makeEvent(path[i]);
+            step.button = Qt::NoButton;
+            brush->move(context, step);
+        }
+        brush->release(context, makeEvent(path.last()));
+        brush->commit(context);
+
+        const Image& image = view.document()->activeLayer()->image;
+        const int plain = image.at(60, 100).a;
+        CHECK(plain > 100);                                // the stroke is there
+        CHECK(std::abs(image.at(100, 100).a - plain) <= 1); // crossing matches it
+        // No step anywhere across the crossing either.
+        int previous = image.at(100, 85).a;
+        for (int y = 86; y <= 115; ++y) {
+            const int alpha = image.at(100, y).a;
+            check(std::abs(alpha - previous) <= 3, "smooth through the crossing",
+                  __LINE__);
+            previous = alpha;
+        }
+        // A second stroke over the same ground does build up, though.
+        drag(brush, context, QPointF(40, 100), QPointF(160, 100));
+        CHECK(view.document()->activeLayer()->image.at(60, 100).a > plain + 10);
+
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("a fast soft stroke has no scalloped edge", [] {
+        // The pointer only reports a position every so often, so a quick drag
+        // arrives as a handful of long segments. Coverage along the edge of
+        // the stroke has to come out the same whatever that spacing is, or the
+        // stroke grows a row of crescents down each side.
+        auto doc = std::make_unique<Document>(400, 300, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(0, 0, 0, 255));
+        brush->optionChanged(QStringLiteral("width"), 80);
+        brush->optionChanged(QStringLiteral("hardness"), 15);
+
+        ToolContext context = view.makeContext();
+        drag(brush, context, QPointF(40, 150), QPointF(360, 150));
+
+        const Image& result = view.document()->activeLayer()->image;
+        // A line through the soft part of the stroke, well inside its length.
+        for (int offset : {20, 28, 34}) {
+            int lowest = 255, highest = 0;
+            for (int x = 100; x <= 300; ++x) {
+                const int alpha = result.at(x, 150 + offset).a;
+                lowest = std::min(lowest, alpha);
+                highest = std::max(highest, alpha);
+            }
+            check(highest - lowest <= 2, "even edge along a fast stroke", __LINE__);
+        }
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
     addTest("the softest brush is a faint haze that builds up", [] {
         // At the lowest hardness one pass should barely mark the canvas, and
         // going over the same ground again should deepen it.
@@ -900,9 +977,23 @@ int main(int argc, char** argv)
 
         ToolContext context = view.makeContext();
         drag(brush, context, QPointF(20, 50), QPointF(180, 50));
-        const int once = view.document()->activeLayer()->image.at(100, 50).a;
+        const Image& haze = view.document()->activeLayer()->image;
+        const int once = haze.at(100, 50).a;
         CHECK(once > 10);   // it does mark the canvas
         CHECK(once < 90);   // but only faintly
+
+        // And it has to look blurred rather than like a flat grey strip: the
+        // coverage leaves the centre line almost level, fades the whole way
+        // out to the rim, and never steps back up on the way.
+        int previous = once;
+        for (int y = 51; y <= 70; ++y) {
+            const int alpha = haze.at(100, y).a;
+            check(alpha <= previous, "the soft brush fades outwards", __LINE__);
+            previous = alpha;
+        }
+        CHECK(once - haze.at(100, 52).a <= 4);   // level across the middle
+        CHECK(haze.at(100, 66).a >= 1);          // still something near the rim
+        CHECK(haze.at(100, 66).a <= once / 4);   // but only a trace of it
 
         drag(brush, context, QPointF(20, 50), QPointF(180, 50));
         const int twice = view.document()->activeLayer()->image.at(100, 50).a;
@@ -918,6 +1009,107 @@ int main(int argc, char** argv)
         drag(brush, solidContext, QPointF(20, 50), QPointF(180, 50));
         CHECK(solidView.document()->activeLayer()->image.at(100, 50).a == 255);
         brush->optionChanged(QStringLiteral("width"), 12);
+    });
+
+    addTest("the rotate zoom shortcut reaches the transform tool", [] {
+        // Menu shortcuts only fire for the active window, and only through the
+        // shortcut map, so this one has to be pressed the way a person presses
+        // it rather than by triggering the action.
+        MainWindow window;
+        window.newDocument(160, 120, Rgba(255, 255, 255, 255));
+        window.show();
+        QApplication::setActiveWindow(&window);
+        QApplication::processEvents();
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        CHECK(view->tool() != nullptr);
+        CHECK(view->tool()->id() != QLatin1String("transform"));
+        QTest::keyClick(&window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QApplication::processEvents();
+        std::printf("    tool after Ctrl+Shift+Z: %s\n",
+                    view->tool()->id().toUtf8().constData());
+        CHECK(view->tool()->id() == QLatin1String("transform"));
+        // Activating it has to be visible, or it looks like nothing happened:
+        // the gizmo must be on the canvas and the options bar must name it.
+        QApplication::processEvents();
+        const QImage shot = view->viewport()->grab().toImage();
+        int painted = 0;
+        for (int y = 0; y < shot.height(); ++y)
+            for (int x = 0; x < shot.width(); ++x)
+                if (qGray(shot.pixel(x, y)) < 200)
+                    ++painted;
+        std::printf("    gizmo pixels: %d of %d\n", painted,
+                    shot.width() * shot.height());
+        CHECK(painted > 100);
+        const QList<QLabel*> labels = window.findChildren<QLabel*>();
+        bool named = false;
+        for (QLabel* label : labels)
+            if (label->text() == QLatin1String("Rotate / Zoom"))
+                named = true;
+        CHECK(named);
+    });
+
+    addTest("shortcuts still work with a Cyrillic keyboard layout", [] {
+        // With the Russian layout the Z key reports Ya, which no shortcut is
+        // bound to, so Ctrl+Shift+Z did nothing at all. The filter translates
+        // the letter back to the key it is printed on.
+        CHECK(KeyLayoutFilter::latinKeyFor(0x042F) == Qt::Key_Z);
+        CHECK(KeyLayoutFilter::latinKeyFor(0x044F) == Qt::Key_Z);
+        CHECK(KeyLayoutFilter::latinKeyFor(Qt::Key_Z) == 0);
+        auto* filter = new KeyLayoutFilter(qApp);
+        qApp->installEventFilter(filter);
+        MainWindow window;
+        window.newDocument(160, 120, Rgba(255, 255, 255, 255));
+        window.show();
+        QApplication::setActiveWindow(&window);
+        QApplication::processEvents();
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        CHECK(view->tool()->id() != QLatin1String("transform"));
+        QTest::keyClick(&window, Qt::Key(0x042F), Qt::ControlModifier | Qt::ShiftModifier);
+        QApplication::processEvents();
+        CHECK(view->tool()->id() == QLatin1String("transform"));
+        qApp->removeEventFilter(filter);
+        delete filter;
+    });
+
+    addTest("escape leaves moved pixels where they were dragged", [] {
+        // Escape used to hand the pixels back to where they started, which
+        // threw away a move that looked finished. It now lets go of them and
+        // drops the outline as well, so one press finishes the job.
+        auto doc = std::make_unique<Document>(200, 200, Rgba(255, 255, 255, 255));
+        ops::fillRegion(doc->activeLayer()->image, Rect(40, 40, 60, 60),
+                        Rgba(255, 0, 0, 255));
+        Mask mask(200, 200);
+        for (int y = 40; y < 100; ++y)
+            for (int x = 40; x < 100; ++x)
+                mask.setAt(x, y, 1.0f);
+        doc->selection().setMask(mask);
+        doc->invalidate();
+        CanvasView view(std::move(doc));
+        view.resize(400, 400);
+        view.show();
+        view.setZoom(1.0);
+        QApplication::processEvents();
+        Tool* move = ToolRegistry::instance().byId(QStringLiteral("move-selected"));
+        CHECK(move != nullptr);
+        view.setTool(move);
+        ToolContext context = view.makeContext();
+        drag(move, context, QPointF(70, 70), QPointF(120, 120));
+
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&view, &escape);
+        const Image& after = view.document()->activeLayer()->image;
+        CHECK(after.at(120, 120).r == 255);   // the pixels stayed where they went
+        CHECK(after.at(120, 120).g == 0);
+        CHECK(after.at(70, 70).a == 0);       // and left a hole behind them
+        CHECK(!move->isBusy());               // the tool has let go
+        CHECK(!view.document()->selection().isActive());  // and so has the outline
+
+        // One undo puts the pixels and the outline back together.
+        CHECK(view.history()->canUndo());
+        view.history()->undo();
+        view.refresh();
+        CHECK(view.document()->activeLayer()->image.at(70, 70).g == 0);
+        CHECK(view.document()->selection().isActive());
     });
 
     addTest("escape clears the selection", [] {

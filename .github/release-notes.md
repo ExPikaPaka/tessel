@@ -8,9 +8,18 @@
 
 Documentation and a usage guide: https://expikapaka.github.io/tessel/
 
-A layered raster image editor for Linux, written in C++20 with Qt 6.
+A layered raster image editor for Linux and Windows, written in C++20 with
+Qt 6.
 
 ## Installing
+
+### Windows
+
+Download `tessel-1.0.0-windows-x64.zip`, unpack it anywhere and run
+`tessel.exe`. The Qt runtime it needs is in the zip, so nothing else has to be
+installed. The build is 64 bit and is made with MSVC.
+
+### Linux
 
 Download the tarball, unpack it and run `tessel`. Qt 6 must be present on the
 system, since the binary links against it dynamically:
@@ -54,9 +63,14 @@ Everything below is new, since this is the first release.
   screen wide colour picker where the display server allows it
 * Dark and light themes, and icons drawn at runtime rather than loaded from
   files
+* Builds for Linux and for Windows, both produced and tested by CI
+* Keyboard shortcuts that keep working while a non Latin keyboard layout is
+  active
 
 ## Verification
 
 Every published build runs the full headless core and interface test suites
-before the release is created. Screenshots of the interface are in the
+before the release is created, on Linux and on Windows alike, and the Windows
+package is started once from its own folder to prove the runtime beside it is
+complete. Screenshots of the interface are in the
 repository under docs/screenshots.

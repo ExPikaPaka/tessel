@@ -48,8 +48,6 @@ public:
         layerUid_ = layer->uid();
         backup_ = layer->image;
         coverage_ = Mask(layer->width(), layer->height());
-        touch_.assign(size_t(layer->width()) * layer->height(), -1.0e9f);
-        travelled_ = 0.0;
         dirty_ = Rect();
         secondary_ = event.isSecondary();
         busy_ = true;
@@ -142,15 +140,14 @@ protected:
     // laid down a visible string of beads. A swept distance field has no such
     // ripple.
     //
-    // How a segment joins what is already there depends on how far back along
-    // the stroke that was. Consecutive segments overlap heavily around their
-    // shared joint, so they are combined with a maximum: taking the union there
-    // would pile coverage up at every joint. But where a stroke loops back over
-    // ground it covered much earlier, a maximum leaves a crease along the line
-    // where the two passes are equidistant, which on a soft brush shows up as a
-    // bright streak through the crossing. Those revisits are combined as a
-    // union instead, so a crossing grows smoothly denser the way a second pass
-    // of paint would, with no seam.
+    // One stroke lays down one coat of paint. Everywhere the stroke covers,
+    // including the places it passes over twice, the coverage is the most the
+    // brush ever offered there, and the whole coat is composited onto the
+    // layer once. Anything else shows: adding the second visit to the first
+    // darkens a band whose edge falls wherever the rule changed its mind, and
+    // that edge is the crescent that used to appear along fast strokes and
+    // through crossings. Paint builds up between strokes instead, which is
+    // where compositing already does it, and what Paint.NET does too.
     void accumulateSegment(QPointF from, QPointF to)
     {
         const double radius = std::max(0.5, diameter() / 2.0);
@@ -160,42 +157,36 @@ protected:
         // antialiased instead of turning into stair steps.
         const double falloff = std::max(radius - inner, 0.5);
         const float amount = strength();
-        // Shape of the falloff across that band. A straight ramp, or a
-        // smoothstep, flattens off near the middle and leaves a solid core, so
-        // even the softest setting still painted a hard centre with a thin
-        // fuzzy rim. Raising the ramp to a power bends it the other way: the
-        // coverage drops away immediately from the centre line and trails off.
-        const double shape = 1.0 + 2.0 * (1.0 - hard) * (1.0 - hard);
-        const bool straight = shape <= 1.02;
-        // How much pigment one pass lays down. A hard brush covers completely,
-        // but a very soft one is a haze that has to be built up, which is what
-        // a real soft brush does and what makes the lowest settings usable.
-        // It also takes the sting out of crossings: with no saturated core, the
-        // kink where two passes of the stroke are equidistant shows up across
-        // the whole falloff, and scaling the whole thing down scales that down
-        // with it. Anything at or above roughly a third hardness still covers
-        // fully, so the default brush is unchanged.
-        const double density = 0.15 + 0.85 * std::min(1.0, hard / 0.35);
+        // Shape of the falloff across that band. A straight ramp meets the
+        // centre line at an angle and the rim at an angle, so a soft brush
+        // came out as a flat grey strip with a spine down the middle rather
+        // than as a blur; raising the ramp to a power only moved the angle.
+        // A bell is flat at both ends: coverage leaves the centre smoothly,
+        // spreads the fade across the whole radius, and arrives at the rim
+        // with nothing to see. That is what makes a soft brush look blurred.
+        // At high hardness the band is a fraction of a pixel wide, so the
+        // curve across it makes no difference and the edge stays crisp.
+        constexpr double kBell = 4.5;
+        const double pedestal = std::exp(-kBell);
+        const double bellScale = 1.0 / (1.0 - pedestal);
+        // How much pigment one stroke lays down. A hard brush covers
+        // completely, but the softest one is a haze that has to be built up
+        // over several strokes, which is what a real soft brush does and what
+        // makes the lowest settings worth having. Anything at or above roughly
+        // a third hardness still covers fully in one go, so the default brush
+        // is unchanged.
+        const double density = 0.10 + 0.90 * std::min(1.0, hard / 0.35);
 
         const Rect box = stampBounds(from, to).intersected(coverage_.rect());
         const double abx = to.x() - from.x();
         const double aby = to.y() - from.y();
         const double lengthSq = abx * abx + aby * aby;
-        const double length = std::sqrt(lengthSq);
-        const double arcStart = travelled_;
-        travelled_ += length;
         if (box.isEmpty())
             return;
-
-        // Anything laid down within a brush width of here counts as the same
-        // pass rather than a revisit.
-        const float window = float(std::max(2.0 * radius, 4.0));
-        const int width = coverage_.width();
 
         parallelFor(box.y, box.bottom(), [&](int y0, int y1) {
             for (int y = y0; y < y1; ++y) {
                 float* line = coverage_.row(y);
-                float* touch = touch_.data() + size_t(y) * width;
                 for (int x = box.x; x < box.right(); ++x) {
                     const double px = x + 0.5 - from.x();
                     const double py = y + 0.5 - from.y();
@@ -206,25 +197,16 @@ protected:
                     const double dx = px - abx * along;
                     const double dy = py - aby * along;
                     const double distance = std::sqrt(dx * dx + dy * dy);
-                    double coverage = (radius - distance) / falloff;
-                    if (coverage <= 0.0)
+                    double across = (radius - distance) / falloff;
+                    if (across <= 0.0)
                         continue;
-                    coverage = std::min(1.0, coverage);
-                    if (!straight)
-                        coverage = std::pow(coverage, shape);
+                    across = std::min(1.0, across);
+                    const double rest = 1.0 - across;
+                    const double coverage =
+                        (std::exp(-kBell * rest * rest) - pedestal) * bellScale;
                     const float value = float(coverage * density) * amount;
-                    const float here = float(arcStart + along * length);
-                    const float previous = line[x];
-                    if (previous <= 0.0f) {
+                    if (value > line[x])
                         line[x] = value;
-                    } else if (std::abs(here - touch[x]) <= window) {
-                        if (value <= previous)
-                            continue;
-                        line[x] = value;
-                    } else {
-                        line[x] = previous + value * (1.0f - previous);
-                    }
-                    touch[x] = here;
                 }
             }
         }, 32);
@@ -318,8 +300,6 @@ private:
     int layerUid_ = 0;
     Image backup_;
     Mask coverage_;
-    std::vector<float> touch_;   // arc length at which each pixel was covered
-    double travelled_ = 0.0;
     QPointF last_;
     Rect dirty_;
     bool busy_ = false;

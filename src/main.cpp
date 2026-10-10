@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <cstring>
+
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -8,12 +11,23 @@
 
 #include "tessel_version.h"
 #include "ui/Icons.h"
+#include "ui/KeyLayoutFilter.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 #include "ui/WheelFilter.h"
 
 int main(int argc, char** argv)
 {
+    // Answered before anything else exists. Qt's own version option puts the
+    // text in a message box on a Windows GUI application, which waits for a
+    // click that a script will never give it.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
+            std::printf("%s %s\n", TESSEL_APP_NAME, TESSEL_VERSION_STRING);
+            return 0;
+        }
+    }
+
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral(TESSEL_APP_NAME));
     QApplication::setApplicationVersion(QStringLiteral(TESSEL_VERSION_STRING));
@@ -52,6 +66,7 @@ int main(int argc, char** argv)
 
     // Wheel over a value field lowers it when pushed forward.
     app.installEventFilter(new tessel::WheelFilter(&app));
+    app.installEventFilter(new tessel::KeyLayoutFilter(&app));
 
     tessel::MainWindow window;
     window.show();

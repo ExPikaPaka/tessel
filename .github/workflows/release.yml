@@ -9,12 +9,15 @@ on:
         description: Tag to publish
         required: true
 
+env:
+  QT_VERSION: 6.8.3
+  QT_ARCH: win64_msvc2022_64
+  VCPKG_TRIPLET: x64-windows-static-md
+
 jobs:
-  release:
-    name: Build and publish
+  linux:
+    name: Linux x86_64
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -47,15 +50,140 @@ jobs:
           strip "$stage/tessel"
           tar czf "$stage.tar.gz" "$stage"
           sha256sum "$stage.tar.gz" > "$stage.tar.gz.sha256"
-          ls -l
 
+      - name: Upload for publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            tessel-*.tar.gz
+            tessel-*.tar.gz.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: ${{ env.QT_ARCH }}
+          cache: true
+
+      - name: Install zlib via vcpkg
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "zlib:$env:VCPKG_TRIPLET"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="$env:VCPKG_TRIPLET" `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Stage and deploy Qt runtime
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item build/tessel.exe staging/
+          Copy-Item README.md staging/
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" `
+            --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            --dir staging staging/tessel.exe
+          Copy-Item "$env:QT_ROOT_DIR\plugins\platforms\qoffscreen.dll" `
+            staging/platforms/ -Force
+
+      - name: Smoke test the deployed binary
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $run = Start-Process -FilePath ./staging/tessel.exe -PassThru -NoNewWindow `
+            -ArgumentList '--screenshot', 'smoke.png', '--screenshot-delay', '1500'
+          if (-not $run.WaitForExit(120000)) {
+            $run.Kill()
+            throw "tessel.exe did not exit within two minutes"
+          }
+          if ($run.ExitCode -ne 0) {
+            throw "tessel.exe exited with $($run.ExitCode)"
+          }
+          if (-not (Test-Path smoke.png)) {
+            throw "tessel.exe wrote no screenshot"
+          }
+          Remove-Item smoke.png
+
+      - name: Package
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $name = "tessel-$($tag -replace '^v', '')-windows-x64"
+          Compress-Archive -Path staging/* -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash `
+            | Out-File -Encoding ascii "$name.zip.sha256"
+
+      - name: Upload for publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            tessel-*.zip
+            tessel-*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect the builds
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Creating the release and uploading to one that already exists are
+      # different commands, so publishing twice for the same tag replaces the
+      # files rather than failing.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release create "$tag" \
-            --title "Tessel $tag" \
-            --notes-file .github/release-notes.md \
-            --verify-tag \
-            tessel-*.tar.gz tessel-*.tar.gz.sha256
+          ls -l dist
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "Tessel $tag" \
+              --notes-file .github/release-notes.md
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" \
+              --title "Tessel $tag" \
+              --notes-file .github/release-notes.md \
+              --verify-tag \
+              dist/*
+          fi

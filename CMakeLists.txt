@@ -36,7 +36,7 @@ else()
   set(TESSEL_WARNING_FLAGS -Wall -Wextra -Wno-unused-parameter)
 endif()
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets PrintSupport)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets PrintSupport Test)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -90,6 +90,8 @@ qt_add_library(tessel_ui STATIC
   src/ui/Icons.h
   src/ui/Theme.cpp
   src/ui/Theme.h
+  src/ui/KeyLayoutFilter.cpp
+  src/ui/KeyLayoutFilter.h
   src/ui/WheelFilter.cpp
   src/ui/WheelFilter.h
   src/tools/Tool.cpp
@@ -125,8 +127,10 @@ add_executable(tessel_tests tests/tests.cpp)
 target_link_libraries(tessel_tests PRIVATE tessel_core)
 add_test(NAME core COMMAND tessel_tests)
 
+# Qt Test is only used for its key and mouse injection, which is the one way
+# to drive real keyboard shortcuts through the shortcut map.
 qt_add_executable(tessel_gui_tests tests/gui_tests.cpp)
-target_link_libraries(tessel_gui_tests PRIVATE tessel_ui)
+target_link_libraries(tessel_gui_tests PRIVATE tessel_ui Qt6::Test)
 add_test(NAME gui COMMAND tessel_gui_tests)
 set_tests_properties(gui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

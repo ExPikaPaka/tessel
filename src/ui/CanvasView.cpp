@@ -667,10 +667,16 @@ void CanvasView::keyPressEvent(QKeyEvent* event)
         const bool abandon = event->key() == Qt::Key_Escape;
         if (tool_ && tool_->isBusy()) {
             ToolContext context = makeContext();
-            if (abandon)
-                tool_->cancel(context);
-            else
-                tool_->commit(context);
+            // The tool gets first say. For most of them Escape means throw the
+            // unfinished thing away, but a tool holding something the user has
+            // already positioned, such as moved pixels, drops it where it
+            // stands instead of snatching the move back.
+            if (!tool_->keyPress(context, event)) {
+                if (abandon)
+                    tool_->cancel(context);
+                else
+                    tool_->commit(context);
+            }
             event->accept();
             return;
         }

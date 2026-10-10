@@ -405,8 +405,9 @@ public:
     {
         return QStringLiteral("Drag the selected pixels. Drag a corner handle to "
                               "scale, the handle above the box or anywhere outside it "
-                              "to rotate (Shift snaps to 15 degrees), press Enter to "
-                              "finish or Escape to cancel.");
+                              "to rotate (Shift snaps to 15 degrees), press Enter or "
+                              "Escape to drop them where they are, Ctrl+Z to put them "
+                              "back.");
     }
     QCursor cursor() const override { return QCursor(Qt::SizeAllCursor); }
 
@@ -465,16 +466,26 @@ public:
         case Qt::Key_Right: target_.translate(step, 0); break;
         case Qt::Key_Up: target_.translate(0, -step); break;
         case Qt::Key_Down: target_.translate(0, step); break;
+        // Both keys let go of the pixels and leave them where they were
+        // dragged. Escape used to snatch the move back, which lost work that
+        // looked finished; undo is the way to take it back. Escape also drops
+        // the selection, the way it does when nothing is being moved, so one
+        // press finishes the job.
         case Qt::Key_Return:
-        case Qt::Key_Enter: commit(context); return true;
-        case Qt::Key_Escape: cancel(context); return true;
+        case Qt::Key_Enter: drop(context, false); return true;
+        case Qt::Key_Escape: drop(context, true); return true;
         default: return false;
         }
         render(context);
         return true;
     }
 
-    void commit(ToolContext& context) override
+    void commit(ToolContext& context) override { drop(context, false); }
+
+    // Lets go of the floating pixels, leaving them where they have been put.
+    // The selection goes with them, or away entirely when the move was ended
+    // with Escape.
+    void drop(ToolContext& context, bool deselect)
     {
         if (!floating_)
             return;
@@ -495,6 +506,10 @@ public:
                 selection.transformBy(placementTransform());
             }
         }
+        if (deselect)
+            selection.clear();
+        // The snapshot carries the selection, so dropping the pixels and
+        // dropping the outline undo together, as one move.
         DocumentState after = context.doc->snapshot();
         context.history->push(std::make_unique<DocumentEdit>(
             name(), iconName(), std::move(before_), std::move(after)));
