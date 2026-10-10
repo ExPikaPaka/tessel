@@ -1,0 +1,133 @@
+# Tessel
+
+A layered raster image editor for Linux, written from scratch in C++20 with Qt 6.
+It follows the way of working that Paint.NET made popular: a tool palette on the
+left, Colors below it, History and Layers on the right, a tool options bar under
+the main toolbar, and a status bar that always tells you where the cursor is,
+how big the selection is and what the zoom level is.
+
+## About the name and the inspiration
+
+Tessel is an independent program. It is not a port of Paint.NET and shares no code
+with it: Paint.NET is closed source, Windows only and built on .NET, so no port
+of it can exist. What Tessel borrows is the workflow and the layout, both of which
+are implemented here from the ground up, including every icon, which is drawn
+procedurally with QPainter rather than loaded from a file.
+
+## Building
+
+Requirements: a C++20 compiler, CMake 3.21 or newer, Qt 6.4 or newer (Widgets),
+and zlib.
+
+    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build build
+    ./build/tessel
+
+To install system wide, together with its desktop entry and icon:
+
+    sudo cmake --install build
+
+On Arch and derivatives the dependencies are `qt6-base`, `cmake`, `ninja` and
+`gcc`. On Debian and Ubuntu they are `qt6-base-dev`, `cmake`, `ninja-build`,
+`g++` and `zlib1g-dev`.
+
+## Running the tests
+
+    ctest --test-dir build --output-on-failure
+
+Two suites run: `core` covers the pixel engine, documents, undo history and file
+formats without a display, and `gui` drives the real widgets, tools and effects
+through the offscreen Qt platform plugin.
+
+## What it can do
+
+### Tools
+
+Rectangle Select, Lasso Select, Ellipse Select and Magic Wand, each with the five
+combine modes (replace, union, subtract, intersect, exclusive or) and with Ctrl
+and Alt as live modifiers. Move Selected Pixels lifts the selection onto a
+floating buffer that can be dragged, nudged with the arrow keys and scaled from
+its corner handles; Move Selection slides the outline on its own.
+
+Paintbrush, Pencil, Eraser, Paint Bucket, Gradient (linear, reflected, radial,
+conical and diamond, in colour or transparency mode, with optional dithering),
+Clone Stamp, Recolor, Color Picker, Text, Line and Curve, Shapes (twelve of
+them), Zoom and Pan.
+
+The right mouse button draws with the secondary colour, the space bar pans with
+any tool, and every drawing tool is clipped to the active selection.
+
+### Adjustments
+
+Auto Level, Black and White, Brightness / Contrast, Color Balance, Color
+Temperature, Curves, Hue / Saturation, Invert Colors, Levels, Posterize, Sepia
+and Threshold. Curves and Levels have dedicated dialogs with the channel
+histogram behind the controls.
+
+### Effects
+
+* Artistic: Oil Painting, Pencil Sketch, Ink Sketch, Mosaic Tiles
+* Blurs: Gaussian, Unfocus, Motion, Radial, Zoom, Fragment, Surface Blur
+* Distort: Bulge, Twist, Polar Inversion, Tile Reflection, Dents, Frosted Glass,
+  Pixelate, Crystalize
+* Noise: Add Noise, Median, Reduce Noise
+* Photo: Sharpen, Glow, Vignette, Soft Portrait, Red Eye Removal
+* Render: Clouds, Julia Fractal, Mandelbrot Fractal, Checkerboard
+
+Every effect dialog is generated from the effect's parameter list and previews
+live on the canvas; Ctrl+F repeats the last one with the same settings.
+
+### Layers
+
+Any number of layers, each with its own name, visibility, opacity and blend
+mode. The fourteen blend modes are Normal, Multiply, Additive, Color Burn, Color
+Dodge, Reflect, Glow, Overlay, Difference, Negation, Lighten, Darken, Screen and
+Xor. Layers can be added, deleted, duplicated, reordered, merged down, flattened,
+flipped, rotated and zoomed, and imported from any readable image file.
+
+### History
+
+Every edit is undoable, and the History window lists them all so you can jump to
+any point in the session. Brush strokes store only the rectangle they touched,
+so a long session stays cheap; the stack is capped by both step count and memory.
+
+### File formats
+
+* `.tessel`, the native format: a zip holding one PNG per layer, a JSON manifest,
+  the selection and a flattened preview
+* `.ora` (OpenRaster), which keeps layers, opacity and blend modes and is read by
+  Krita, GIMP and MyPaint
+* PNG, JPEG, BMP, TIFF, WebP, TGA, GIF, ICO and anything else the Qt image
+  plugins on the system can handle
+
+Paint.NET's own `.pdn` files cannot be read, because the format is an
+undocumented serialisation of .NET objects. Tessel says so plainly when one is
+opened and suggests exporting `.ora` or `.png` from Paint.NET instead.
+
+## Keyboard
+
+Press F1 inside the program for the full list. The tool letters are S for the
+selection tools (press it again to cycle), M for the two move tools, B
+paintbrush, P pencil, E eraser, F paint bucket, G gradient, K colour picker, L
+clone stamp, R recolor, T text, O line and shapes, Z zoom and H pan. X swaps the
+palette colours and D resets them.
+
+## How the code is laid out
+
+    src/core      pixel engine: Image, blend modes, ImageOps, Document, Layer,
+                  Selection, History, zip and file formats. No GUI dependency,
+                  which is why the core tests run headless.
+    src/effects   the effect registry and the effects themselves, each one a
+                  lambda plus a parameter list
+    src/tools     the Tool interface, the shared stroke engine and all 19 tools
+    src/ui        the window, canvas view, docks, colour panel and dialogs
+    tests         the two test suites
+
+Pixel work is parallelised over scanlines with a small `parallelFor`, blurs use a
+three pass box approximation of a gaussian, and resampling is done in
+premultiplied alpha so transparent edges do not bleed.
+
+## Licence
+
+Written for this repository. Qt is used under the LGPL, so the dynamic linking
+here keeps that licence intact.

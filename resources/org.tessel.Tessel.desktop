@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Tessel
+GenericName=Image Editor
+Comment=Layered raster image editor
+Exec=tessel %F
+Icon=org.tessel.Tessel
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;GTK;
+MimeType=image/png;image/jpeg;image/bmp;image/gif;image/tiff;image/webp;image/x-tga;image/vnd.microsoft.icon;image/openraster;image/x-tessel;
+Keywords=paint;draw;image;editor;layers;photo;
+StartupNotify=true
+StartupWMClass=tessel
