@@ -19,11 +19,6 @@ namespace {
 
 QString escaped(const QString& text) { return text.toHtmlEscaped(); }
 
-QString plural(int count, const QString& singular, const QString& many)
-{
-    return count == 1 ? singular : many;
-}
-
 } // namespace
 
 QString LoadReport::summary() const
@@ -31,15 +26,14 @@ QString LoadReport::summary() const
     const int ok = int(loaded.size());
     const int bad = int(failed.size());
     if (bad > 0) {
-        return QStringLiteral("%1 effect %2 failed to load. See Effects > About the "
-                              "Plugins.")
-            .arg(bad)
-            .arg(plural(bad, QStringLiteral("plugin"), QStringLiteral("plugins")));
+        return QCoreApplication::translate(
+            "Effects",
+            "%n effect plugin(s) failed to load. See Effects > About the Plugins.",
+            nullptr, bad);
     }
     if (ok > 0) {
-        return QStringLiteral("%1 effect %2 loaded.")
-            .arg(ok)
-            .arg(plural(ok, QStringLiteral("plugin"), QStringLiteral("plugins")));
+        return QCoreApplication::translate("Effects", "%n effect plugin(s) loaded.",
+                                           nullptr, ok);
     }
     return QString();
 }
@@ -47,27 +41,30 @@ QString LoadReport::summary() const
 QString LoadReport::html() const
 {
     QString out;
-    out += QStringLiteral("<p>Effects can be added to Tessel by dropping a plugin "
-                          "library into one of these directories, which are read at "
-                          "startup:</p><ul>");
+    out += QCoreApplication::translate(
+        "Effects", "<p>Effects can be added to Tessel by dropping a plugin library "
+                   "into one of these directories, which are read at "
+                   "startup:</p><ul>");
     for (const QString& dir : directories)
         out += QStringLiteral("<li><code>%1</code></li>").arg(escaped(dir));
     out += QStringLiteral("</ul>");
 
     if (loaded.empty() && failed.empty()) {
-        out += QStringLiteral("<p>No plugins were found.</p>");
+        out += QCoreApplication::translate("Effects", "<p>No plugins were found.</p>");
     } else if (!loaded.empty()) {
-        out += QStringLiteral("<p><b>Loaded</b></p><ul>");
+        out += QCoreApplication::translate("Effects", "<p><b>Loaded</b></p><ul>");
         for (const PluginInfo& info : loaded) {
             QString line = QStringLiteral("<b>%1</b>").arg(escaped(info.name));
             if (!info.version.isEmpty())
                 line += QStringLiteral(" %1").arg(escaped(info.version));
-            if (!info.author.isEmpty())
-                line += QStringLiteral(" by %1").arg(escaped(info.author));
+            if (!info.author.isEmpty()) {
+                line += QCoreApplication::translate("Effects", " by %1")
+                            .arg(escaped(info.author));
+            }
             line += QStringLiteral("<br><code>%1</code>")
                         .arg(escaped(QFileInfo(info.path).fileName()));
             line += info.effects.isEmpty()
-                ? QStringLiteral("<br>No effects.")
+                ? QCoreApplication::translate("Effects", "<br>No effects.")
                 : QStringLiteral("<br>%1").arg(escaped(info.effects.join(
                       QStringLiteral(", "))));
             out += QStringLiteral("<li>%1</li>").arg(line);
@@ -76,7 +73,8 @@ QString LoadReport::html() const
     }
 
     if (!failed.empty()) {
-        out += QStringLiteral("<p><b>Did not load</b></p><ul>");
+        out += QCoreApplication::translate("Effects",
+                                           "<p><b>Did not load</b></p><ul>");
         for (const PluginFailure& failure : failed) {
             out += QStringLiteral("<li><b><code>%1</code></b><br>%2</li>")
                        .arg(escaped(QFileInfo(failure.path).fileName()),
@@ -85,7 +83,8 @@ QString LoadReport::html() const
         out += QStringLiteral("</ul>");
     }
 
-    out += QStringLiteral("<p>This build hosts effect plugin interface version "
+    out += QCoreApplication::translate(
+               "Effects", "<p>This build hosts effect plugin interface version "
                           "%1.</p>")
                .arg(kEffectPluginVersion);
     return out;
@@ -115,14 +114,16 @@ bool acceptPlugin(EffectPlugin* plugin, const QString& path, EffectRegistry& reg
                   LoadReport& into)
 {
     if (!plugin) {
-        into.failed.push_back({path, QStringLiteral("no plugin object")});
+        into.failed.push_back(
+            {path, QCoreApplication::translate("Effects", "no plugin object")});
         return false;
     }
     const int version = plugin->interfaceVersion();
     if (version != kEffectPluginVersion) {
         into.failed.push_back(
             {path,
-             QStringLiteral("built against effect plugin interface version %1, this "
+             QCoreApplication::translate(
+                 "Effects", "built against effect plugin interface version %1, this "
                             "build of Tessel hosts version %2. Rebuild the plugin "
                             "against this version of Tessel.")
                  .arg(version)
@@ -165,8 +166,10 @@ void loadFile(const QString& path, EffectRegistry& registry, LoadReport& into)
     auto* plugin = qobject_cast<EffectPlugin*>(object);
     if (!plugin) {
         into.failed.push_back(
-            {path, QStringLiteral("a Qt plugin, but not a Tessel effect plugin: it "
-                                  "does not implement " TesselEffectPluginIid ".")});
+            {path, QCoreApplication::translate(
+                       "Effects", "a Qt plugin, but not a Tessel effect plugin: it "
+                                  "does not implement %1.")
+                       .arg(QLatin1String(TesselEffectPluginIid))});
         loader.unload();
         return;
     }

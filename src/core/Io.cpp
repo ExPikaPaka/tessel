@@ -4,6 +4,7 @@
 #include <optional>
 
 #include <QBuffer>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QImageWriter>
@@ -148,7 +149,7 @@ void collectOraLayers(QXmlStreamReader& xml, std::vector<OraEntry>& out, int ox,
             entry.group = true;
             readOraCommon(attrs, entry);
             if (entry.name.isEmpty())
-                entry.name = QStringLiteral("Group");
+                entry.name = QCoreApplication::translate("Core", "Group");
             // A stack nested past the limit is folded into its parent rather
             // than dropped, so no pixels are lost to a pathological file.
             if (depth < 8)
@@ -167,7 +168,7 @@ void collectOraLayers(QXmlStreamReader& xml, std::vector<OraEntry>& out, int ox,
             continue;
         readOraCommon(attrs, entry);
         if (entry.name.isEmpty())
-            entry.name = QStringLiteral("Layer");
+            entry.name = QCoreApplication::translate("Core", "Layer");
         entry.x = x;
         entry.y = y;
         out.push_back(entry);
@@ -190,7 +191,8 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
     reader.setAutoTransform(true);
     if (!reader.canRead()) {
         if (error)
-            *error = QStringLiteral("%1 is not an image Tessel can read (%2).")
+            *error = QCoreApplication::translate(
+                "Core", "%1 is not an image Tessel can read (%2).")
                          .arg(QFileInfo(path).fileName(), reader.errorString());
         return nullptr;
     }
@@ -199,7 +201,7 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
     QImage first = reader.read();
     if (first.isNull()) {
         if (error)
-            *error = QStringLiteral("Could not decode %1: %2")
+            *error = QCoreApplication::translate("Core", "Could not decode %1: %2")
                          .arg(QFileInfo(path).fileName(), reader.errorString());
         return nullptr;
     }
@@ -226,15 +228,17 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
             sized.blit(pixels, 0, 0);
             pixels = std::move(sized);
         }
-        const QString name = i == 0 ? QStringLiteral("Background")
-                                    : QStringLiteral("Frame %1").arg(i + 1);
+        const QString name = i == 0 ? QCoreApplication::translate("Core", "Background")
+                                    : QCoreApplication::translate(
+                                        "Core", "Frame %1").arg(i + 1);
         auto layer = std::make_unique<Layer>(std::move(pixels), name);
         layer->visible = (i == 0);
         doc->addLayer(std::move(layer), static_cast<int>(i));
     }
     if (doc->layerCount() == 0) {
         if (error)
-            *error = QStringLiteral("The file contains no usable image data.");
+            *error = QCoreApplication::translate(
+                "Core", "The file contains no usable image data.");
         return nullptr;
     }
     doc->layerAt(0)->visible = true;
@@ -362,8 +366,9 @@ void readTesselLayers(Document& doc, Layer* parent, const QJsonArray& array,
 {
     for (const QJsonValue& value : array) {
         const QJsonObject entry = value.toObject();
+        const QString fallbackName = QCoreApplication::translate("Core", "Layer");
         const QString name =
-            entry.value(QStringLiteral("name")).toString(QStringLiteral("Layer"));
+            entry.value(QStringLiteral("name")).toString(fallbackName);
         const std::vector<LayerEffect> effects =
             effectsFromJson(entry.value(QStringLiteral("effects")).toArray());
         Layer* added = nullptr;
@@ -426,7 +431,8 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
     ZipReader zip(path);
     if (!zip.isValid()) {
         if (error)
-            *error = QStringLiteral("Not a Tessel image: %1").arg(zip.errorString());
+            *error = QCoreApplication::translate(
+                "Core", "Not a Tessel image: %1").arg(zip.errorString());
         return nullptr;
     }
     const QByteArray manifestBytes = zip.read(QStringLiteral("document.json"));
@@ -434,7 +440,8 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
     const QJsonDocument manifest = QJsonDocument::fromJson(manifestBytes, &parseError);
     if (!manifest.isObject()) {
         if (error)
-            *error = QStringLiteral("Damaged Tessel image: %1").arg(parseError.errorString());
+            *error = QCoreApplication::translate(
+                "Core", "Damaged Tessel image: %1").arg(parseError.errorString());
         return nullptr;
     }
     const QJsonObject root = manifest.object();
@@ -443,7 +450,8 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
     const QJsonArray layerArray = root.value(QStringLiteral("layers")).toArray();
     if (width <= 0 || height <= 0 || layerArray.isEmpty()) {
         if (error)
-            *error = QStringLiteral("Damaged Tessel image: no layers.");
+            *error = QCoreApplication::translate(
+                "Core", "Damaged Tessel image: no layers.");
         return nullptr;
     }
     auto doc = std::make_unique<Document>(width, height);
@@ -454,7 +462,8 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
     readTesselLayers(*doc, doc->rootGroup(), layerArray, zip, 0);
     if (doc->layerCount() == 0) {
         if (error)
-            *error = QStringLiteral("Damaged Tessel image: no layers could be read.");
+            *error = QCoreApplication::translate(
+                "Core", "Damaged Tessel image: no layers could be read.");
         return nullptr;
     }
     doc->setActiveIndex(root.value(QStringLiteral("active")).toInt(doc->layerCount() - 1));
@@ -510,13 +519,15 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
     ZipReader zip(path);
     if (!zip.isValid()) {
         if (error)
-            *error = QStringLiteral("Not an OpenRaster image: %1").arg(zip.errorString());
+            *error = QCoreApplication::translate(
+                "Core", "Not an OpenRaster image: %1").arg(zip.errorString());
         return nullptr;
     }
     const QByteArray stackBytes = zip.read(QStringLiteral("stack.xml"));
     if (stackBytes.isEmpty()) {
         if (error)
-            *error = QStringLiteral("Damaged OpenRaster image: stack.xml is missing.");
+            *error = QCoreApplication::translate(
+                "Core", "Damaged OpenRaster image: stack.xml is missing.");
         return nullptr;
     }
     QXmlStreamReader xml(stackBytes);
@@ -543,7 +554,8 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
     }
     if (width <= 0 || height <= 0 || countOraLayers(entries) == 0) {
         if (error)
-            *error = QStringLiteral("Damaged OpenRaster image: no layers found.");
+            *error = QCoreApplication::translate(
+                "Core", "Damaged OpenRaster image: no layers found.");
         return nullptr;
     }
     auto doc = std::make_unique<Document>(width, height);
@@ -558,11 +570,11 @@ std::unique_ptr<Document> readPdn(const QString& path, QString* error)
 {
     Q_UNUSED(path);
     if (error) {
-        *error = QStringLiteral(
-            "Paint.NET's .pdn format is an undocumented serialisation of .NET "
-            "objects, so Tessel cannot read it.\n\n"
-            "In Paint.NET, use Save As and pick OpenRaster (.ora) to keep the "
-            "layers, or PNG to export the flattened image. Tessel reads both.");
+        *error = QCoreApplication::translate(
+            "Core", "Paint.NET's .pdn format is an undocumented serialisation of .NET "
+                    "objects, so Tessel cannot read it.\n\n"
+                    "In Paint.NET, use Save As and pick OpenRaster (.ora) to keep the "
+                    "layers, or PNG to export the flattened image. Tessel reads both.");
     }
     return nullptr;
 }
@@ -592,7 +604,7 @@ bool writeFlat(const Image& image, double resolution, const QString& path,
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error)
-            *error = QStringLiteral("Could not write %1: %2")
+            *error = QCoreApplication::translate("Core", "Could not write %1: %2")
                          .arg(QFileInfo(path).fileName(), file.errorString());
         return false;
     }
@@ -603,14 +615,15 @@ bool writeFlat(const Image& image, double resolution, const QString& path,
         writer.setCompression(6);
     if (!writer.write(out)) {
         if (error)
-            *error = QStringLiteral("Could not write %1: %2")
+            *error = QCoreApplication::translate("Core", "Could not write %1: %2")
                          .arg(QFileInfo(path).fileName(), writer.errorString());
         file.cancelWriting();
         return false;
     }
     if (!file.commit()) {
         if (error)
-            *error = QStringLiteral("Could not finish writing %1: %2")
+            *error = QCoreApplication::translate(
+                "Core", "Could not finish writing %1: %2")
                          .arg(QFileInfo(path).fileName(), file.errorString());
         return false;
     }
@@ -683,7 +696,7 @@ bool writeTessel(const Document& doc, const QString& path, QString* error,
         ZipWriter zip(temp);
         if (!zip.isOpen()) {
             if (error)
-                *error = QStringLiteral("Could not write %1: %2")
+                *error = QCoreApplication::translate("Core", "Could not write %1: %2")
                              .arg(QFileInfo(path).fileName(), zip.errorString());
             return false;
         }
@@ -719,7 +732,8 @@ bool writeTessel(const Document& doc, const QString& path, QString* error,
         }
         if (!zip.close()) {
             if (error)
-                *error = QStringLiteral("Could not finish writing %1.")
+                *error = QCoreApplication::translate(
+                    "Core", "Could not finish writing %1.")
                              .arg(QFileInfo(path).fileName());
             QFile::remove(temp);
             return false;
@@ -728,7 +742,8 @@ bool writeTessel(const Document& doc, const QString& path, QString* error,
     QFile::remove(path);
     if (!QFile::rename(temp, path)) {
         if (error)
-            *error = QStringLiteral("Could not replace %1.").arg(QFileInfo(path).fileName());
+            *error = QCoreApplication::translate(
+                "Core", "Could not replace %1.").arg(QFileInfo(path).fileName());
         QFile::remove(temp);
         return false;
     }
@@ -813,7 +828,7 @@ bool writeOra(const Document& doc, const QString& path, QString* error)
         ZipWriter zip(temp);
         if (!zip.isOpen()) {
             if (error)
-                *error = QStringLiteral("Could not write %1: %2")
+                *error = QCoreApplication::translate("Core", "Could not write %1: %2")
                              .arg(QFileInfo(path).fileName(), zip.errorString());
             return false;
         }
@@ -843,7 +858,8 @@ bool writeOra(const Document& doc, const QString& path, QString* error)
         zip.add(QStringLiteral("Thumbnails/thumbnail.png"), encodePng(doc.thumbnail(256)));
         if (!zip.close()) {
             if (error)
-                *error = QStringLiteral("Could not finish writing %1.")
+                *error = QCoreApplication::translate(
+                    "Core", "Could not finish writing %1.")
                              .arg(QFileInfo(path).fileName());
             QFile::remove(temp);
             return false;
@@ -852,7 +868,8 @@ bool writeOra(const Document& doc, const QString& path, QString* error)
     QFile::remove(path);
     if (!QFile::rename(temp, path)) {
         if (error)
-            *error = QStringLiteral("Could not replace %1.").arg(QFileInfo(path).fileName());
+            *error = QCoreApplication::translate(
+                "Core", "Could not replace %1.").arg(QFileInfo(path).fileName());
         QFile::remove(temp);
         return false;
     }
@@ -944,19 +961,22 @@ struct NamedFilter {
     const char* extensions;
 };
 
+// The labels are marked here and looked up where the filter is built, because
+// a static table cannot hold a translation: the language may change before
+// anything asks for the list.
 const std::vector<NamedFilter>& namedFilters()
 {
     static const std::vector<NamedFilter> filters = {
-        {"Tessel layered image", "tessel"},
-        {"OpenRaster", "ora"},
-        {"PNG image", "png"},
-        {"JPEG image", "jpg jpeg"},
-        {"Bitmap", "bmp"},
-        {"TIFF image", "tif tiff"},
-        {"WebP image", "webp"},
-        {"Targa", "tga"},
-        {"Windows icon", "ico"},
-        {"GIF image", "gif"},
+        {QT_TRANSLATE_NOOP("Core", "Tessel layered image"), "tessel"},
+        {QT_TRANSLATE_NOOP("Core", "OpenRaster"), "ora"},
+        {QT_TRANSLATE_NOOP("Core", "PNG image"), "png"},
+        {QT_TRANSLATE_NOOP("Core", "JPEG image"), "jpg jpeg"},
+        {QT_TRANSLATE_NOOP("Core", "Bitmap"), "bmp"},
+        {QT_TRANSLATE_NOOP("Core", "TIFF image"), "tif tiff"},
+        {QT_TRANSLATE_NOOP("Core", "WebP image"), "webp"},
+        {QT_TRANSLATE_NOOP("Core", "Targa"), "tga"},
+        {QT_TRANSLATE_NOOP("Core", "Windows icon"), "ico"},
+        {QT_TRANSLATE_NOOP("Core", "GIF image"), "gif"},
     };
     return filters;
 }
@@ -966,7 +986,7 @@ const std::vector<NamedFilter>& namedFilters()
 QString openFilter()
 {
     QStringList parts;
-    parts.append(QStringLiteral("All supported images (%1)")
+    parts.append(QCoreApplication::translate("Core", "All supported images (%1)")
                      .arg(patternsFor(readableExtensions())));
     const QStringList readable = readableExtensions();
     for (const NamedFilter& filter : namedFilters()) {
@@ -977,10 +997,11 @@ QString openFilter()
             supported = supported || readable.contains(extension);
         if (supported)
             parts.append(QStringLiteral("%1 (%2)")
-                             .arg(QLatin1String(filter.label), patternsFor(extensions)));
+                             .arg(QCoreApplication::translate("Core", filter.label),
+                                  patternsFor(extensions)));
     }
-    parts.append(QStringLiteral("Paint.NET image (*.pdn)"));
-    parts.append(QStringLiteral("All files (*)"));
+    parts.append(QCoreApplication::translate("Core", "Paint.NET image (*.pdn)"));
+    parts.append(QCoreApplication::translate("Core", "All files (*)"));
     return parts.join(QStringLiteral(";;"));
 }
 
@@ -996,7 +1017,8 @@ QString saveFilter()
             supported = supported || writable.contains(extension);
         if (supported)
             parts.append(QStringLiteral("%1 (%2)")
-                             .arg(QLatin1String(filter.label), patternsFor(extensions)));
+                             .arg(QCoreApplication::translate("Core", filter.label),
+                                  patternsFor(extensions)));
     }
     return parts.join(QStringLiteral(";;"));
 }
@@ -1008,7 +1030,8 @@ QString filterForExtension(const QString& extension)
                                            .split(QLatin1Char(' '));
         if (extensions.contains(extension.toLower()))
             return QStringLiteral("%1 (%2)")
-                .arg(QLatin1String(filter.label), patternsFor(extensions));
+                .arg(QCoreApplication::translate("Core", filter.label),
+                     patternsFor(extensions));
     }
     return QString();
 }
@@ -1018,7 +1041,8 @@ std::unique_ptr<Document> openDocument(const QString& path, QString* error)
     const QFileInfo info(path);
     if (!info.exists()) {
         if (error)
-            *error = QStringLiteral("%1 does not exist.").arg(info.fileName());
+            *error = QCoreApplication::translate(
+                "Core", "%1 does not exist.").arg(info.fileName());
         return nullptr;
     }
     const QString extension = info.suffix().toLower();
@@ -1077,7 +1101,8 @@ bool saveDocument(const Document& doc, const QString& path, QString* error,
         return writeOra(doc, path, error);
     if (!canWrite(path)) {
         if (error)
-            *error = QStringLiteral("Tessel cannot write '.%1' files.").arg(extension);
+            *error = QCoreApplication::translate(
+                "Core", "Tessel cannot write '.%1' files.").arg(extension);
         return false;
     }
     return writeFlat(doc.composite(), doc.resolution(), path, error, quality);

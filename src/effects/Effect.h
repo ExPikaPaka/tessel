@@ -66,7 +66,10 @@ public:
     virtual ~Effect() = default;
 
     virtual QString id() const = 0;
+    // Translated, because it is only ever shown.
     virtual QString name() const = 0;
+    // Not translated: the menus group by it and compare it, so it is an id.
+    // effectCategoryLabel() turns it into something to show.
     virtual QString category() const = 0;
     virtual QString shortcut() const { return QString(); }
     virtual std::vector<ParamSpec> params() const { return {}; }
@@ -129,6 +132,10 @@ private:
     std::vector<Effect*> order_;
     QHash<QString, Effect*> byId_;
 };
+
+// What the Effects menu calls `category`. The built in categories are
+// translated, a plugin's own category is passed through.
+QString effectCategoryLabel(const QString& category);
 
 void registerBuiltinEffects();
 

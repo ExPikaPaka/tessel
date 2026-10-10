@@ -122,7 +122,7 @@ ToolOptionsBar::ToolOptionsBar(QWidget* parent) : QWidget(parent)
     chooser_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     chooser_->setIconSize(QSize(20, 20));
     chooser_->setAutoRaise(true);
-    chooser_->setToolTip(QStringLiteral("Choose a tool (Alt+T)"));
+    chooser_->setToolTip(tr("Choose a tool (Alt+T)"));
     chooser_->setMenu(new QMenu(chooser_));
     layout_->addWidget(chooser_);
     title_ = new QLabel(this);

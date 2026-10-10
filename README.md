@@ -50,10 +50,12 @@ To install system wide, together with its desktop entry and icon:
 
     sudo cmake --install build
 
-On Arch and derivatives the dependencies are `qt6-base`, `cmake`, `ninja` and
-`gcc`. On Debian and Ubuntu they are `qt6-base-dev`, `cmake`, `ninja-build`,
-`g++` and `zlib1g-dev`. Qt Test is part of Qt 6 base and is used by the
-interface test suite.
+On Arch and derivatives the dependencies are `qt6-base`, `qt6-tools`, `cmake`,
+`ninja` and `gcc`. On Debian and Ubuntu they are `qt6-base-dev`,
+`qt6-tools-dev`, `qt6-l10n-tools`, `cmake`, `ninja-build`, `g++` and
+`zlib1g-dev`. Qt Test is part of Qt 6 base and is used by the interface test
+suite; the Qt Linguist tools come from the packages named above and compile the
+translations. A build without them is English only.
 
 ## Running the tests
 
@@ -181,6 +183,51 @@ palette colours and D resets them.
 Shortcuts that hold Ctrl or Alt are matched by the key's position, so they keep
 working while a non Latin keyboard layout is active.
 
+## Languages
+
+The interface ships in English and Russian. By default Tessel follows the
+system locale; Settings (the gear in the top right corner) has a Language box
+with System, English and Russian, and the choice takes effect the next time the
+program starts. Qt's own translations, which cover the standard dialog buttons
+and the file chooser, are loaded from the Qt installation for the same
+language.
+
+Every language lives in one file under `translations/`, named after its locale,
+and is compiled to a `.qm` by lrelease during an ordinary build. The `.qm`
+files are embedded in the executable as a resource under `/i18n`, so a single
+binary carries all of them and there is nothing to install beside it. The
+Linguist tools are optional: without them the build simply has no translations
+and the English source text is used.
+
+To add a language, say French:
+
+1. Create `translations/tessel_fr.ts` and add it to the `TS_FILES` of the
+   `qt_add_translations` call in `CMakeLists.txt`.
+2. Fill it with the strings in the source:
+
+       cmake --build build --target update_translations
+
+   lupdate reads everything under `src/` and writes one entry per string. Run
+   it again whenever a string changes; `-no-obsolete` keeps the file free of
+   entries nothing uses any more.
+3. Translate, by hand or in Qt Linguist:
+
+       linguist translations/tessel_fr.ts
+
+   Keep the `%1`, `%2` and `%n` markers, keep one `&` in every menu entry (it
+   is the Alt mnemonic, and the letters have to stay unique within a menu),
+   and fill in all three forms of a plural message where the language has
+   three. The `gui` test suite checks that no translation lost a placeholder.
+4. Add the language to the box in Settings: one `addItem` in
+   `MainWindow::showSettings`, with the locale name as the item's data.
+5. Build. The `.qm` is compiled and embedded automatically, and
+   `LANG=fr_FR.UTF-8 ./build/tessel` shows the result.
+
+Strings that are matched on rather than read are deliberately not translated:
+the blend mode names the file format stores, the unit and tool ids, the effect
+category keys and the icon names. Each of those has a separate display
+spelling, such as `blendModeLabel` beside `blendModeName`.
+
 ## How the code is laid out
 
     src/core      pixel engine: Image, blend modes, ImageOps, Document, Layer,
@@ -192,6 +239,7 @@ working while a non Latin keyboard layout is active.
     plugins       the example effect plugin
     src/tools     the Tool interface, the shared stroke engine and all 19 tools
     src/ui        the window, canvas view, docks, colour panel and dialogs
+    translations  one .ts file per language, compiled into the binary
     tests         the two test suites
 
 Pixel work is parallelised over scanlines with a small `parallelFor`, blurs use a

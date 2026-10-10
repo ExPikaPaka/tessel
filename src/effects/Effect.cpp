@@ -2,19 +2,20 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPolygonF>
 
 namespace tessel {
 
-ParamSpec ParamSpec::intParam(QString id, QString label, int minimum, int maximum,
+ParamSpec ParamSpec::intParam(QString id, const char* label, int minimum, int maximum,
                               int defaultValue, QString suffix)
 {
     ParamSpec spec;
     spec.type = ParamType::Int;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.minimum = minimum;
     spec.maximum = maximum;
     spec.defaultValue = defaultValue;
@@ -23,14 +24,14 @@ ParamSpec ParamSpec::intParam(QString id, QString label, int minimum, int maximu
     return spec;
 }
 
-ParamSpec ParamSpec::doubleParam(QString id, QString label, double minimum,
+ParamSpec ParamSpec::doubleParam(QString id, const char* label, double minimum,
                                  double maximum, double defaultValue, double step,
                                  int decimals, QString suffix)
 {
     ParamSpec spec;
     spec.type = ParamType::Double;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.minimum = minimum;
     spec.maximum = maximum;
     spec.defaultValue = defaultValue;
@@ -40,60 +41,60 @@ ParamSpec ParamSpec::doubleParam(QString id, QString label, double minimum,
     return spec;
 }
 
-ParamSpec ParamSpec::boolParam(QString id, QString label, bool defaultValue)
+ParamSpec ParamSpec::boolParam(QString id, const char* label, bool defaultValue)
 {
     ParamSpec spec;
     spec.type = ParamType::Bool;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.defaultValue = defaultValue ? 1.0 : 0.0;
     return spec;
 }
 
-ParamSpec ParamSpec::choiceParam(QString id, QString label, QStringList choices,
+ParamSpec ParamSpec::choiceParam(QString id, const char* label, QStringList choices,
                                  int defaultIndex)
 {
     ParamSpec spec;
     spec.type = ParamType::Choice;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.choices = std::move(choices);
     spec.defaultValue = defaultIndex;
     spec.maximum = static_cast<double>(std::max<qsizetype>(0, spec.choices.size() - 1));
     return spec;
 }
 
-ParamSpec ParamSpec::colorParam(QString id, QString label, Rgba defaultColor)
+ParamSpec ParamSpec::colorParam(QString id, const char* label, Rgba defaultColor)
 {
     ParamSpec spec;
     spec.type = ParamType::Color;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.color = defaultColor;
     return spec;
 }
 
-ParamSpec ParamSpec::angleParam(QString id, QString label, double defaultDegrees)
+ParamSpec ParamSpec::angleParam(QString id, const char* label, double defaultDegrees)
 {
     ParamSpec spec;
     spec.type = ParamType::Angle;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.minimum = -360.0;
     spec.maximum = 360.0;
     spec.defaultValue = defaultDegrees;
     spec.step = 1.0;
     spec.decimals = 1;
-    spec.suffix = QStringLiteral(" deg");
+    spec.suffix = QCoreApplication::translate("Effects", " deg");
     return spec;
 }
 
-ParamSpec ParamSpec::offsetParam(QString id, QString label, double x, double y)
+ParamSpec ParamSpec::offsetParam(QString id, const char* label, double x, double y)
 {
     ParamSpec spec;
     spec.type = ParamType::Offset;
     spec.id = std::move(id);
-    spec.label = std::move(label);
+    spec.label = QCoreApplication::translate("Effects", label);
     spec.minimum = -1.0;
     spec.maximum = 1.0;
     spec.defaultValue = x;
@@ -306,6 +307,28 @@ Effect* EffectRegistry::byId(const QString& id) const
     return byId_.value(id, nullptr);
 }
 
+QString effectCategoryLabel(const QString& category)
+{
+    // One place for the built in category names, which are ids everywhere
+    // else. A category a plugin brought along is shown as it named itself.
+    static const QHash<QString, const char*> known = {
+        {QStringLiteral("Adjustments"), QT_TRANSLATE_NOOP("Effects", "Adjustments")},
+        {QStringLiteral("Artistic"), QT_TRANSLATE_NOOP("Effects", "Artistic")},
+        {QStringLiteral("Blurs"), QT_TRANSLATE_NOOP("Effects", "Blurs")},
+        {QStringLiteral("Color"), QT_TRANSLATE_NOOP("Effects", "Color")},
+        {QStringLiteral("Distort"), QT_TRANSLATE_NOOP("Effects", "Distort")},
+        {QStringLiteral("Noise"), QT_TRANSLATE_NOOP("Effects", "Noise")},
+        {QStringLiteral("Object"), QT_TRANSLATE_NOOP("Effects", "Object")},
+        {QStringLiteral("Photo"), QT_TRANSLATE_NOOP("Effects", "Photo")},
+        {QStringLiteral("Render"), QT_TRANSLATE_NOOP("Effects", "Render")},
+        {QStringLiteral("Stylize"), QT_TRANSLATE_NOOP("Effects", "Stylize")},
+    };
+    const auto found = known.constFind(category);
+    if (found == known.constEnd())
+        return category;
+    return QCoreApplication::translate("Effects", found.value());
+}
+
 QStringList EffectRegistry::categories() const
 {
     QStringList out;
@@ -332,8 +355,11 @@ void add(EffectRegistry& registry, const char* id, const char* name,
          const char* category, std::vector<ParamSpec> specs,
          LambdaEffect::Fn fn, const char* shortcut)
 {
+    // The name is what the menus show, so it is looked up in the "Effects"
+    // context; the category is the key the menus are grouped by and stays as
+    // it was written, with effectCategoryLabel() doing the showing.
     registry.add(std::make_unique<LambdaEffect>(
-        QString::fromLatin1(id), QString::fromLatin1(name),
+        QString::fromLatin1(id), QCoreApplication::translate("Effects", name),
         QString::fromLatin1(category), std::move(specs), std::move(fn),
         shortcut ? QString::fromLatin1(shortcut) : QString()));
 }

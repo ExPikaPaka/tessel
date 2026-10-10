@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QCoreApplication>
+
 namespace tessel {
 
 namespace {
@@ -164,10 +166,13 @@ Mask dilatedAlpha(const Image& image, const Rect& region, int radius)
 void registerColorEffects(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ quantize
-    fx::add(registry, "quantize", "Quantize", "Color",
+    fx::add(registry, "quantize", QT_TRANSLATE_NOOP("Effects", "Quantize"), "Color",
             {
-                ParamSpec::intParam("colors", "Palette size", 2, 256, 16),
-                ParamSpec::intParam("dither", "Dithering", 0, 8, 4),
+                ParamSpec::intParam("colors",
+                                    QT_TRANSLATE_NOOP("Effects", "Palette size"),
+                                    2, 256, 16),
+                ParamSpec::intParam("dither", QT_TRANSLATE_NOOP("Effects", "Dithering"),
+                                    0, 8, 4),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int wanted = std::clamp(values.intValue("colors", 16), 2, 256);
@@ -211,11 +216,16 @@ void registerColorEffects(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ palette map
-    fx::add(registry, "duotone", "Duotone", "Color",
+    fx::add(registry, "duotone", QT_TRANSLATE_NOOP("Effects", "Duotone"), "Color",
             {
-                ParamSpec::colorParam("shadow", "Shadow colour", Rgba(20, 24, 70, 255)),
-                ParamSpec::colorParam("highlight", "Highlight colour", Rgba(255, 220, 150, 255)),
-                ParamSpec::intParam("mix", "Strength", 0, 100, 100, "%"),
+                ParamSpec::colorParam("shadow",
+                                      QT_TRANSLATE_NOOP("Effects", "Shadow colour"),
+                                      Rgba(20, 24, 70, 255)),
+                ParamSpec::colorParam("highlight",
+                                      QT_TRANSLATE_NOOP("Effects", "Highlight colour"),
+                                      Rgba(255, 220, 150, 255)),
+                ParamSpec::intParam("mix", QT_TRANSLATE_NOOP("Effects", "Strength"),
+                                    0, 100, 100, "%"),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const Rgba shadow = values.colorValue("shadow", Rgba(20, 24, 70, 255));
@@ -237,13 +247,24 @@ void registerColorEffects(EffectRegistry& registry)
 void registerObjectEffects(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ drop shadow
-    fx::add(registry, "drop_shadow", "Drop Shadow", "Object",
+    fx::add(registry, "drop_shadow", QT_TRANSLATE_NOOP("Effects", "Drop Shadow"),
+            "Object",
             {
-                ParamSpec::intParam("offset_x", "Offset X", -500, 500, 8, " px"),
-                ParamSpec::intParam("offset_y", "Offset Y", -500, 500, 8, " px"),
-                ParamSpec::doubleParam("blur", "Blur radius", 0.0, 200.0, 6.0, 0.5, 1, " px"),
-                ParamSpec::colorParam("color", "Shadow colour", Rgba(0, 0, 0, 180)),
-                ParamSpec::boolParam("keep_object", "Keep the object", true),
+                ParamSpec::intParam("offset_x",
+                                    QT_TRANSLATE_NOOP("Effects", "Offset X"),
+                                    -500, 500, 8, " px"),
+                ParamSpec::intParam("offset_y",
+                                    QT_TRANSLATE_NOOP("Effects", "Offset Y"),
+                                    -500, 500, 8, " px"),
+                ParamSpec::doubleParam("blur",
+                                       QT_TRANSLATE_NOOP("Effects", "Blur radius"),
+                                       0.0, 200.0, 6.0, 0.5, 1, " px"),
+                ParamSpec::colorParam("color",
+                                      QT_TRANSLATE_NOOP("Effects", "Shadow colour"),
+                                      Rgba(0, 0, 0, 180)),
+                ParamSpec::boolParam("keep_object",
+                                     QT_TRANSLATE_NOOP("Effects", "Keep the object"),
+                                     true),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int dx = values.intValue("offset_x", 8);
@@ -280,13 +301,25 @@ void registerObjectEffects(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ outline object
-    fx::add(registry, "outline_object", "Outline Object", "Object",
+    fx::add(registry, "outline_object", QT_TRANSLATE_NOOP("Effects", "Outline Object"),
+            "Object",
             {
-                ParamSpec::intParam("thickness", "Thickness", 1, 100, 4, " px"),
-                ParamSpec::colorParam("color", "Outline colour", Rgba(255, 255, 255, 255)),
-                ParamSpec::doubleParam("softness", "Softness", 0.0, 20.0, 0.0, 0.5, 1, " px"),
-                ParamSpec::choiceParam("position", "Position",
-                                       {"Outside", "Inside"}, 0),
+                ParamSpec::intParam("thickness",
+                                    QT_TRANSLATE_NOOP("Effects", "Thickness"),
+                                    1, 100, 4, " px"),
+                ParamSpec::colorParam("color",
+                                      QT_TRANSLATE_NOOP("Effects", "Outline colour"),
+                                      Rgba(255, 255, 255, 255)),
+                ParamSpec::doubleParam("softness",
+                                       QT_TRANSLATE_NOOP("Effects", "Softness"),
+                                       0.0, 20.0, 0.0, 0.5, 1, " px"),
+                ParamSpec::choiceParam("position",
+                                       QT_TRANSLATE_NOOP("Effects", "Position"),
+                                       {QCoreApplication::translate("Effects",
+                                                                    "Outside"),
+                                        QCoreApplication::translate("Effects",
+                                                                    "Inside")},
+                                       0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int thickness = std::max(1, values.intValue("thickness", 4));
@@ -329,11 +362,17 @@ void registerObjectEffects(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ glow object
-    fx::add(registry, "object_glow", "Outer Glow", "Object",
+    fx::add(registry, "object_glow", QT_TRANSLATE_NOOP("Effects", "Outer Glow"),
+            "Object",
             {
-                ParamSpec::doubleParam("radius", "Radius", 1.0, 200.0, 12.0, 0.5, 1, " px"),
-                ParamSpec::intParam("intensity", "Intensity", 1, 400, 150, "%"),
-                ParamSpec::colorParam("color", "Glow colour", Rgba(255, 220, 120, 255)),
+                ParamSpec::doubleParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                       1.0, 200.0, 12.0, 0.5, 1, " px"),
+                ParamSpec::intParam("intensity",
+                                    QT_TRANSLATE_NOOP("Effects", "Intensity"),
+                                    1, 400, 150, "%"),
+                ParamSpec::colorParam("color",
+                                      QT_TRANSLATE_NOOP("Effects", "Glow colour"),
+                                      Rgba(255, 220, 120, 255)),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radius = values.doubleValue("radius", 12.0);

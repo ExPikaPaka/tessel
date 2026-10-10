@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 namespace tessel {
 
 namespace {
@@ -19,8 +21,14 @@ ops::EdgeMode edgeFromChoice(int choice)
 
 ParamSpec edgeParam()
 {
-    return ParamSpec::choiceParam("edge", "Edge behaviour",
-                                  {"Clamp", "Wrap", "Reflect", "Transparent"}, 0);
+    return ParamSpec::choiceParam("edge",
+                                  QT_TRANSLATE_NOOP("Effects", "Edge behaviour"),
+                                  {QCoreApplication::translate("Effects", "Clamp"),
+                                   QCoreApplication::translate("Effects", "Wrap"),
+                                   QCoreApplication::translate("Effects", "Reflect"),
+                                   QCoreApplication::translate("Effects",
+                                                               "Transparent")},
+                                  0);
 }
 
 // Shared warp driver: `fn` maps a destination pixel to a source position.
@@ -48,10 +56,12 @@ Image warp(const EffectContext& context, ops::EdgeMode edge, F&& fn)
 void registerDistortions(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ bulge
-    fx::add(registry, "bulge", "Bulge", "Distort",
+    fx::add(registry, "bulge", QT_TRANSLATE_NOOP("Effects", "Bulge"), "Distort",
             {
-                ParamSpec::intParam("amount", "Amount", -200, 100, 45, "%"),
-                ParamSpec::offsetParam("center", "Offset", 0.0, 0.0),
+                ParamSpec::intParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                    -200, 100, 45, "%"),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Offset"),
+                                       0.0, 0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double amount = values.intValue("amount", 45) / 100.0;
@@ -74,11 +84,14 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ twist
-    fx::add(registry, "twist", "Twist", "Distort",
+    fx::add(registry, "twist", QT_TRANSLATE_NOOP("Effects", "Twist"), "Distort",
             {
-                ParamSpec::doubleParam("amount", "Amount", -200.0, 200.0, 30.0, 1.0, 1),
-                ParamSpec::intParam("size", "Size", 1, 200, 100, "%"),
-                ParamSpec::offsetParam("center", "Offset", 0.0, 0.0),
+                ParamSpec::doubleParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                       -200.0, 200.0, 30.0, 1.0, 1),
+                ParamSpec::intParam("size", QT_TRANSLATE_NOOP("Effects", "Size"),
+                                    1, 200, 100, "%"),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Offset"),
+                                       0.0, 0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double amount = values.doubleValue("amount", 30.0) * M_PI / 180.0;
@@ -103,10 +116,13 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ polar inversion
-    fx::add(registry, "polar_inversion", "Polar Inversion", "Distort",
+    fx::add(registry, "polar_inversion",
+            QT_TRANSLATE_NOOP("Effects", "Polar Inversion"), "Distort",
             {
-                ParamSpec::doubleParam("amount", "Amount", -4.0, 4.0, 0.0, 0.05, 2),
-                ParamSpec::offsetParam("center", "Offset", 0.0, 0.0),
+                ParamSpec::doubleParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                       -4.0, 4.0, 0.0, 0.05, 2),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Offset"),
+                                       0.0, 0.0),
                 edgeParam(),
             },
             [](const EffectContext& context, const ParamValues& values) {
@@ -130,11 +146,16 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ tile reflection
-    fx::add(registry, "tile_reflection", "Tile Reflection", "Distort",
+    fx::add(registry, "tile_reflection",
+            QT_TRANSLATE_NOOP("Effects", "Tile Reflection"), "Distort",
             {
-                ParamSpec::angleParam("rotation", "Rotation", 30.0),
-                ParamSpec::intParam("size", "Tile size", 2, 400, 48, " px"),
-                ParamSpec::doubleParam("curvature", "Curvature", -100.0, 100.0, 8.0, 0.5, 1),
+                ParamSpec::angleParam("rotation",
+                                      QT_TRANSLATE_NOOP("Effects", "Rotation"), 30.0),
+                ParamSpec::intParam("size", QT_TRANSLATE_NOOP("Effects", "Tile size"),
+                                    2, 400, 48, " px"),
+                ParamSpec::doubleParam("curvature",
+                                       QT_TRANSLATE_NOOP("Effects", "Curvature"),
+                                       -100.0, 100.0, 8.0, 0.5, 1),
                 edgeParam(),
             },
             [](const EffectContext& context, const ParamValues& values) {
@@ -159,13 +180,20 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ dents
-    fx::add(registry, "dents", "Dents", "Distort",
+    fx::add(registry, "dents", QT_TRANSLATE_NOOP("Effects", "Dents"), "Distort",
             {
-                ParamSpec::doubleParam("scale", "Scale", 1.0, 200.0, 25.0, 1.0, 1),
-                ParamSpec::doubleParam("refraction", "Refraction", 0.0, 100.0, 12.0, 0.5, 1),
-                ParamSpec::doubleParam("roughness", "Roughness", 0.05, 0.95, 0.5, 0.05, 2),
-                ParamSpec::intParam("detail", "Detail", 1, 6, 3),
-                ParamSpec::intParam("seed", "Seed", 0, 999, 17),
+                ParamSpec::doubleParam("scale", QT_TRANSLATE_NOOP("Effects", "Scale"),
+                                       1.0, 200.0, 25.0, 1.0, 1),
+                ParamSpec::doubleParam("refraction",
+                                       QT_TRANSLATE_NOOP("Effects", "Refraction"),
+                                       0.0, 100.0, 12.0, 0.5, 1),
+                ParamSpec::doubleParam("roughness",
+                                       QT_TRANSLATE_NOOP("Effects", "Roughness"),
+                                       0.05, 0.95, 0.5, 0.05, 2),
+                ParamSpec::intParam("detail", QT_TRANSLATE_NOOP("Effects", "Detail"),
+                                    1, 6, 3),
+                ParamSpec::intParam("seed", QT_TRANSLATE_NOOP("Effects", "Seed"),
+                                    0, 999, 17),
                 edgeParam(),
             },
             [](const EffectContext& context, const ParamValues& values) {
@@ -186,10 +214,14 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ frosted glass
-    fx::add(registry, "frosted_glass", "Frosted Glass", "Distort",
+    fx::add(registry, "frosted_glass", QT_TRANSLATE_NOOP("Effects", "Frosted Glass"),
+            "Distort",
             {
-                ParamSpec::intParam("scatter", "Maximum scatter", 1, 100, 4, " px"),
-                ParamSpec::intParam("seed", "Seed", 0, 999, 42),
+                ParamSpec::intParam("scatter",
+                                    QT_TRANSLATE_NOOP("Effects", "Maximum scatter"),
+                                    1, 100, 4, " px"),
+                ParamSpec::intParam("seed", QT_TRANSLATE_NOOP("Effects", "Seed"),
+                                    0, 999, 42),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double scatter = std::max(1, values.intValue("scatter", 4));
@@ -207,9 +239,10 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ pixelate
-    fx::add(registry, "pixelate", "Pixelate", "Distort",
+    fx::add(registry, "pixelate", QT_TRANSLATE_NOOP("Effects", "Pixelate"), "Distort",
             {
-                ParamSpec::intParam("cell", "Cell size", 2, 200, 6, " px"),
+                ParamSpec::intParam("cell", QT_TRANSLATE_NOOP("Effects", "Cell size"),
+                                    2, 200, 6, " px"),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int cell = std::max(2, values.intValue("cell", 6));
@@ -260,10 +293,13 @@ void registerDistortions(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ crystalize
-    fx::add(registry, "crystalize", "Crystalize", "Distort",
+    fx::add(registry, "crystalize", QT_TRANSLATE_NOOP("Effects", "Crystalize"),
+            "Distort",
             {
-                ParamSpec::intParam("cell", "Cell size", 2, 200, 8, " px"),
-                ParamSpec::intParam("seed", "Seed", 0, 999, 5),
+                ParamSpec::intParam("cell", QT_TRANSLATE_NOOP("Effects", "Cell size"),
+                                    2, 200, 8, " px"),
+                ParamSpec::intParam("seed", QT_TRANSLATE_NOOP("Effects", "Seed"),
+                                    0, 999, 5),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int cell = std::max(2, values.intValue("cell", 8));

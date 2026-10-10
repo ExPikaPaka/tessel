@@ -29,6 +29,7 @@
 
 #include "core/ImageOps.h"
 #include "core/Io.h"
+#include "core/Strings.h"
 #include "effects/Effect.h"
 #include "tessel_version.h"
 #include "ui/EffectDialog.h"
@@ -48,21 +49,23 @@ struct Preset {
     int height;
 };
 
+// The names are marked here and looked up where the box is filled, because a
+// static table cannot hold a translation.
 const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
-        {"Custom", 0, 0},
-        {"Screen 1920 x 1080", 1920, 1080},
-        {"Screen 2560 x 1440", 2560, 1440},
-        {"Screen 3840 x 2160", 3840, 2160},
-        {"Square 512 x 512", 512, 512},
-        {"Square 1024 x 1024", 1024, 1024},
-        {"Icon 256 x 256", 256, 256},
-        {"Portrait A4 at 150 dpi", 1240, 1754},
-        {"Landscape A4 at 150 dpi", 1754, 1240},
-        {"Photo 4 x 6 at 300 dpi", 1800, 1200},
-        {"Social post 1080 x 1080", 1080, 1080},
-        {"Social story 1080 x 1920", 1080, 1920},
+        {QT_TRANSLATE_NOOP("Dialogs", "Custom"), 0, 0},
+        {QT_TRANSLATE_NOOP("Dialogs", "Screen 1920 x 1080"), 1920, 1080},
+        {QT_TRANSLATE_NOOP("Dialogs", "Screen 2560 x 1440"), 2560, 1440},
+        {QT_TRANSLATE_NOOP("Dialogs", "Screen 3840 x 2160"), 3840, 2160},
+        {QT_TRANSLATE_NOOP("Dialogs", "Square 512 x 512"), 512, 512},
+        {QT_TRANSLATE_NOOP("Dialogs", "Square 1024 x 1024"), 1024, 1024},
+        {QT_TRANSLATE_NOOP("Dialogs", "Icon 256 x 256"), 256, 256},
+        {QT_TRANSLATE_NOOP("Dialogs", "Portrait A4 at 150 dpi"), 1240, 1754},
+        {QT_TRANSLATE_NOOP("Dialogs", "Landscape A4 at 150 dpi"), 1754, 1240},
+        {QT_TRANSLATE_NOOP("Dialogs", "Photo 4 x 6 at 300 dpi"), 1800, 1200},
+        {QT_TRANSLATE_NOOP("Dialogs", "Social post 1080 x 1080"), 1080, 1080},
+        {QT_TRANSLATE_NOOP("Dialogs", "Social story 1080 x 1920"), 1080, 1920},
     };
     return list;
 }
@@ -71,7 +74,8 @@ QString describeSize(int width, int height)
 {
     const double megapixels = double(width) * height / 1.0e6;
     const double megabytes = double(width) * height * 4 / (1024.0 * 1024.0);
-    return QStringLiteral("%1 x %2 pixels  -  %3 MP  -  %4 MB per layer")
+    return QCoreApplication::translate(
+               "Dialogs", "%1 x %2 pixels  -  %3 MP  -  %4 MB per layer")
         .arg(width).arg(height)
         .arg(megapixels, 0, 'f', 2)
         .arg(megabytes, 0, 'f', 1);
@@ -85,7 +89,7 @@ NewImageDialog::NewImageDialog(int defaultWidth, int defaultHeight, Rgba seconda
                                QWidget* parent)
     : QDialog(parent), secondary_(secondary)
 {
-    setWindowTitle(QStringLiteral("New Image"));
+    setWindowTitle(tr("New Image"));
     setWindowIcon(icons::get(QStringLiteral("new"), 22));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
@@ -95,8 +99,8 @@ NewImageDialog::NewImageDialog(int defaultWidth, int defaultHeight, Rgba seconda
     form->setSpacing(8);
     preset_ = new QComboBox(this);
     for (const Preset& item : presets())
-        preset_->addItem(QString::fromLatin1(item.name));
-    form->addRow(QStringLiteral("Preset"), preset_);
+        preset_->addItem(QCoreApplication::translate("Dialogs", item.name));
+    form->addRow(tr("Preset"), preset_);
 
     width_ = new QSpinBox(this);
     width_->setRange(1, 60000);
@@ -106,16 +110,16 @@ NewImageDialog::NewImageDialog(int defaultWidth, int defaultHeight, Rgba seconda
     height_->setRange(1, 60000);
     height_->setValue(defaultHeight);
     height_->setSuffix(QStringLiteral(" px"));
-    form->addRow(QStringLiteral("Width"), width_);
-    form->addRow(QStringLiteral("Height"), height_);
+    form->addRow(tr("Width"), width_);
+    form->addRow(tr("Height"), height_);
 
-    keepRatio_ = new QCheckBox(QStringLiteral("Maintain aspect ratio"), this);
+    keepRatio_ = new QCheckBox(tr("Maintain aspect ratio"), this);
     form->addRow(QString(), keepRatio_);
 
     background_ = new QComboBox(this);
-    background_->addItems({QStringLiteral("White"), QStringLiteral("Transparent"),
-                           QStringLiteral("Secondary colour"), QStringLiteral("Black")});
-    form->addRow(QStringLiteral("Background"), background_);
+    background_->addItems({tr("White"), tr("Transparent"),
+                           tr("Secondary colour"), tr("Black")});
+    form->addRow(tr("Background"), background_);
     root->addLayout(form);
 
     sizeLabel_ = new QLabel(this);
@@ -233,7 +237,7 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
     for (Unit candidate : kResizeUnits)
         unitCombo_->addItem(units::unitName(candidate));
     unitCombo_->setCurrentIndex(indexOfUnit(unit_));
-    form->addRow(QStringLiteral("Units"), unitCombo_);
+    form->addRow(tr("Units"), unitCombo_);
 
     width_ = new QDoubleSpinBox(this);
     width_->setObjectName(QStringLiteral("width"));
@@ -241,10 +245,10 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
     height_ = new QDoubleSpinBox(this);
     height_->setObjectName(QStringLiteral("height"));
     height_->setKeyboardTracking(false);
-    form->addRow(QStringLiteral("Width"), width_);
-    form->addRow(QStringLiteral("Height"), height_);
+    form->addRow(tr("Width"), width_);
+    form->addRow(tr("Height"), height_);
 
-    keepRatio_ = new QCheckBox(QStringLiteral("Maintain aspect ratio"), this);
+    keepRatio_ = new QCheckBox(tr("Maintain aspect ratio"), this);
     keepRatio_->setObjectName(QStringLiteral("keepratio"));
     keepRatio_->setChecked(true);
     form->addRow(QString(), keepRatio_);
@@ -257,26 +261,25 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
         resolutionBox_->setSuffix(QStringLiteral(" ppi"));
         resolutionBox_->setKeyboardTracking(false);
         resolutionBox_->setValue(resolution_);
-        form->addRow(QStringLiteral("Resolution"), resolutionBox_);
+        form->addRow(tr("Resolution"), resolutionBox_);
 
-        resample_ = new QCheckBox(QStringLiteral("Resample image"), this);
+        resample_ = new QCheckBox(tr("Resample image"), this);
         resample_->setObjectName(QStringLiteral("resample"));
         resample_->setChecked(true);
-        resample_->setToolTip(QStringLiteral(
-            "Off: changing the resolution only changes the print size, and the "
-            "pixels are left alone."));
+        resample_->setToolTip(tr("Off: changing the resolution only changes the "
+                                 "print size, and the pixels are left alone."));
         form->addRow(QString(), resample_);
 
         resampling_ = new QComboBox(this);
         resampling_->setObjectName(QStringLiteral("resampling"));
-        resampling_->addItems({QStringLiteral("Smooth (best quality)"),
-                               QStringLiteral("Nearest neighbour (hard pixels)")});
-        form->addRow(QStringLiteral("Resampling"), resampling_);
+        resampling_->addItems({tr("Smooth (best quality)"),
+                               tr("Nearest neighbour (hard pixels)")});
+        form->addRow(tr("Resampling"), resampling_);
     }
     root->addLayout(form);
 
     if (withAnchor) {
-        auto* group = new QGroupBox(QStringLiteral("Anchor"), this);
+        auto* group = new QGroupBox(tr("Anchor"), this);
         auto* grid = new QGridLayout(group);
         grid->setSpacing(2);
         static const Anchor order[9] = {
@@ -290,7 +293,8 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
             button->setCheckable(true);
             button->setFixedSize(30, 30);
             button->setIcon(icons::get(QString::fromLatin1(glyphs[i]), 16));
-            button->setToolTip(QString::fromLatin1(anchorName(order[i])));
+            button->setToolTip(
+                QCoreApplication::translate("Core", anchorName(order[i])));
             button->setChecked(order[i] == Anchor::Center);
             connect(button, &QToolButton::clicked, this, [this, i] {
                 anchor_ = order[i];
@@ -407,10 +411,10 @@ void ResizeDialog::refreshFields()
 
 void ResizeDialog::refreshLabels()
 {
-    printSize_->setText(QStringLiteral("Print size: %1")
+    printSize_->setText(tr("Print size: %1")
                             .arg(units::describePrintSize(pixelWidth_, pixelHeight_,
                                                           resolution_, unit_)));
-    summary_->setText(QStringLiteral("Was %1 x %2 px at %3 ppi  ->  %4")
+    summary_->setText(tr("Was %1 x %2 px at %3 ppi  ->  %4")
                           .arg(originalWidth_).arg(originalHeight_)
                           .arg(originalResolution_, 0, 'g', 6)
                           .arg(describeSize(pixelWidth_, pixelHeight_)));
@@ -496,7 +500,7 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
                                              QWidget* parent)
     : QDialog(parent), doc_(doc), history_(history)
 {
-    setWindowTitle(QStringLiteral("Layer Properties"));
+    setWindowTitle(tr("Layer Properties"));
     setWindowIcon(icons::get(QStringLiteral("layer-props"), 22));
     // The properties belong to the layer or group itself, never to its mask.
     Layer* layer = doc_->activeNode();
@@ -513,14 +517,14 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
     form->setSpacing(8);
 
     name_ = new QLineEdit(originalName_, this);
-    form->addRow(QStringLiteral("Name"), name_);
-    visible_ = new QCheckBox(QStringLiteral("Visible"), this);
+    form->addRow(tr("Name"), name_);
+    visible_ = new QCheckBox(tr("Visible"), this);
     visible_->setChecked(originalVisible_);
     form->addRow(QString(), visible_);
     blend_ = new QComboBox(this);
-    blend_->addItems(blendModeNames());
+    blend_->addItems(blendModeLabels());
     blend_->setCurrentIndex(int(originalMode_));
-    form->addRow(QStringLiteral("Blend mode"), blend_);
+    form->addRow(tr("Blend mode"), blend_);
 
     auto* opacityRow = new QHBoxLayout;
     opacity_ = new QSlider(Qt::Horizontal, this);
@@ -531,7 +535,7 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
     opacityValue_->setValue(originalOpacity_);
     opacityRow->addWidget(opacity_, 1);
     opacityRow->addWidget(opacityValue_);
-    form->addRow(QStringLiteral("Opacity"), opacityRow);
+    form->addRow(tr("Opacity"), opacityRow);
     root->addLayout(form);
     buildEffectsSection(root);
 
@@ -561,8 +565,8 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
     const Layer* layer = doc_->layerByUid(layerUid_);
     if (!layer)
         return;
-    auto* box = new QGroupBox(layer->isAdjustment() ? QStringLiteral("Adjustment")
-                                                    : QStringLiteral("Effects"),
+    auto* box = new QGroupBox(layer->isAdjustment() ? tr("Adjustment")
+                                                    : tr("Effects"),
                               this);
     auto* column = new QVBoxLayout(box);
     column->setSpacing(6);
@@ -571,11 +575,11 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
     effects_->setSelectionMode(QAbstractItemView::SingleSelection);
     effects_->setMaximumHeight(110);
     effects_->setToolTip(layer->isAdjustment()
-        ? QStringLiteral("What this adjustment layer applies to everything below "
-                         "it inside its group.")
-        : QStringLiteral("Applied to this layer's pixels while it is composited. "
-                         "The stored pixels are left alone until the stack is "
-                         "flattened."));
+        ? tr("What this adjustment layer applies to everything below "
+             "it inside its group.")
+        : tr("Applied to this layer's pixels while it is composited. "
+             "The stored pixels are left alone until the stack is "
+             "flattened."));
     column->addWidget(effects_);
 
     auto* buttons = new QHBoxLayout;
@@ -591,7 +595,7 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
         return widget;
     };
     if (!layer->isAdjustment()) {
-        auto* add = button(QStringLiteral("layer-add"), QStringLiteral("Add Effect"));
+        auto* add = button(QStringLiteral("layer-add"), tr("Add Effect"));
         add->setPopupMode(QToolButton::InstantPopup);
         add->setObjectName(QStringLiteral("addEffect"));
         auto* menu = new QMenu(add);
@@ -602,7 +606,7 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
             std::vector<LayerEffect> next = target->effects();
             next.push_back({effect->id(), ParamValues::defaults(effect->params()),
                             true});
-            recordEffects(QStringLiteral("Add Effect"), QStringLiteral("effect"),
+            recordEffects(tr("Add Effect"), QStringLiteral("effect"),
                           next);
             effects_->setCurrentRow(int(next.size()) - 1);
             if (!effect->params().empty())
@@ -610,18 +614,18 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
         });
         add->setMenu(menu);
     }
-    editEffect_ = button(QStringLiteral("settings"), QStringLiteral("Edit Settings"));
+    editEffect_ = button(QStringLiteral("settings"), tr("Edit Settings"));
     editEffect_->setObjectName(QStringLiteral("editEffect"));
     connect(editEffect_, &QToolButton::clicked, this,
             [this] { editEffectEntry(selectedEffect()); });
     if (!layer->isAdjustment()) {
-        upEffect_ = button(QStringLiteral("up"), QStringLiteral("Move Effect Up"));
-        downEffect_ = button(QStringLiteral("down"), QStringLiteral("Move Effect Down"));
+        upEffect_ = button(QStringLiteral("up"), tr("Move Effect Up"));
+        downEffect_ = button(QStringLiteral("down"), tr("Move Effect Down"));
         removeEffect_ = button(QStringLiteral("layer-delete"),
-                               QStringLiteral("Remove Effect"));
+                               tr("Remove Effect"));
         removeEffect_->setObjectName(QStringLiteral("removeEffect"));
         flattenEffects_ = button(QStringLiteral("flatten"),
-                                 QStringLiteral("Flatten the effects into the pixels"));
+                                 tr("Flatten the effects into the pixels"));
         flattenEffects_->setObjectName(QStringLiteral("flattenEffects"));
         // The entries run bottom to top, and the list shows them in that same
         // order, so moving an entry up in the list moves it later in the run.
@@ -635,7 +639,7 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
                 return;
             std::vector<LayerEffect> next = target->effects();
             std::swap(next[size_t(index)], next[size_t(other)]);
-            recordEffects(QStringLiteral("Reorder Effects"), QStringLiteral("effect"),
+            recordEffects(tr("Reorder Effects"), QStringLiteral("effect"),
                           next);
             effects_->setCurrentRow(other);
         };
@@ -648,7 +652,7 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
                 return;
             std::vector<LayerEffect> next = target->effects();
             next.erase(next.begin() + index);
-            recordEffects(QStringLiteral("Remove Effect"),
+            recordEffects(tr("Remove Effect"),
                           QStringLiteral("layer-delete"), next);
         });
         connect(flattenEffects_, &QToolButton::clicked, this, [this] {
@@ -660,7 +664,7 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
             // the snapshot does not hold values a later Cancel would revoke.
             commitProperties();
             const int uid = layerUid_;
-            recordDocumentEdit(*doc_, *history_, QStringLiteral("Flatten Effects"),
+            recordDocumentEdit(*doc_, *history_, tr("Flatten Effects"),
                                QStringLiteral("flatten"), [this, uid] {
                                    if (Layer* again = doc_->layerByUid(uid))
                                        doc_->flattenLayerEffects(again);
@@ -692,8 +696,8 @@ void LayerPropertiesDialog::buildEffectsSection(QVBoxLayout* root)
             return;
         std::vector<LayerEffect> next = target->effects();
         next[size_t(index)].enabled = on;
-        recordEffects(on ? QStringLiteral("Enable Effect")
-                         : QStringLiteral("Disable Effect"),
+        recordEffects(on ? tr("Enable Effect")
+                         : tr("Disable Effect"),
                       QStringLiteral("effect"), next);
     });
     refreshEffects();
@@ -714,7 +718,7 @@ void LayerPropertiesDialog::refreshEffects()
         Effect* effect = registry.byId(stored.effectId);
         auto* item = new QListWidgetItem(
             effect ? effect->name()
-                   : QStringLiteral("%1 (not installed)").arg(stored.effectId),
+                   : tr("%1 (not installed)").arg(stored.effectId),
             effects_);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(stored.enabled ? Qt::Checked : Qt::Unchecked);
@@ -831,7 +835,7 @@ void LayerPropertiesDialog::commitProperties()
         const BlendMode oldMode = originalMode_;
         const uint8_t oldOpacity = originalOpacity_;
         history_->push(std::make_unique<PropertyEdit>(
-            QStringLiteral("Layer Properties"), QStringLiteral("layer-props"),
+            tr("Layer Properties"), QStringLiteral("layer-props"),
             [uid, oldName, oldVisible, oldMode, oldOpacity](Document& doc) {
                 if (Layer* target = doc.layerByUid(uid)) {
                     target->name = oldName;
@@ -883,7 +887,7 @@ void LayerPropertiesDialog::done(int result)
 RotateZoomDialog::RotateZoomDialog(Document* doc, History* history, QWidget* parent)
     : QDialog(parent), doc_(doc), history_(history)
 {
-    setWindowTitle(QStringLiteral("Rotate / Zoom Layer"));
+    setWindowTitle(tr("Rotate / Zoom Layer"));
     setWindowIcon(icons::get(QStringLiteral("rotate-cw"), 22));
     if (Layer* layer = doc_->activeLayer()) {
         source_ = layer->image;
@@ -915,12 +919,12 @@ RotateZoomDialog::RotateZoomDialog(Document* doc, History* history, QWidget* par
         spin->setSuffix(QStringLiteral(" px"));
         spin->setKeyboardTracking(false);
     }
-    tile_ = new QCheckBox(QStringLiteral("Tile the result"), this);
+    tile_ = new QCheckBox(tr("Tile the result"), this);
 
-    form->addRow(QStringLiteral("Angle"), angle_);
-    form->addRow(QStringLiteral("Zoom"), zoom_);
-    form->addRow(QStringLiteral("Pan X"), offsetX_);
-    form->addRow(QStringLiteral("Pan Y"), offsetY_);
+    form->addRow(tr("Angle"), angle_);
+    form->addRow(tr("Zoom"), zoom_);
+    form->addRow(tr("Pan X"), offsetX_);
+    form->addRow(tr("Pan Y"), offsetY_);
     form->addRow(QString(), tile_);
     root->addLayout(form);
 
@@ -990,7 +994,7 @@ void RotateZoomDialog::done(int result)
         if (Layer* layer = doc_->layerByUid(layerUid_)) {
             const Image rotated = render();
             layer->image = source_;
-            EditScope scope(*doc_, *history_, layer, QStringLiteral("Rotate / Zoom Layer"),
+            EditScope scope(*doc_, *history_, layer, tr("Rotate / Zoom Layer"),
                             QStringLiteral("rotate-cw"));
             layer->image = rotated;
             scope.commit();
@@ -1017,22 +1021,32 @@ struct SelectionOpInfo {
     int maximum;
 };
 
+// Marked rather than translated, because the window title doubles as the name
+// of the undo step and is asked for long before the dialog is built.
 SelectionOpInfo selectionOpInfo(SelectionOpDialog::Op op)
 {
     switch (op) {
     case SelectionOpDialog::Op::Feather:
-        return {"Feather Selection", "Radius",
-                "Softens the selection edge so edits fade out across the radius.",
+        return {QT_TRANSLATE_NOOP("Dialogs", "Feather Selection"),
+                QT_TRANSLATE_NOOP("Dialogs", "Radius"),
+                QT_TRANSLATE_NOOP("Dialogs", "Softens the selection edge so edits "
+                                             "fade out across the radius."),
                 "select-ellipse", 250};
     case SelectionOpDialog::Op::Grow:
-        return {"Grow Selection", "Amount",
-                "Pushes the selection edge outwards.", "select-all", 500};
+        return {QT_TRANSLATE_NOOP("Dialogs", "Grow Selection"),
+                QT_TRANSLATE_NOOP("Dialogs", "Amount"),
+                QT_TRANSLATE_NOOP("Dialogs", "Pushes the selection edge outwards."),
+                "select-all", 500};
     case SelectionOpDialog::Op::Shrink:
-        return {"Shrink Selection", "Amount",
-                "Pulls the selection edge inwards.", "deselect", 500};
+        return {QT_TRANSLATE_NOOP("Dialogs", "Shrink Selection"),
+                QT_TRANSLATE_NOOP("Dialogs", "Amount"),
+                QT_TRANSLATE_NOOP("Dialogs", "Pulls the selection edge inwards."),
+                "deselect", 500};
     default:
-        return {"Border Selection", "Width",
-                "Replaces the selection with a band along the inside of its edge.",
+        return {QT_TRANSLATE_NOOP("Dialogs", "Border Selection"),
+                QT_TRANSLATE_NOOP("Dialogs", "Width"),
+                QT_TRANSLATE_NOOP("Dialogs", "Replaces the selection with a band "
+                                             "along the inside of its edge."),
                 "select-rect", 500};
     }
 }
@@ -1043,19 +1057,20 @@ SelectionOpDialog::SelectionOpDialog(Op op, QWidget* parent)
     : QDialog(parent), op_(op)
 {
     const SelectionOpInfo info = selectionOpInfo(op);
-    setWindowTitle(QString::fromLatin1(info.title));
+    setWindowTitle(QCoreApplication::translate("Dialogs", info.title));
     setWindowIcon(icons::get(QString::fromLatin1(info.icon), 22));
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    auto* hint = new QLabel(QString::fromLatin1(info.hint), this);
+    auto* hint = new QLabel(QCoreApplication::translate("Dialogs", info.hint), this);
     hint->setWordWrap(true);
     root->addWidget(hint);
 
     auto* row = new QHBoxLayout;
-    row->addWidget(new QLabel(QString::fromLatin1(info.label), this));
+    row->addWidget(
+        new QLabel(QCoreApplication::translate("Dialogs", info.label), this));
     amount_ = new QSpinBox(this);
     amount_->setRange(op == Op::Border ? 1 : 0, info.maximum);
     amount_->setValue(op == Op::Feather ? 4 : (op == Op::Border ? 4 : 2));
@@ -1080,7 +1095,7 @@ int SelectionOpDialog::amount() const
 
 QString SelectionOpDialog::title(Op op)
 {
-    return QString::fromLatin1(selectionOpInfo(op).title);
+    return QCoreApplication::translate("Dialogs", selectionOpInfo(op).title);
 }
 
 void SelectionOpDialog::applyDirect(Op op, Document& doc, History& history, int amount)
@@ -1102,19 +1117,19 @@ SaveOptionsDialog::SaveOptionsDialog(const Image& image, const QString& path,
                                      int quality, QWidget* parent)
     : QDialog(parent), image_(image), path_(path)
 {
-    setWindowTitle(QStringLiteral("Save Configuration"));
+    setWindowTitle(tr("Save Configuration"));
     setWindowIcon(icons::get(QStringLiteral("save"), 22));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    root->addWidget(new QLabel(QStringLiteral("%1 stores the image with lossy "
-                                              "compression.")
+    root->addWidget(new QLabel(tr("%1 stores the image with lossy "
+                                  "compression.")
                                    .arg(QFileInfo(path).suffix().toUpper()),
                                this));
 
     auto* row = new QHBoxLayout;
-    row->addWidget(new QLabel(QStringLiteral("Quality"), this));
+    row->addWidget(new QLabel(tr("Quality"), this));
     slider_ = new QSlider(Qt::Horizontal, this);
     slider_->setRange(1, 100);
     slider_->setValue(quality);
@@ -1177,11 +1192,11 @@ void SaveOptionsDialog::estimate()
         || QFileInfo(path_).suffix().compare(QLatin1String("jpeg"), Qt::CaseInsensitive) == 0)
         out = out.convertToFormat(QImage::Format_RGB888);
     if (!writer.write(out)) {
-        estimate_->setText(QStringLiteral("File size estimate is not available."));
+        estimate_->setText(tr("File size estimate is not available."));
         return;
     }
     const double bytes = encoded.size() / (factor * factor);
-    estimate_->setText(QStringLiteral("Estimated file size: %1 KB")
+    estimate_->setText(tr("Estimated file size: %1 KB")
                            .arg(bytes / 1024.0, 0, 'f', bytes > 1024 * 100 ? 0 : 1));
 }
 
@@ -1190,7 +1205,7 @@ void SaveOptionsDialog::estimate()
 void showAboutDialog(QWidget* parent)
 {
     QDialog dialog(parent);
-    dialog.setWindowTitle(QStringLiteral("About Tessel"));
+    dialog.setWindowTitle(QCoreApplication::translate("Dialogs", "About Tessel"));
     dialog.setWindowIcon(icons::appIcon());
     auto* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(18, 18, 18, 18);
@@ -1201,8 +1216,10 @@ void showAboutDialog(QWidget* parent)
     logo->setPixmap(icons::appIcon().pixmap(64, 64));
     header->addWidget(logo);
     auto* titles = new QVBoxLayout;
-    auto* title = new QLabel(QStringLiteral("<b style='font-size:16pt'>Tessel</b>"), &dialog);
-    auto* version = new QLabel(QStringLiteral("Version %1").arg(
+    auto* title = new QLabel(
+        QCoreApplication::translate("Dialogs", "<b style='font-size:16pt'>Tessel</b>"),
+        &dialog);
+    auto* version = new QLabel(QCoreApplication::translate("Dialogs", "Version %1").arg(
                                    QString::fromLatin1(TESSEL_VERSION_STRING)),
                                &dialog);
     titles->addWidget(title);
@@ -1213,16 +1230,19 @@ void showAboutDialog(QWidget* parent)
 
     auto* text = new QTextBrowser(&dialog);
     text->setOpenExternalLinks(false);
-    text->setHtml(QStringLiteral(
-        "<p>A layered raster image editor for Linux, built with C++ and Qt 6.</p>"
-        "<p>Tessel is an independent program written from scratch. It is not "
-        "affiliated with, derived from, or endorsed by Paint.NET or dotPDN LLC; "
-        "it simply follows a similar way of working.</p>"
-        "<p><b>Formats</b><br>Native layered format (.tessel), OpenRaster (.ora) for "
-        "exchanging layered images with Krita, GIMP and MyPaint, plus PNG, JPEG, "
-        "BMP, TIFF, WebP, TGA, GIF and ICO.</p>"
-        "<p><b>Built with</b><br>Qt %1, zlib, and the C++ standard library.</p>")
-                      .arg(QString::fromLatin1(qVersion())));
+    text->setHtml(
+        QCoreApplication::translate(
+            "Dialogs",
+            "<p>A layered raster image editor for Linux, built with C++ and "
+            "Qt 6.</p>"
+            "<p>Tessel is an independent program written from scratch. It is not "
+            "affiliated with, derived from, or endorsed by Paint.NET or dotPDN LLC; "
+            "it simply follows a similar way of working.</p>"
+            "<p><b>Formats</b><br>Native layered format (.tessel), OpenRaster (.ora) "
+            "for exchanging layered images with Krita, GIMP and MyPaint, plus PNG, "
+            "JPEG, BMP, TIFF, WebP, TGA, GIF and ICO.</p>"
+            "<p><b>Built with</b><br>Qt %1, zlib, and the C++ standard library.</p>")
+            .arg(QString::fromLatin1(qVersion())));
     text->setMinimumSize(430, 220);
     root->addWidget(text);
 
@@ -1236,7 +1256,7 @@ void showAboutDialog(QWidget* parent)
 void showShortcutsDialog(QWidget* parent, const QList<ShortcutEntry>& entries)
 {
     QDialog dialog(parent);
-    dialog.setWindowTitle(QStringLiteral("Keyboard Shortcuts"));
+    dialog.setWindowTitle(QCoreApplication::translate("Dialogs", "Keyboard Shortcuts"));
     dialog.setWindowIcon(icons::get(QStringLiteral("settings"), 22));
     auto* root = new QVBoxLayout(&dialog);
     auto* text = new QTextBrowser(&dialog);

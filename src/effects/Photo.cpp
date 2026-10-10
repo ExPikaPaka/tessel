@@ -8,10 +8,12 @@ namespace tessel {
 void registerPhoto(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ sharpen
-    fx::add(registry, "sharpen", "Sharpen", "Photo",
+    fx::add(registry, "sharpen", QT_TRANSLATE_NOOP("Effects", "Sharpen"), "Photo",
             {
-                ParamSpec::doubleParam("amount", "Amount", 0.0, 20.0, 2.0, 0.1, 1),
-                ParamSpec::doubleParam("radius", "Radius", 0.5, 20.0, 1.5, 0.1, 1, " px"),
+                ParamSpec::doubleParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                       0.0, 20.0, 2.0, 0.1, 1),
+                ParamSpec::doubleParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                       0.5, 20.0, 1.5, 0.1, 1, " px"),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const float amount = float(values.doubleValue("amount", 2.0));
@@ -28,11 +30,16 @@ void registerPhoto(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ glow
-    fx::add(registry, "glow", "Glow", "Photo",
+    fx::add(registry, "glow", QT_TRANSLATE_NOOP("Effects", "Glow"), "Photo",
             {
-                ParamSpec::intParam("radius", "Radius", 1, 200, 6, " px"),
-                ParamSpec::intParam("brightness", "Brightness", -100, 100, 10),
-                ParamSpec::intParam("contrast", "Contrast", -100, 100, 10),
+                ParamSpec::intParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                    1, 200, 6, " px"),
+                ParamSpec::intParam("brightness",
+                                    QT_TRANSLATE_NOOP("Effects", "Brightness"),
+                                    -100, 100, 10),
+                ParamSpec::intParam("contrast",
+                                    QT_TRANSLATE_NOOP("Effects", "Contrast"),
+                                    -100, 100, 10),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radius = std::max(1, values.intValue("radius", 6));
@@ -54,12 +61,17 @@ void registerPhoto(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ vignette
-    fx::add(registry, "vignette", "Vignette", "Photo",
+    fx::add(registry, "vignette", QT_TRANSLATE_NOOP("Effects", "Vignette"), "Photo",
             {
-                ParamSpec::doubleParam("radius", "Radius", 0.1, 2.0, 0.6, 0.02, 2),
-                ParamSpec::doubleParam("amount", "Amount", 0.0, 2.0, 1.0, 0.05, 2),
-                ParamSpec::doubleParam("softness", "Softness", 0.05, 2.0, 0.7, 0.05, 2),
-                ParamSpec::offsetParam("center", "Centre", 0.0, 0.0),
+                ParamSpec::doubleParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                       0.1, 2.0, 0.6, 0.02, 2),
+                ParamSpec::doubleParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                       0.0, 2.0, 1.0, 0.05, 2),
+                ParamSpec::doubleParam("softness",
+                                       QT_TRANSLATE_NOOP("Effects", "Softness"),
+                                       0.05, 2.0, 0.7, 0.05, 2),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Centre"),
+                                       0.0, 0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radius = values.doubleValue("radius", 0.6);
@@ -80,11 +92,16 @@ void registerPhoto(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ soft portrait
-    fx::add(registry, "soft_portrait", "Soft Portrait", "Photo",
+    fx::add(registry, "soft_portrait", QT_TRANSLATE_NOOP("Effects", "Soft Portrait"),
+            "Photo",
             {
-                ParamSpec::intParam("softness", "Softness", 0, 10, 5),
-                ParamSpec::intParam("lighting", "Lighting", -20, 20, 0),
-                ParamSpec::intParam("warmth", "Warmth", 0, 20, 10),
+                ParamSpec::intParam("softness",
+                                    QT_TRANSLATE_NOOP("Effects", "Softness"), 0, 10, 5),
+                ParamSpec::intParam("lighting",
+                                    QT_TRANSLATE_NOOP("Effects", "Lighting"),
+                                    -20, 20, 0),
+                ParamSpec::intParam("warmth", QT_TRANSLATE_NOOP("Effects", "Warmth"),
+                                    0, 20, 10),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int softness = std::clamp(values.intValue("softness", 5), 0, 10);
@@ -108,10 +125,15 @@ void registerPhoto(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ red eye
-    fx::add(registry, "red_eye", "Red Eye Removal", "Photo",
+    fx::add(registry, "red_eye", QT_TRANSLATE_NOOP("Effects", "Red Eye Removal"),
+            "Photo",
             {
-                ParamSpec::intParam("tolerance", "Tolerance", 0, 100, 70),
-                ParamSpec::intParam("saturation", "Saturation", 0, 100, 90),
+                ParamSpec::intParam("tolerance",
+                                    QT_TRANSLATE_NOOP("Effects", "Tolerance"),
+                                    0, 100, 70),
+                ParamSpec::intParam("saturation",
+                                    QT_TRANSLATE_NOOP("Effects", "Saturation"),
+                                    0, 100, 90),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const float tolerance = values.intValue("tolerance", 70) / 100.0f;

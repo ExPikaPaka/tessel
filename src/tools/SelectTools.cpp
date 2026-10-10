@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 #include <QKeyEvent>
 #include <QPolygonF>
 #include <QTransform>
@@ -16,11 +18,17 @@ namespace {
 
 QList<QPair<QString, QString>> combineModeIcons()
 {
-    return {{QStringLiteral("select-rect"), QStringLiteral("Replace (default)")},
-            {QStringLiteral("select-all"), QStringLiteral("Union: add to the selection (Ctrl)")},
-            {QStringLiteral("deselect"), QStringLiteral("Subtract from the selection (Alt)")},
-            {QStringLiteral("crop"), QStringLiteral("Intersect with the selection")},
-            {QStringLiteral("invert"), QStringLiteral("Exclusive or")}};
+    return {{QStringLiteral("select-rect"),
+             QCoreApplication::translate("Tools", "Replace (default)")},
+            {QStringLiteral("select-all"),
+             QCoreApplication::translate("Tools",
+                                         "Union: add to the selection (Ctrl)")},
+            {QStringLiteral("deselect"),
+             QCoreApplication::translate("Tools", "Subtract from the selection (Alt)")},
+            {QStringLiteral("crop"),
+             QCoreApplication::translate("Tools", "Intersect with the selection")},
+            {QStringLiteral("invert"),
+             QCoreApplication::translate("Tools", "Exclusive or")}};
 }
 
 CombineMode effectiveMode(CombineMode base, Qt::KeyboardModifiers modifiers)
@@ -60,10 +68,12 @@ public:
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addToggleGroup(QStringLiteral("mode"), QStringLiteral("Mode"),
+        bar.addToggleGroup(QStringLiteral("mode"),
+                           QCoreApplication::translate("Tools", "Mode"),
                            combineModeIcons(), int(mode_));
         bar.addSeparator();
-        bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+        bar.addCheck(QStringLiteral("antialias"),
+                     QCoreApplication::translate("Tools", "Antialiasing"),
                      antialias_);
     }
 
@@ -86,10 +96,11 @@ protected:
             context.documentChanged();
         const Selection& selection = context.doc->selection();
         if (!selection.isActive()) {
-            context.say(QStringLiteral("Selection cleared"));
+            context.say(QCoreApplication::translate("Tools", "Selection cleared"));
         } else {
             const Rect bounds = selection.bounds();
-            context.say(QStringLiteral("Selection %1 x %2 at %3, %4")
+            context.say(QCoreApplication::translate("Tools",
+                                                    "Selection %1 x %2 at %3, %4")
                             .arg(bounds.w).arg(bounds.h).arg(bounds.x).arg(bounds.y));
         }
     }
@@ -110,14 +121,15 @@ public:
     }
     QString name() const override
     {
-        return ellipse_ ? QStringLiteral("Ellipse Select")
-                        : QStringLiteral("Rectangle Select");
+        return ellipse_ ? QCoreApplication::translate("Tools", "Ellipse Select")
+                        : QCoreApplication::translate("Tools", "Rectangle Select");
     }
     QString shortcut() const override { return QStringLiteral("S"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag to select. Shift keeps it square, Ctrl adds, Alt "
-                              "subtracts.");
+        return QCoreApplication::translate(
+            "Tools", "Drag to select. Shift keeps it square, Ctrl adds, Alt "
+                     "subtracts.");
     }
 
     void press(ToolContext& context, const ToolEvent& event) override
@@ -147,7 +159,7 @@ public:
         if (box.width() < 0.5 || box.height() < 0.5) {
             // A click with no drag clears the selection, like clicking away.
             recordSelectionEdit(*context.doc, *context.history,
-                                QStringLiteral("Deselect"),
+                                QCoreApplication::translate("Tools", "Deselect"),
                                 [&] { context.doc->selection().clear(); });
             context.repaintAll();
             if (context.documentChanged)
@@ -200,12 +212,16 @@ private:
 class LassoSelectTool : public SelectionToolBase {
 public:
     QString id() const override { return QStringLiteral("lasso"); }
-    QString name() const override { return QStringLiteral("Lasso Select"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Lasso Select");
+    }
     QString iconName() const override { return QStringLiteral("lasso"); }
     QString shortcut() const override { return QStringLiteral("S"); }
     QString hint() const override
     {
-        return QStringLiteral("Draw a freehand outline; it closes itself when you let go.");
+        return QCoreApplication::translate(
+            "Tools", "Draw a freehand outline; it closes itself when you let go.");
     }
 
     void press(ToolContext& context, const ToolEvent& event) override
@@ -281,25 +297,33 @@ private:
 class MagicWandTool : public SelectionToolBase {
 public:
     QString id() const override { return QStringLiteral("wand"); }
-    QString name() const override { return QStringLiteral("Magic Wand"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Magic Wand");
+    }
     QString iconName() const override { return QStringLiteral("wand"); }
     QString shortcut() const override { return QStringLiteral("S"); }
     QString hint() const override
     {
-        return QStringLiteral("Click to select a region of similar colour. Drag up or "
-                              "down to adjust the tolerance.");
+        return QCoreApplication::translate(
+            "Tools", "Click to select a region of similar colour. Drag up or "
+                     "down to adjust the tolerance.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
         SelectionToolBase::buildOptions(bar);
         bar.addSeparator();
-        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+        bar.addPercent(QStringLiteral("tolerance"),
+                       QCoreApplication::translate("Tools", "Tolerance"),
                        int(std::lround(tolerance_ * 100.0)), 0, 100);
-        bar.addCombo(QStringLiteral("fill"), QStringLiteral("Flood mode"),
-                     {QStringLiteral("Contiguous"), QStringLiteral("Global")},
+        bar.addCombo(QStringLiteral("fill"),
+                     QCoreApplication::translate("Tools", "Flood mode"),
+                     {QCoreApplication::translate("Tools", "Contiguous"),
+                      QCoreApplication::translate("Tools", "Global")},
                      contiguous_ ? 0 : 1);
-        bar.addCheck(QStringLiteral("merged"), QStringLiteral("Sample merged"), merged_);
+        bar.addCheck(QStringLiteral("merged"),
+                     QCoreApplication::translate("Tools", "Sample merged"), merged_);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -373,7 +397,7 @@ private:
         pending_ = ops::floodFill(sample, seed_.x(), seed_.y(), tolerance, contiguous_,
                                   antialias_);
         preview_ = pathFromMask(pending_);
-        context.say(QStringLiteral("Tolerance %1%  -  %2 pixels")
+        context.say(QCoreApplication::translate("Tools", "Tolerance %1%  -  %2 pixels")
                         .arg(int(std::lround(tolerance * 100.0)))
                         .arg(pending_.countAbove(0.5f)));
         context.repaintAll();
@@ -398,16 +422,20 @@ private:
 class MoveSelectedTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("move-selected"); }
-    QString name() const override { return QStringLiteral("Move Selected Pixels"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Move Selected Pixels");
+    }
     QString iconName() const override { return QStringLiteral("move-selected"); }
     QString shortcut() const override { return QStringLiteral("M"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag the selected pixels. Drag a corner handle to "
-                              "scale, the handle above the box or anywhere outside it "
-                              "to rotate (Shift snaps to 15 degrees), press Enter or "
-                              "Escape to drop them where they are, Ctrl+Z to put them "
-                              "back.");
+        return QCoreApplication::translate(
+            "Tools", "Drag the selected pixels. Drag a corner handle to "
+                     "scale, the handle above the box or anywhere outside it "
+                     "to rotate (Shift snaps to 15 degrees), press Enter or "
+                     "Escape to drop them where they are, Ctrl+Z to put them "
+                     "back.");
     }
     QCursor cursor() const override { return QCursor(Qt::SizeAllCursor); }
 
@@ -736,10 +764,12 @@ private:
                        Rect(x, y, placed.width(), placed.height()));
         context.doc->invalidateLayer(layer);
         context.repaintAll();
-        QString where = QStringLiteral("Moved to %1, %2  -  %3 x %4")
+        QString where = QCoreApplication::translate("Tools",
+                                                    "Moved to %1, %2  -  %3 x %4")
                             .arg(x).arg(y).arg(width).arg(height);
         if (std::abs(angle_) > 1.0e-3)
-            where += QStringLiteral("  -  %1 degrees").arg(angle_, 0, 'f', 1);
+            where += QCoreApplication::translate("Tools", "  -  %1 degrees")
+                         .arg(angle_, 0, 'f', 1);
         context.say(where);
     }
 
@@ -765,12 +795,16 @@ private:
 class MoveSelectionTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("move-selection"); }
-    QString name() const override { return QStringLiteral("Move Selection"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Move Selection");
+    }
     QString iconName() const override { return QStringLiteral("move-selection"); }
     QString shortcut() const override { return QStringLiteral("M"); }
     QString hint() const override
     {
-        return QStringLiteral("Drags the selection outline without moving any pixels.");
+        return QCoreApplication::translate(
+            "Tools", "Drags the selection outline without moving any pixels.");
     }
     QCursor cursor() const override { return QCursor(Qt::SizeAllCursor); }
 
@@ -798,7 +832,10 @@ public:
         offset_ = next;
         context.repaintAll();
         const Rect bounds = selection.bounds();
-        context.say(QStringLiteral("Selection at %1, %2").arg(bounds.x).arg(bounds.y));
+        context.say(
+                    QCoreApplication::translate("Tools", "Selection at %1, %2")
+                        .arg(bounds.x)
+                        .arg(bounds.y));
     }
 
     void release(ToolContext& context, const ToolEvent&) override

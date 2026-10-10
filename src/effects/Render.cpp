@@ -3,19 +3,30 @@
 
 #include <cmath>
 
+#include "core/Strings.h"
+
 namespace tessel {
 
 void registerRenderers(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ clouds
-    fx::add(registry, "clouds", "Clouds", "Render",
+    fx::add(registry, "clouds", QT_TRANSLATE_NOOP("Effects", "Clouds"), "Render",
             {
-                ParamSpec::doubleParam("scale", "Scale", 2.0, 1000.0, 180.0, 1.0, 1),
-                ParamSpec::doubleParam("roughness", "Roughness", 0.05, 0.95, 0.5, 0.05, 2),
-                ParamSpec::intParam("detail", "Detail", 1, 8, 6),
-                ParamSpec::intParam("seed", "Seed", 0, 999, 0),
-                ParamSpec::choiceParam("blend", "Blend mode", blendModeNames(), 0),
-                ParamSpec::boolParam("use_palette", "Use palette colours", true),
+                ParamSpec::doubleParam("scale", QT_TRANSLATE_NOOP("Effects", "Scale"),
+                                       2.0, 1000.0, 180.0, 1.0, 1),
+                ParamSpec::doubleParam("roughness",
+                                       QT_TRANSLATE_NOOP("Effects", "Roughness"),
+                                       0.05, 0.95, 0.5, 0.05, 2),
+                ParamSpec::intParam("detail", QT_TRANSLATE_NOOP("Effects", "Detail"),
+                                    1, 8, 6),
+                ParamSpec::intParam("seed", QT_TRANSLATE_NOOP("Effects", "Seed"),
+                                    0, 999, 0),
+                ParamSpec::choiceParam("blend",
+                                       QT_TRANSLATE_NOOP("Effects", "Blend mode"),
+                                       blendModeLabels(), 0),
+                ParamSpec::boolParam("use_palette",
+                                     QT_TRANSLATE_NOOP("Effects", "Use palette colours"),
+                                     true),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double scale = std::max(2.0, values.doubleValue("scale", 180.0));
@@ -53,14 +64,21 @@ void registerRenderers(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ julia
-    fx::add(registry, "julia", "Julia Fractal", "Render",
+    fx::add(registry, "julia", QT_TRANSLATE_NOOP("Effects", "Julia Fractal"), "Render",
             {
-                ParamSpec::doubleParam("factor", "Factor", 1.0, 10.0, 4.0, 0.1, 2),
-                ParamSpec::doubleParam("zoom", "Zoom", 0.1, 50.0, 1.0, 0.1, 2),
-                ParamSpec::angleParam("angle", "Angle", 0.0),
-                ParamSpec::doubleParam("cr", "Seed real", -2.0, 2.0, -0.74, 0.01, 3),
-                ParamSpec::doubleParam("ci", "Seed imaginary", -2.0, 2.0, 0.19, 0.01, 3),
-                ParamSpec::intParam("quality", "Quality", 1, 5, 2),
+                ParamSpec::doubleParam("factor", QT_TRANSLATE_NOOP("Effects", "Factor"),
+                                       1.0, 10.0, 4.0, 0.1, 2),
+                ParamSpec::doubleParam("zoom", QT_TRANSLATE_NOOP("Effects", "Zoom"),
+                                       0.1, 50.0, 1.0, 0.1, 2),
+                ParamSpec::angleParam("angle", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                      0.0),
+                ParamSpec::doubleParam("cr", QT_TRANSLATE_NOOP("Effects", "Seed real"),
+                                       -2.0, 2.0, -0.74, 0.01, 3),
+                ParamSpec::doubleParam("ci",
+                                       QT_TRANSLATE_NOOP("Effects", "Seed imaginary"),
+                                       -2.0, 2.0, 0.19, 0.01, 3),
+                ParamSpec::intParam("quality", QT_TRANSLATE_NOOP("Effects", "Quality"),
+                                    1, 5, 2),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double factor = values.doubleValue("factor", 4.0);
@@ -99,14 +117,22 @@ void registerRenderers(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ mandelbrot
-    fx::add(registry, "mandelbrot", "Mandelbrot Fractal", "Render",
+    fx::add(registry, "mandelbrot", QT_TRANSLATE_NOOP("Effects", "Mandelbrot Fractal"),
+            "Render",
             {
-                ParamSpec::doubleParam("factor", "Factor", 1.0, 10.0, 3.0, 0.1, 2),
-                ParamSpec::doubleParam("zoom", "Zoom", 0.1, 500.0, 1.0, 0.1, 2),
-                ParamSpec::doubleParam("cx", "Centre x", -2.5, 1.5, -0.6, 0.001, 4),
-                ParamSpec::doubleParam("cy", "Centre y", -2.0, 2.0, 0.0, 0.001, 4),
-                ParamSpec::intParam("quality", "Quality", 1, 5, 2),
-                ParamSpec::boolParam("invert", "Invert colours", false),
+                ParamSpec::doubleParam("factor", QT_TRANSLATE_NOOP("Effects", "Factor"),
+                                       1.0, 10.0, 3.0, 0.1, 2),
+                ParamSpec::doubleParam("zoom", QT_TRANSLATE_NOOP("Effects", "Zoom"),
+                                       0.1, 500.0, 1.0, 0.1, 2),
+                ParamSpec::doubleParam("cx", QT_TRANSLATE_NOOP("Effects", "Centre x"),
+                                       -2.5, 1.5, -0.6, 0.001, 4),
+                ParamSpec::doubleParam("cy", QT_TRANSLATE_NOOP("Effects", "Centre y"),
+                                       -2.0, 2.0, 0.0, 0.001, 4),
+                ParamSpec::intParam("quality", QT_TRANSLATE_NOOP("Effects", "Quality"),
+                                    1, 5, 2),
+                ParamSpec::boolParam("invert",
+                                     QT_TRANSLATE_NOOP("Effects", "Invert colours"),
+                                     false),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double factor = values.doubleValue("factor", 3.0);
@@ -145,10 +171,14 @@ void registerRenderers(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ checker
-    fx::add(registry, "checkerboard", "Checkerboard", "Render",
+    fx::add(registry, "checkerboard", QT_TRANSLATE_NOOP("Effects", "Checkerboard"),
+            "Render",
             {
-                ParamSpec::intParam("cell", "Cell size", 1, 512, 16, " px"),
-                ParamSpec::choiceParam("blend", "Blend mode", blendModeNames(), 0),
+                ParamSpec::intParam("cell", QT_TRANSLATE_NOOP("Effects", "Cell size"),
+                                    1, 512, 16, " px"),
+                ParamSpec::choiceParam("blend",
+                                       QT_TRANSLATE_NOOP("Effects", "Blend mode"),
+                                       blendModeLabels(), 0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int cell = std::max(1, values.intValue("cell", 16));

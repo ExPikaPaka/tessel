@@ -96,7 +96,7 @@ void showPluginsDialog(QWidget* parent)
 {
     QDialog dialog(parent);
     dialog.setObjectName(QStringLiteral("pluginsDialog"));
-    dialog.setWindowTitle(QStringLiteral("About the Plugins"));
+    dialog.setWindowTitle(QCoreApplication::translate("Dialogs", "About the Plugins"));
     dialog.setWindowIcon(icons::get(QStringLiteral("effect"), 22));
     auto* root = new QVBoxLayout(&dialog);
     auto* text = new QTextBrowser(&dialog);
@@ -166,7 +166,7 @@ void MainWindow::createActions()
     };
 
     // ---------------------------------------------------------------- file
-    make(QStringLiteral("new"), QStringLiteral("&New..."), QStringLiteral("new"),
+    make(QStringLiteral("new"), tr("&New..."), QStringLiteral("new"),
          QKeySequence::New, [this] {
              Document* doc = currentDocument();
              NewImageDialog dialog(doc ? doc->width() : defaultWidth_,
@@ -176,38 +176,37 @@ void MainWindow::createActions()
              if (dialog.exec() == QDialog::Accepted)
                  newDocument(dialog.imageWidth(), dialog.imageHeight(), dialog.background());
          });
-    make(QStringLiteral("open"), QStringLiteral("&Open..."), QStringLiteral("open"),
+    make(QStringLiteral("open"), tr("&Open..."), QStringLiteral("open"),
          QKeySequence::Open, [this] {
              const QStringList paths = QFileDialog::getOpenFileNames(
-                 this, QStringLiteral("Open Image"), lastDirectory_, io::openFilter());
+                 this, tr("Open Image"), lastDirectory_, io::openFilter());
              openPaths(paths);
          });
-    make(QStringLiteral("save"), QStringLiteral("&Save"), QStringLiteral("save"),
+    make(QStringLiteral("save"), tr("&Save"), QStringLiteral("save"),
          QKeySequence::Save, [this] { saveView(stack_->currentIndex(), false); });
-    make(QStringLiteral("saveas"), QStringLiteral("Save &As..."), QStringLiteral("save"),
+    make(QStringLiteral("saveas"), tr("Save &As..."), QStringLiteral("save"),
          QKeySequence::SaveAs, [this] { saveView(stack_->currentIndex(), true); });
-    QAction* closeAction = make(QStringLiteral("close"), QStringLiteral("&Close"),
+    QAction* closeAction = make(QStringLiteral("close"), tr("&Close"),
                                 QStringLiteral("close"), QKeySequence::Close,
                                 [this] { closeView(stack_->currentIndex()); });
     closeAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+W")),
                                QKeySequence(QStringLiteral("Ctrl+F4"))});
-    make(QStringLiteral("saveall"), QStringLiteral("Save A&ll"), QStringLiteral("save"),
+    make(QStringLiteral("saveall"), tr("Save A&ll"), QStringLiteral("save"),
          QKeySequence(QStringLiteral("Ctrl+Alt+S")), [this] {
              int saved = 0;
              for (int i = 0; i < stack_->count(); ++i) {
                  if (viewAt(i)->document()->isModified() && saveView(i, false))
                      ++saved;
              }
-             hintLabel_->setText(QStringLiteral("Saved %1 image%2").arg(saved).arg(
-                 saved == 1 ? QString() : QStringLiteral("s")));
+             hintLabel_->setText(tr("Saved %n image(s)", "", saved));
          });
-    make(QStringLiteral("print"), QStringLiteral("&Print..."), QStringLiteral("image"),
+    make(QStringLiteral("print"), tr("&Print..."), QStringLiteral("image"),
          QKeySequence::Print, [this] { printImage(); });
-    make(QStringLiteral("quit"), QStringLiteral("E&xit"), QString(),
+    make(QStringLiteral("quit"), tr("E&xit"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Q")), [this] { close(); });
 
     // ---------------------------------------------------------------- edit
-    make(QStringLiteral("undo"), QStringLiteral("&Undo"), QStringLiteral("undo"),
+    make(QStringLiteral("undo"), tr("&Undo"), QStringLiteral("undo"),
          QKeySequence::Undo, [this] {
              if (CanvasView* view = currentView()) {
                  view->cancelPendingTool();
@@ -216,7 +215,7 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
-    make(QStringLiteral("redo"), QStringLiteral("&Redo"), QStringLiteral("redo"),
+    make(QStringLiteral("redo"), tr("&Redo"), QStringLiteral("redo"),
          QKeySequence(QStringLiteral("Ctrl+Y")), [this] {
              if (CanvasView* view = currentView()) {
                  view->cancelPendingTool();
@@ -225,48 +224,48 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
-    QAction* cutAction = make(QStringLiteral("cut"), QStringLiteral("Cu&t"),
+    QAction* cutAction = make(QStringLiteral("cut"), tr("Cu&t"),
                               QStringLiteral("cut"), QKeySequence::Cut,
                               [this] { doCut(); });
     cutAction->setShortcuts({QKeySequence::Cut,
                              QKeySequence(QStringLiteral("Shift+Delete"))});
-    QAction* copyAction = make(QStringLiteral("copy"), QStringLiteral("&Copy"),
+    QAction* copyAction = make(QStringLiteral("copy"), tr("&Copy"),
                                QStringLiteral("copy"), QKeySequence::Copy,
                                [this] { doCopy(false); });
     copyAction->setShortcuts({QKeySequence::Copy,
                               QKeySequence(QStringLiteral("Ctrl+Insert"))});
-    make(QStringLiteral("copymerged"), QStringLiteral("Copy &Merged"), QString(),
+    make(QStringLiteral("copymerged"), tr("Copy &Merged"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Shift+C")), [this] { doCopy(true); });
-    QAction* pasteAction = make(QStringLiteral("paste"), QStringLiteral("&Paste"),
+    QAction* pasteAction = make(QStringLiteral("paste"), tr("&Paste"),
                                 QStringLiteral("paste"), QKeySequence::Paste,
                                 [this] { doPaste(false, false); });
     pasteAction->setShortcuts({QKeySequence::Paste,
                                QKeySequence(QStringLiteral("Shift+Insert"))});
-    make(QStringLiteral("pastelayer"), QStringLiteral("Paste Into New &Layer"), QString(),
+    make(QStringLiteral("pastelayer"), tr("Paste Into New &Layer"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Shift+V")), [this] { doPaste(true, false); });
-    make(QStringLiteral("pasteimage"), QStringLiteral("Paste Into New &Image"), QString(),
+    make(QStringLiteral("pasteimage"), tr("Paste Into New &Image"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+V")), [this] { doPaste(false, true); });
-    make(QStringLiteral("copyselection"), QStringLiteral("Cop&y Selection"), QString(),
+    make(QStringLiteral("copyselection"), tr("Cop&y Selection"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+Shift+C")), [this] { copySelection(); });
-    make(QStringLiteral("pasteselection"), QStringLiteral("Paste Selection"), QString(),
+    make(QStringLiteral("pasteselection"), tr("Paste Selection"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+Shift+V")), [this] { pasteSelection(); });
-    make(QStringLiteral("selectall"), QStringLiteral("Select &All"), QStringLiteral("select-all"),
+    make(QStringLiteral("selectall"), tr("Select &All"), QStringLiteral("select-all"),
          QKeySequence::SelectAll, [this] {
              if (CanvasView* view = currentView()) {
                  recordSelectionEdit(*view->document(), *view->history(),
-                                     QStringLiteral("Select All"),
+                                     tr("Select All"),
                                      [&] { view->document()->selection().selectAll(); });
                  view->refresh();
                  updateEverything();
              }
          });
-    QAction* deselectAction = make(QStringLiteral("deselect"), QStringLiteral("&Deselect All"),
+    QAction* deselectAction = make(QStringLiteral("deselect"), tr("&Deselect All"),
                                    QStringLiteral("deselect"),
                                    QKeySequence(QStringLiteral("Ctrl+D")), [this] {
              if (CanvasView* view = currentView()) {
                  view->commitPendingTool();
                  recordSelectionEdit(*view->document(), *view->history(),
-                                     QStringLiteral("Deselect All"),
+                                     tr("Deselect All"),
                                      [&] { view->document()->selection().clear(); });
                  view->refresh();
                  updateEverything();
@@ -274,11 +273,11 @@ void MainWindow::createActions()
          });
     deselectAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+D")),
                                   QKeySequence(QStringLiteral("Ctrl+Shift+A"))});
-    make(QStringLiteral("invertselection"), QStringLiteral("&Invert Selection"),
+    make(QStringLiteral("invertselection"), tr("&Invert Selection"),
          QStringLiteral("invert"), QKeySequence(QStringLiteral("Ctrl+I")), [this] {
              if (CanvasView* view = currentView()) {
                  recordSelectionEdit(*view->document(), *view->history(),
-                                     QStringLiteral("Invert Selection"),
+                                     tr("Invert Selection"),
                                      [&] { view->document()->selection().invert(); });
                  view->refresh();
                  updateEverything();
@@ -297,54 +296,54 @@ void MainWindow::createActions()
         view->refresh();
         updateEverything();
     };
-    make(QStringLiteral("feather"), QStringLiteral("&Feather..."),
+    make(QStringLiteral("feather"), tr("&Feather..."),
          QStringLiteral("select-ellipse"), QKeySequence(QStringLiteral("Ctrl+Alt+F")),
          [selectionOp] { selectionOp(SelectionOpDialog::Op::Feather); });
-    make(QStringLiteral("grow"), QStringLiteral("&Grow..."),
+    make(QStringLiteral("grow"), tr("&Grow..."),
          QStringLiteral("select-all"), QKeySequence(),
          [selectionOp] { selectionOp(SelectionOpDialog::Op::Grow); });
-    make(QStringLiteral("shrink"), QStringLiteral("S&hrink..."),
+    make(QStringLiteral("shrink"), tr("S&hrink..."),
          QStringLiteral("deselect"), QKeySequence(),
          [selectionOp] { selectionOp(SelectionOpDialog::Op::Shrink); });
-    make(QStringLiteral("border"), QStringLiteral("&Border..."),
+    make(QStringLiteral("border"), tr("&Border..."),
          QStringLiteral("select-rect"), QKeySequence(),
          [selectionOp] { selectionOp(SelectionOpDialog::Op::Border); });
-    make(QStringLiteral("freetransform"), QStringLiteral("Free &Transform"),
+    make(QStringLiteral("freetransform"), tr("Free &Transform"),
          QStringLiteral("move-selected"), QKeySequence(QStringLiteral("Ctrl+T")),
          [this] { chooseTool(QStringLiteral("move-selected")); });
-    make(QStringLiteral("erase"), QStringLiteral("&Erase Selection"), QStringLiteral("delete"),
+    make(QStringLiteral("erase"), tr("&Erase Selection"), QStringLiteral("delete"),
          QKeySequence::Delete, [this] { eraseSelection(); });
-    make(QStringLiteral("fill"), QStringLiteral("&Fill Selection"), QStringLiteral("bucket"),
+    make(QStringLiteral("fill"), tr("&Fill Selection"), QStringLiteral("bucket"),
          QKeySequence(QStringLiteral("Backspace")), [this] { fillSelection(); });
 
     // ---------------------------------------------------------------- view
-    make(QStringLiteral("zoomin"), QStringLiteral("Zoom &In"), QStringLiteral("zoom-in"),
+    make(QStringLiteral("zoomin"), tr("Zoom &In"), QStringLiteral("zoom-in"),
          QKeySequence::ZoomIn, [this] {
              if (CanvasView* view = currentView())
                  view->zoomIn();
          });
-    make(QStringLiteral("zoomout"), QStringLiteral("Zoom &Out"), QStringLiteral("zoom-out"),
+    make(QStringLiteral("zoomout"), tr("Zoom &Out"), QStringLiteral("zoom-out"),
          QKeySequence::ZoomOut, [this] {
              if (CanvasView* view = currentView())
                  view->zoomOut();
          });
-    make(QStringLiteral("zoomfit"), QStringLiteral("&Fit to Window"), QStringLiteral("fit"),
+    make(QStringLiteral("zoomfit"), tr("&Fit to Window"), QStringLiteral("fit"),
          QKeySequence(QStringLiteral("Ctrl+B")), [this] {
              if (CanvasView* view = currentView())
                  view->zoomToFit();
          });
-    make(QStringLiteral("zoomactual"), QStringLiteral("&Actual Size"), QStringLiteral("actual"),
+    make(QStringLiteral("zoomactual"), tr("&Actual Size"), QStringLiteral("actual"),
          QKeySequence(QStringLiteral("Ctrl+0")), [this] {
              if (CanvasView* view = currentView())
                  view->zoomToActualSize();
          });
-    make(QStringLiteral("zoomselection"), QStringLiteral("Zoom to &Selection"), QString(),
+    make(QStringLiteral("zoomselection"), tr("Zoom to &Selection"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Shift+B")), [this] {
              if (CanvasView* view = currentView())
                  view->zoomToSelection();
          });
 
-    auto* grid = new QAction(QStringLiteral("Pixel &Grid"), this);
+    auto* grid = new QAction(tr("Pixel &Grid"), this);
     grid->setCheckable(true);
     grid->setIcon(icons::get(QStringLiteral("grid"), 20));
     grid->setProperty("iconName", QStringLiteral("grid"));
@@ -356,7 +355,7 @@ void MainWindow::createActions()
     actions_.insert(QStringLiteral("grid"), grid);
     addAction(grid);
 
-    auto* rulers = new QAction(QStringLiteral("&Rulers"), this);
+    auto* rulers = new QAction(tr("&Rulers"), this);
     rulers->setCheckable(true);
     connect(rulers, &QAction::toggled, this, [this](bool on) {
         for (int i = 0; i < stack_->count(); ++i)
@@ -383,7 +382,7 @@ void MainWindow::createActions()
         addAction(action);
     }
 
-    auto* selectionOutline = new QAction(QStringLiteral("Selection &Outline"), this);
+    auto* selectionOutline = new QAction(tr("Selection &Outline"), this);
     selectionOutline->setCheckable(true);
     selectionOutline->setChecked(true);
     connect(selectionOutline, &QAction::toggled, this, [this](bool on) {
@@ -393,7 +392,7 @@ void MainWindow::createActions()
     selectionOutline->setObjectName(QStringLiteral("selectionoutline"));
     actions_.insert(QStringLiteral("selectionoutline"), selectionOutline);
 
-    auto* fullScreen = new QAction(QStringLiteral("F&ull Screen"), this);
+    auto* fullScreen = new QAction(tr("F&ull Screen"), this);
     fullScreen->setCheckable(true);
     fullScreen->setShortcut(QKeySequence(QStringLiteral("F11")));
     connect(fullScreen, &QAction::toggled, this, [this](bool on) {
@@ -407,71 +406,71 @@ void MainWindow::createActions()
     addAction(fullScreen);
 
     // ---------------------------------------------------------------- image
-    make(QStringLiteral("crop"), QStringLiteral("&Crop to Selection"), QStringLiteral("crop"),
+    make(QStringLiteral("crop"), tr("&Crop to Selection"), QStringLiteral("crop"),
          QKeySequence(QStringLiteral("Ctrl+Shift+X")), [this] { cropToSelection(); });
-    make(QStringLiteral("resize"), QStringLiteral("&Resize Image..."), QStringLiteral("resize"),
+    make(QStringLiteral("resize"), tr("&Resize Image..."), QStringLiteral("resize"),
          QKeySequence(QStringLiteral("Ctrl+R")), [this] { resizeImage(); });
-    make(QStringLiteral("canvassize"), QStringLiteral("Canvas &Size..."),
+    make(QStringLiteral("canvassize"), tr("Canvas &Size..."),
          QStringLiteral("canvas"), QKeySequence(QStringLiteral("Ctrl+Shift+R")),
          [this] { changeCanvasSize(); });
-    make(QStringLiteral("fliph"), QStringLiteral("Flip &Horizontal"), QStringLiteral("flip-h"),
+    make(QStringLiteral("fliph"), tr("Flip &Horizontal"), QStringLiteral("flip-h"),
          QKeySequence(), [this] {
-             structuralEdit(QStringLiteral("Flip Horizontal"), QStringLiteral("flip-h"),
+             structuralEdit(tr("Flip Horizontal"), QStringLiteral("flip-h"),
                             [this] { currentDocument()->flip(true); });
          });
-    make(QStringLiteral("flipv"), QStringLiteral("Flip &Vertical"), QStringLiteral("flip-v"),
+    make(QStringLiteral("flipv"), tr("Flip &Vertical"), QStringLiteral("flip-v"),
          QKeySequence(), [this] {
-             structuralEdit(QStringLiteral("Flip Vertical"), QStringLiteral("flip-v"),
+             structuralEdit(tr("Flip Vertical"), QStringLiteral("flip-v"),
                             [this] { currentDocument()->flip(false); });
          });
-    make(QStringLiteral("rotatecw"), QStringLiteral("Rotate 90 degrees &Clockwise"),
+    make(QStringLiteral("rotatecw"), tr("Rotate 90 degrees &Clockwise"),
          QStringLiteral("rotate-cw"), QKeySequence(QStringLiteral("Ctrl+H")), [this] {
-             structuralEdit(QStringLiteral("Rotate 90 Clockwise"),
+             structuralEdit(tr("Rotate 90 Clockwise"),
                             QStringLiteral("rotate-cw"),
                             [this] { currentDocument()->rotate90(1); });
          });
-    make(QStringLiteral("rotateccw"), QStringLiteral("Rotate 90 degrees Counter-Clock&wise"),
+    make(QStringLiteral("rotateccw"), tr("Rotate 90 degrees Counter-Clock&wise"),
          QStringLiteral("rotate-ccw"), QKeySequence(QStringLiteral("Ctrl+G")), [this] {
-             structuralEdit(QStringLiteral("Rotate 90 Counter-Clockwise"),
+             structuralEdit(tr("Rotate 90 Counter-Clockwise"),
                             QStringLiteral("rotate-ccw"),
                             [this] { currentDocument()->rotate90(3); });
          });
-    make(QStringLiteral("rotate180"), QStringLiteral("Rotate &180 degrees"), QString(),
+    make(QStringLiteral("rotate180"), tr("Rotate &180 degrees"), QString(),
          QKeySequence(), [this] {
-             structuralEdit(QStringLiteral("Rotate 180"), QStringLiteral("rotate-cw"),
+             structuralEdit(tr("Rotate 180"), QStringLiteral("rotate-cw"),
                             [this] { currentDocument()->rotate90(2); });
          });
-    make(QStringLiteral("flatten"), QStringLiteral("&Flatten"), QStringLiteral("flatten"),
+    make(QStringLiteral("flatten"), tr("&Flatten"), QStringLiteral("flatten"),
          QKeySequence(QStringLiteral("Ctrl+Shift+F")), [this] { flattenImage(); });
 
     // ---------------------------------------------------------------- layers
-    make(QStringLiteral("addlayer"), QStringLiteral("&Add New Layer"),
+    make(QStringLiteral("addlayer"), tr("&Add New Layer"),
          QStringLiteral("layer-add"), QKeySequence(QStringLiteral("Ctrl+Shift+N")),
          [this] { addLayer(); });
-    make(QStringLiteral("addgroup"), QStringLiteral("Add &Group"),
+    make(QStringLiteral("addgroup"), tr("Add &Group"),
          QStringLiteral("layer"), QKeySequence(QStringLiteral("Ctrl+Shift+G")), [this] {
              if (Document* doc = currentDocument()) {
-                 structuralEdit(QStringLiteral("Add Group"), QStringLiteral("layer"),
+                 structuralEdit(tr("Add Group"), QStringLiteral("layer"),
                                 [doc] { doc->addGroup(); });
              }
          });
-    make(QStringLiteral("deletelayer"), QStringLiteral("&Delete Layer"),
+    make(QStringLiteral("deletelayer"), tr("&Delete Layer"),
          QStringLiteral("layer-delete"), QKeySequence(QStringLiteral("Ctrl+Shift+Delete")),
          [this] { deleteLayer(); });
-    make(QStringLiteral("duplicatelayer"), QStringLiteral("D&uplicate Layer"),
+    make(QStringLiteral("duplicatelayer"), tr("D&uplicate Layer"),
          QStringLiteral("layer-duplicate"), QKeySequence(QStringLiteral("Ctrl+Shift+D")),
          [this] { duplicateLayer(); });
-    make(QStringLiteral("mergedown"), QStringLiteral("&Merge Layer Down"),
+    make(QStringLiteral("mergedown"), tr("&Merge Layer Down"),
          QStringLiteral("layer-merge"), QKeySequence(QStringLiteral("Ctrl+M")),
          [this] { mergeLayerDown(); });
-    make(QStringLiteral("importlayer"), QStringLiteral("&Import from File..."),
+    make(QStringLiteral("importlayer"), tr("&Import from File..."),
          QStringLiteral("open"), QKeySequence(), [this] { importLayerFromFile(); });
-    make(QStringLiteral("layerfliph"), QStringLiteral("Flip Layer &Horizontal"),
+    make(QStringLiteral("layerfliph"), tr("Flip Layer &Horizontal"),
          QStringLiteral("flip-h"), QKeySequence(), [this] {
              if (CanvasView* view = currentView()) {
                  Layer* layer = view->document()->activeLayer();
                  EditScope scope(*view->document(), *view->history(), layer,
-                                 QStringLiteral("Flip Layer Horizontal"),
+                                 tr("Flip Layer Horizontal"),
                                  QStringLiteral("flip-h"));
                  layer->image = ops::flip(layer->image, true);
                  scope.commit();
@@ -479,12 +478,12 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
-    make(QStringLiteral("layerflipv"), QStringLiteral("Flip Layer &Vertical"),
+    make(QStringLiteral("layerflipv"), tr("Flip Layer &Vertical"),
          QStringLiteral("flip-v"), QKeySequence(), [this] {
              if (CanvasView* view = currentView()) {
                  Layer* layer = view->document()->activeLayer();
                  EditScope scope(*view->document(), *view->history(), layer,
-                                 QStringLiteral("Flip Layer Vertical"),
+                                 tr("Flip Layer Vertical"),
                                  QStringLiteral("flip-v"));
                  layer->image = ops::flip(layer->image, false);
                  scope.commit();
@@ -492,20 +491,20 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
-    make(QStringLiteral("rotatezoom"), QStringLiteral("&Rotate / Zoom Layer"),
+    make(QStringLiteral("rotatezoom"), tr("&Rotate / Zoom Layer"),
          QStringLiteral("rotate-cw"), QKeySequence(QStringLiteral("Ctrl+Shift+Z")),
          [this] { chooseTool(QStringLiteral("transform")); });
     // Layer masks. Adding, inverting and applying all change pixels, so they go
     // through the document snapshot; which of the two thumbnails painting lands
     // in is interface state, like the active layer, and is not recorded.
-    make(QStringLiteral("addmask"), QStringLiteral("Add Layer &Mask"),
+    make(QStringLiteral("addmask"), tr("Add Layer &Mask"),
          QStringLiteral("layer-props"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
              if (!layer || layer->hasMask())
                  return;
              const int uid = layer->uid();
-             structuralEdit(QStringLiteral("Add Layer Mask"),
+             structuralEdit(tr("Add Layer Mask"),
                             QStringLiteral("layer-props"), [doc, uid] {
                                 if (Layer* target = doc->layerByUid(uid)) {
                                     doc->addMask(target);
@@ -513,7 +512,7 @@ void MainWindow::createActions()
                                 }
                             });
          });
-    make(QStringLiteral("editmask"), QStringLiteral("&Paint in Mask"),
+    make(QStringLiteral("editmask"), tr("&Paint in Mask"),
          QStringLiteral("brush"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
@@ -523,7 +522,7 @@ void MainWindow::createActions()
              refreshPanels();
              updateEverything();
          });
-    make(QStringLiteral("togglemask"), QStringLiteral("&Enable Layer Mask"),
+    make(QStringLiteral("togglemask"), tr("&Enable Layer Mask"),
          QStringLiteral("visible"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
@@ -531,8 +530,8 @@ void MainWindow::createActions()
                  return;
              const int uid = layer->uid();
              const bool next = !layer->maskEnabled();
-             structuralEdit(next ? QStringLiteral("Enable Layer Mask")
-                                 : QStringLiteral("Disable Layer Mask"),
+             structuralEdit(next ? tr("Enable Layer Mask")
+                                 : tr("Disable Layer Mask"),
                             QStringLiteral("visible"), [doc, uid, next] {
                                 if (Layer* target = doc->layerByUid(uid)) {
                                     target->setMaskEnabled(next);
@@ -540,14 +539,14 @@ void MainWindow::createActions()
                                 }
                             });
          });
-    make(QStringLiteral("invertmask"), QStringLiteral("&Invert Layer Mask"),
+    make(QStringLiteral("invertmask"), tr("&Invert Layer Mask"),
          QStringLiteral("invert"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
              if (!layer || !layer->hasMask())
                  return;
              const int uid = layer->uid();
-             structuralEdit(QStringLiteral("Invert Layer Mask"),
+             structuralEdit(tr("Invert Layer Mask"),
                             QStringLiteral("invert"), [doc, uid] {
                                 if (Layer* target = doc->layerByUid(uid)) {
                                     target->invertMask();
@@ -555,70 +554,70 @@ void MainWindow::createActions()
                                 }
                             });
          });
-    make(QStringLiteral("applymask"), QStringLiteral("App&ly Layer Mask"),
+    make(QStringLiteral("applymask"), tr("App&ly Layer Mask"),
          QStringLiteral("flatten"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
              if (!layer || !layer->hasMask())
                  return;
              const int uid = layer->uid();
-             structuralEdit(QStringLiteral("Apply Layer Mask"),
+             structuralEdit(tr("Apply Layer Mask"),
                             QStringLiteral("flatten"), [doc, uid] {
                                 if (Layer* target = doc->layerByUid(uid))
                                     doc->applyMask(target);
                             });
          });
-    make(QStringLiteral("deletemask"), QStringLiteral("Delete Layer Mas&k"),
+    make(QStringLiteral("deletemask"), tr("Delete Layer Mas&k"),
          QStringLiteral("layer-delete"), QKeySequence(), [this] {
              Document* doc = currentDocument();
              Layer* layer = doc ? doc->activeNode() : nullptr;
              if (!layer || !layer->hasMask())
                  return;
              const int uid = layer->uid();
-             structuralEdit(QStringLiteral("Delete Layer Mask"),
+             structuralEdit(tr("Delete Layer Mask"),
                             QStringLiteral("layer-delete"), [doc, uid] {
                                 if (Layer* target = doc->layerByUid(uid))
                                     doc->removeMask(target);
                             });
          });
-    make(QStringLiteral("layerup"), QStringLiteral("Move Layer &Up"), QStringLiteral("up"),
+    make(QStringLiteral("layerup"), tr("Move Layer &Up"), QStringLiteral("up"),
          QKeySequence(), [this] { moveLayer(1); });
-    make(QStringLiteral("layerdown"), QStringLiteral("Move Layer &Down"),
+    make(QStringLiteral("layerdown"), tr("Move Layer &Down"),
          QStringLiteral("down"), QKeySequence(), [this] { moveLayer(-1); });
-    make(QStringLiteral("togglevisible"), QStringLiteral("Toggle Layer &Visibility"),
+    make(QStringLiteral("togglevisible"), tr("Toggle Layer &Visibility"),
          QStringLiteral("visible"), QKeySequence(QStringLiteral("Ctrl+,")), [this] {
              Document* doc = currentDocument();
              if (Layer* layer = doc ? doc->activeNode() : nullptr)
                  setLayerVisible(doc->activeIndex(), !layer->visible);
          });
-    make(QStringLiteral("gotop"), QStringLiteral("Go to &Top Layer"), QString(),
+    make(QStringLiteral("gotop"), tr("Go to &Top Layer"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+PgUp")),
          [this] { goToLayer(currentDocument() ? currentDocument()->layerCount() - 1 : 0); });
-    make(QStringLiteral("goabove"), QStringLiteral("Go to Layer &Above"), QString(),
+    make(QStringLiteral("goabove"), tr("Go to Layer &Above"), QString(),
          QKeySequence(QStringLiteral("Alt+PgUp")), [this] {
              if (Document* doc = currentDocument())
                  goToLayer(doc->activeIndex() + 1);
          });
-    make(QStringLiteral("gobelow"), QStringLiteral("Go to Layer &Below"), QString(),
+    make(QStringLiteral("gobelow"), tr("Go to Layer &Below"), QString(),
          QKeySequence(QStringLiteral("Alt+PgDown")), [this] {
              if (Document* doc = currentDocument())
                  goToLayer(doc->activeIndex() - 1);
          });
-    make(QStringLiteral("gobottom"), QStringLiteral("Go to &Bottom Layer"), QString(),
+    make(QStringLiteral("gobottom"), tr("Go to &Bottom Layer"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+PgDown")), [this] { goToLayer(0); });
-    make(QStringLiteral("layerprops"), QStringLiteral("Layer &Properties..."),
+    make(QStringLiteral("layerprops"), tr("Layer &Properties..."),
          QStringLiteral("layer-props"), QKeySequence(QStringLiteral("F4")),
          [this] { showLayerProperties(); });
-    make(QStringLiteral("editadjustment"), QStringLiteral("Edit Ad&justment..."),
+    make(QStringLiteral("editadjustment"), tr("Edit Ad&justment..."),
          QStringLiteral("adjust"), QKeySequence(), [this] { editAdjustmentLayer(); });
 
     // ---------------------------------------------------------------- window
-    make(QStringLiteral("nextimage"), QStringLiteral("&Next Image"), QString(),
+    make(QStringLiteral("nextimage"), tr("&Next Image"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Tab")), [this] {
              if (stack_->count() > 1)
                  setCurrentView((stack_->currentIndex() + 1) % stack_->count());
          });
-    make(QStringLiteral("previmage"), QStringLiteral("&Previous Image"), QString(),
+    make(QStringLiteral("previmage"), tr("&Previous Image"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Shift+Tab")), [this] {
              if (stack_->count() > 1)
                  setCurrentView((stack_->currentIndex() + stack_->count() - 1)
@@ -626,10 +625,10 @@ void MainWindow::createActions()
          });
 
     // ---------------------------------------------------------------- help
-    make(QStringLiteral("shortcuts"), QStringLiteral("&Keyboard Shortcuts"),
+    make(QStringLiteral("shortcuts"), tr("&Keyboard Shortcuts"),
          QStringLiteral("settings"), QKeySequence(QStringLiteral("F1")),
          [this] { showShortcutsDialog(this, collectShortcuts()); });
-    make(QStringLiteral("about"), QStringLiteral("&About Tessel"), QStringLiteral("about"),
+    make(QStringLiteral("about"), tr("&About Tessel"), QStringLiteral("about"),
          QKeySequence(), [this] { showAboutDialog(this); });
 }
 
@@ -642,10 +641,10 @@ void MainWindow::createMenus()
             menu->addAction(action);
     };
 
-    QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
+    QMenu* file = menuBar()->addMenu(tr("&File"));
     add(file, QStringLiteral("new"));
     add(file, QStringLiteral("open"));
-    recentMenu_ = file->addMenu(QStringLiteral("Open &Recent"));
+    recentMenu_ = file->addMenu(tr("Open &Recent"));
     file->addSeparator();
     add(file, QStringLiteral("save"));
     add(file, QStringLiteral("saveas"));
@@ -656,7 +655,7 @@ void MainWindow::createMenus()
     add(file, QStringLiteral("close"));
     add(file, QStringLiteral("quit"));
 
-    QMenu* edit = menuBar()->addMenu(QStringLiteral("&Edit"));
+    QMenu* edit = menuBar()->addMenu(tr("&Edit"));
     add(edit, QStringLiteral("undo"));
     add(edit, QStringLiteral("redo"));
     edit->addSeparator();
@@ -672,7 +671,7 @@ void MainWindow::createMenus()
     add(edit, QStringLiteral("invertselection"));
     add(edit, QStringLiteral("copyselection"));
     add(edit, QStringLiteral("pasteselection"));
-    QMenu* selectionMenu = edit->addMenu(QStringLiteral("Se&lection"));
+    QMenu* selectionMenu = edit->addMenu(tr("Se&lection"));
     add(selectionMenu, QStringLiteral("feather"));
     selectionMenu->addSeparator();
     add(selectionMenu, QStringLiteral("grow"));
@@ -684,7 +683,7 @@ void MainWindow::createMenus()
     add(edit, QStringLiteral("erase"));
     add(edit, QStringLiteral("fill"));
 
-    QMenu* view = menuBar()->addMenu(QStringLiteral("&View"));
+    QMenu* view = menuBar()->addMenu(tr("&View"));
     add(view, QStringLiteral("zoomin"));
     add(view, QStringLiteral("zoomout"));
     add(view, QStringLiteral("zoomfit"));
@@ -694,14 +693,14 @@ void MainWindow::createMenus()
     add(view, QStringLiteral("grid"));
     add(view, QStringLiteral("rulers"));
     add(view, QStringLiteral("selectionoutline"));
-    QMenu* unitsMenu = view->addMenu(QStringLiteral("&Units"));
+    QMenu* unitsMenu = view->addMenu(tr("&Units"));
     unitsMenu->setObjectName(QStringLiteral("unitsmenu"));
     for (Unit candidate : {Unit::Pixels, Unit::Inches, Unit::Centimetres})
         add(unitsMenu, QStringLiteral("unit-") + units::unitId(candidate));
     view->addSeparator();
     add(view, QStringLiteral("fullscreen"));
 
-    QMenu* image = menuBar()->addMenu(QStringLiteral("&Image"));
+    QMenu* image = menuBar()->addMenu(tr("&Image"));
     add(image, QStringLiteral("crop"));
     add(image, QStringLiteral("resize"));
     add(image, QStringLiteral("canvassize"));
@@ -714,12 +713,12 @@ void MainWindow::createMenus()
     image->addSeparator();
     add(image, QStringLiteral("flatten"));
 
-    QMenu* layersMenu = menuBar()->addMenu(QStringLiteral("&Layers"));
+    QMenu* layersMenu = menuBar()->addMenu(tr("&Layers"));
     add(layersMenu, QStringLiteral("addlayer"));
     add(layersMenu, QStringLiteral("addgroup"));
     // Every adjustment and effect can be had as a layer of its own, listed the
     // way the Adjustments and Effects menus list them.
-    QMenu* newAdjustment = layersMenu->addMenu(QStringLiteral("New Ad&justment Layer"));
+    QMenu* newAdjustment = layersMenu->addMenu(tr("New Ad&justment Layer"));
     newAdjustment->setObjectName(QStringLiteral("newadjustmentmenu"));
     newAdjustment->setIcon(icons::get(QStringLiteral("adjust"), 20));
     fillEffectMenu(newAdjustment, [this](Effect* effect) { addAdjustmentLayer(effect); });
@@ -728,7 +727,7 @@ void MainWindow::createMenus()
     add(layersMenu, QStringLiteral("mergedown"));
     add(layersMenu, QStringLiteral("importlayer"));
     layersMenu->addSeparator();
-    QMenu* maskMenu = layersMenu->addMenu(QStringLiteral("Layer &Mask"));
+    QMenu* maskMenu = layersMenu->addMenu(tr("Layer &Mask"));
     add(maskMenu, QStringLiteral("addmask"));
     add(maskMenu, QStringLiteral("editmask"));
     maskMenu->addSeparator();
@@ -754,7 +753,7 @@ void MainWindow::createMenus()
     add(layersMenu, QStringLiteral("editadjustment"));
 
     // Adjustments and effects come straight from the registry.
-    QMenu* adjustments = menuBar()->addMenu(QStringLiteral("&Adjustments"));
+    QMenu* adjustments = menuBar()->addMenu(tr("&Adjustments"));
     for (Effect* effect : EffectRegistry::instance().inCategory(
              QStringLiteral("Adjustments"))) {
         auto* action = new QAction(effect->params().empty()
@@ -769,8 +768,8 @@ void MainWindow::createMenus()
         addAction(action);
     }
 
-    QMenu* effects = menuBar()->addMenu(QStringLiteral("Effec&ts"));
-    repeatAction_ = new QAction(QStringLiteral("Repeat Last Effect"), this);
+    QMenu* effects = menuBar()->addMenu(tr("Effec&ts"));
+    repeatAction_ = new QAction(tr("Repeat Last Effect"), this);
     repeatAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+F")));
     repeatAction_->setEnabled(false);
     connect(repeatAction_, &QAction::triggered, this, [this] { repeatLastEffect(); });
@@ -781,7 +780,7 @@ void MainWindow::createMenus()
         const std::vector<Effect*> list = EffectRegistry::instance().inCategory(category);
         if (list.empty())
             continue;
-        QMenu* submenu = effects->addMenu(category);
+        QMenu* submenu = effects->addMenu(effectCategoryLabel(category));
         submenu->setIcon(icons::get(QStringLiteral("effect"), 20));
         for (Effect* effect : list) {
             auto* action = new QAction(effect->params().empty()
@@ -797,7 +796,7 @@ void MainWindow::createMenus()
         }
     }
     effects->addSeparator();
-    auto* pluginsAction = new QAction(QStringLiteral("About the Plugins..."), this);
+    auto* pluginsAction = new QAction(tr("About the Plugins..."), this);
     pluginsAction->setObjectName(QStringLiteral("aboutplugins"));
     connect(pluginsAction, &QAction::triggered, this,
             [this] { showPluginsDialog(this); });
@@ -838,18 +837,19 @@ void MainWindow::createMenuBarIcons()
         return button;
     };
 
-    toolsButton_ = addButton(QStringLiteral("brush"), QStringLiteral("Tools Window"), true);
-    historyButton_ = addButton(QStringLiteral("undo"), QStringLiteral("History Window"), true);
+    toolsButton_ = addButton(QStringLiteral("brush"), tr("Tools Window"), true);
+    historyButton_ = addButton(QStringLiteral("undo"), tr("History Window"), true);
     layersButton_ = addButton(QStringLiteral("layer-duplicate"),
-                              QStringLiteral("Layers Window"), true);
-    colorsButton_ = addButton(QStringLiteral("palette"), QStringLiteral("Colors Window"),
+                              tr("Layers Window"), true);
+    colorsButton_ = addButton(QStringLiteral("palette"), tr("Colors Window"),
                               true);
 
     auto* settingsButton = addButton(QStringLiteral("settings"),
-                                     QStringLiteral("Settings"), false);
+                                     tr("Settings"), false);
+    settingsButton->setObjectName(QStringLiteral("settingsButton"));
     connect(settingsButton, &QToolButton::clicked, this, &MainWindow::showSettings);
 
-    auto* helpButton = addButton(QStringLiteral("about"), QStringLiteral("Help"), false);
+    auto* helpButton = addButton(QStringLiteral("about"), tr("Help"), false);
     auto* helpMenu = new QMenu(helpButton);
     if (QAction* shortcuts = actions_.value(QStringLiteral("shortcuts")))
         helpMenu->addAction(shortcuts);
@@ -866,7 +866,7 @@ void MainWindow::createMenuBarIcons()
 
 void MainWindow::createToolBars()
 {
-    mainToolBar_ = addToolBar(QStringLiteral("Main"));
+    mainToolBar_ = addToolBar(tr("Main"));
     mainToolBar_->setObjectName(QStringLiteral("mainToolBar"));
     mainToolBar_->setMovable(false);
     mainToolBar_->setIconSize(QSize(20, 20));
@@ -900,7 +900,7 @@ void MainWindow::createToolBars()
             [this](int index) { closeView(index); });
 
     addToolBarBreak();
-    optionsToolBar_ = addToolBar(QStringLiteral("Tool Options"));
+    optionsToolBar_ = addToolBar(tr("Tool Options"));
     optionsToolBar_->setObjectName(QStringLiteral("toolOptionsToolBar"));
     optionsToolBar_->setMovable(false);
     options_ = new ToolOptionsBar(optionsToolBar_);
@@ -936,17 +936,17 @@ void MainWindow::createDocks()
     };
 
     tools_ = new ToolsPalette(this);
-    toolsDock_ = makeDock(QStringLiteral("Tools"), tools_, QStringLiteral("toolsDock"));
+    toolsDock_ = makeDock(tr("Tools"), tools_, QStringLiteral("toolsDock"));
 
     colors_ = new ColorPanel(this);
-    colorsDock_ = makeDock(QStringLiteral("Colors"), colors_, QStringLiteral("colorsDock"));
+    colorsDock_ = makeDock(tr("Colors"), colors_, QStringLiteral("colorsDock"));
 
     history_ = new HistoryPanel(this);
-    historyDock_ = makeDock(QStringLiteral("History"), history_,
+    historyDock_ = makeDock(tr("History"), history_,
                             QStringLiteral("historyDock"));
 
     layers_ = new LayersPanel(this);
-    layersDock_ = makeDock(QStringLiteral("Layers"), layers_, QStringLiteral("layersDock"));
+    layersDock_ = makeDock(tr("Layers"), layers_, QStringLiteral("layersDock"));
 
     // A dock area is as wide as its widest panel, so pairing the narrow tool
     // palette with the Colors panel made the entire left column as wide as the
@@ -1005,7 +1005,7 @@ void MainWindow::createDocks()
                                                : doc->layerByUid(parentUid);
                 if (!layer || !parent || !doc->canReparent(layer, parent))
                     return;
-                structuralEdit(QStringLiteral("Move Layer"), QStringLiteral("up"),
+                structuralEdit(tr("Move Layer"), QStringLiteral("up"),
                                [doc, layer, parent, childIndex] {
                                    doc->reparentLayer(layer, parent, childIndex);
                                });
@@ -1060,8 +1060,9 @@ void MainWindow::createStatusBar()
     zoomCombo_ = new QComboBox(this);
     zoomCombo_->setEditable(true);
     zoomCombo_->setFixedWidth(92);
-    for (const char* label : {"Window", "1%", "5%", "12%", "25%", "50%", "66%", "100%",
-                              "200%", "400%", "800%", "1600%", "3200%"}) {
+    zoomCombo_->addItem(tr("Window"));
+    for (const char* label : {"1%", "5%", "12%", "25%", "50%", "66%", "100%", "200%",
+                              "400%", "800%", "1600%", "3200%"}) {
         zoomCombo_->addItem(QString::fromLatin1(label));
     }
     zoomCombo_->setCurrentText(QStringLiteral("100%"));
@@ -1148,10 +1149,10 @@ void MainWindow::styleDockButtons(QDockWidget* dock)
         const QString name = button->objectName();
         if (name == QLatin1String("qt_dockwidget_closebutton")) {
             button->setIcon(icons::get(QStringLiteral("close"), 14));
-            button->setToolTip(QStringLiteral("Close this panel"));
+            button->setToolTip(tr("Close this panel"));
         } else if (name == QLatin1String("qt_dockwidget_floatbutton")) {
             button->setIcon(icons::get(QStringLiteral("copy"), 14));
-            button->setToolTip(QStringLiteral("Float or dock this panel"));
+            button->setToolTip(tr("Float or dock this panel"));
         } else {
             continue;
         }
@@ -1267,10 +1268,10 @@ void MainWindow::setCurrentView(int index)
 void MainWindow::newDocument(int width, int height, Rgba background)
 {
     auto doc = std::make_unique<Document>(width, height, background);
-    doc->setTitle(QStringLiteral("Untitled %1").arg(untitledCounter_++));
+    doc->setTitle(tr("Untitled %1").arg(untitledCounter_++));
     doc->setModified(false);
     addView(new CanvasView(std::move(doc), this));
-    hintLabel_->setText(QStringLiteral("Created a new %1 x %2 image")
+    hintLabel_->setText(tr("Created a new %1 x %2 image")
                             .arg(width).arg(height));
 }
 
@@ -1286,7 +1287,7 @@ bool MainWindow::openPath(const QString& path)
     QString error;
     std::unique_ptr<Document> doc = io::openDocument(path, &error);
     if (!doc) {
-        QMessageBox::warning(this, QStringLiteral("Cannot open image"), error);
+        QMessageBox::warning(this, tr("Cannot open image"), error);
         return false;
     }
     lastDirectory_ = QFileInfo(path).absolutePath();
@@ -1295,7 +1296,7 @@ bool MainWindow::openPath(const QString& path)
     while (recentFiles_.size() > kMaxRecentFiles)
         recentFiles_.removeLast();
     addView(new CanvasView(std::move(doc), this));
-    hintLabel_->setText(QStringLiteral("Opened %1").arg(QFileInfo(path).fileName()));
+    hintLabel_->setText(tr("Opened %1").arg(QFileInfo(path).fileName()));
     updateEverything();
     return true;
 }
@@ -1313,8 +1314,8 @@ bool MainWindow::promptToSave(int index)
         return true;
     const QString name = view->document()->displayName();
     const QMessageBox::StandardButton answer = QMessageBox::question(
-        this, QStringLiteral("Save changes?"),
-        QStringLiteral("Save changes to %1 before closing it?").arg(name),
+        this, tr("Save changes?"),
+        tr("Save changes to %1 before closing it?").arg(name),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
         QMessageBox::Save);
     if (answer == QMessageBox::Cancel)
@@ -1337,7 +1338,7 @@ bool MainWindow::saveView(int index, bool saveAs)
         QString suggestion = path.isEmpty()
             ? QStringLiteral("%1/%2.tessel").arg(lastDirectory_, doc->title())
             : path;
-        path = QFileDialog::getSaveFileName(this, QStringLiteral("Save Image"), suggestion,
+        path = QFileDialog::getSaveFileName(this, tr("Save Image"), suggestion,
                                             io::saveFilter(), &selectedFilter);
         if (path.isEmpty())
             return false;
@@ -1347,10 +1348,10 @@ bool MainWindow::saveView(int index, bool saveAs)
     // Warn once when the chosen format cannot hold everything in the image.
     if (io::flattensLayers(path) && doc->layerCount() > 1) {
         const QMessageBox::StandardButton answer = QMessageBox::question(
-            this, QStringLiteral("Flatten image?"),
-            QStringLiteral("%1 cannot store layers, so the image will be saved "
-                           "flattened.\n\nThe layers stay intact in this window. "
-                           "Save as .tessel or .ora to keep them in the file.")
+            this, tr("Flatten image?"),
+            tr("%1 cannot store layers, so the image will be saved "
+               "flattened.\n\nThe layers stay intact in this window. "
+               "Save as .tessel or .ora to keep them in the file.")
                 .arg(QFileInfo(path).fileName()),
             QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Save);
         if (answer == QMessageBox::Cancel)
@@ -1365,7 +1366,7 @@ bool MainWindow::saveView(int index, bool saveAs)
     }
     QString error;
     if (!io::saveDocument(*doc, path, &error, quality)) {
-        QMessageBox::warning(this, QStringLiteral("Cannot save image"), error);
+        QMessageBox::warning(this, tr("Cannot save image"), error);
         return false;
     }
     doc->setFilePath(path);
@@ -1375,7 +1376,7 @@ bool MainWindow::saveView(int index, bool saveAs)
     lastDirectory_ = QFileInfo(path).absolutePath();
     recentFiles_.removeAll(path);
     recentFiles_.prepend(path);
-    hintLabel_->setText(QStringLiteral("Saved %1").arg(QFileInfo(path).fileName()));
+    hintLabel_->setText(tr("Saved %1").arg(QFileInfo(path).fileName()));
     updateEverything();
     return true;
 }
@@ -1418,10 +1419,10 @@ void MainWindow::updateEverything()
             connect(action, &QAction::triggered, this, [this, path] { openPath(path); });
         }
         if (recentFiles_.isEmpty()) {
-            recentMenu_->addAction(QStringLiteral("No recent files"))->setEnabled(false);
+            recentMenu_->addAction(tr("No recent files"))->setEnabled(false);
         } else {
             recentMenu_->addSeparator();
-            connect(recentMenu_->addAction(QStringLiteral("Clear list")),
+            connect(recentMenu_->addAction(tr("Clear list")),
                     &QAction::triggered, this, [this] {
                         recentFiles_.clear();
                         updateEverything();
@@ -1446,7 +1447,7 @@ void MainWindow::updateWindowTitle()
         setWindowTitle(QStringLiteral(TESSEL_APP_NAME));
         return;
     }
-    setWindowTitle(QStringLiteral("%1%2 - %3")
+    setWindowTitle(tr("%1%2 - %3")
                        .arg(doc->displayName(),
                             doc->isModified() ? QStringLiteral("*") : QString(),
                             QStringLiteral(TESSEL_APP_NAME)));
@@ -1461,12 +1462,11 @@ void MainWindow::updateImageStrip()
         Document* doc = viewAt(i)->document();
         ImageStrip::Entry entry;
         entry.title = doc->displayName();
-        entry.tooltip = QStringLiteral("%1\n%2 x %3  -  %4 layer%5")
-                            .arg(doc->filePath().isEmpty() ? doc->title() : doc->filePath())
+        entry.tooltip = tr("%1\n%2 x %3  -  %n layer(s)", "", doc->layerCount())
+                            .arg(doc->filePath().isEmpty() ? doc->title()
+                                                           : doc->filePath())
                             .arg(doc->width())
-                            .arg(doc->height())
-                            .arg(doc->layerCount())
-                            .arg(doc->layerCount() == 1 ? QString() : QStringLiteral("s"));
+                            .arg(doc->height());
         entry.thumbnail = doc->thumbnail(44).toQImage();
         entry.modified = doc->isModified();
         entries.append(entry);
@@ -1485,11 +1485,11 @@ void MainWindow::updateStatusBar()
     const Selection& selection = doc->selection();
     if (selection.isActive()) {
         const Rect bounds = selection.bounds();
-        selectionLabel_->setText(QStringLiteral("Selection %1 x %2 at %3, %4")
+        selectionLabel_->setText(tr("Selection %1 x %2 at %3, %4")
                                      .arg(bounds.w).arg(bounds.h)
                                      .arg(bounds.x).arg(bounds.y));
     } else {
-        selectionLabel_->setText(QStringLiteral("No selection"));
+        selectionLabel_->setText(tr("No selection"));
     }
     sizeLabel_->setText(
         units::describeSize(doc->width(), doc->height(), doc->resolution(), unit_));
@@ -1514,13 +1514,13 @@ void MainWindow::updateActionStates()
     enable(QStringLiteral("redo"), history && history->canRedo());
     if (QAction* undo = actions_.value(QStringLiteral("undo"))) {
         undo->setText(history && history->canUndo()
-                          ? QStringLiteral("&Undo %1").arg(history->undoName())
-                          : QStringLiteral("&Undo"));
+                          ? tr("&Undo %1").arg(history->undoName())
+                          : tr("&Undo"));
     }
     if (QAction* redo = actions_.value(QStringLiteral("redo"))) {
         redo->setText(history && history->canRedo()
-                          ? QStringLiteral("&Redo %1").arg(history->redoName())
-                          : QStringLiteral("&Redo"));
+                          ? tr("&Redo %1").arg(history->redoName())
+                          : tr("&Redo"));
     }
     enable(QStringLiteral("crop"), hasSelection);
     for (const QString& key : {QStringLiteral("feather"), QStringLiteral("grow"),
@@ -1540,13 +1540,13 @@ void MainWindow::updateActionStates()
     }
     if (QAction* toggle = actions_.value(QStringLiteral("togglemask"))) {
         toggle->setText(hasMask && active->maskEnabled()
-                            ? QStringLiteral("&Disable Layer Mask")
-                            : QStringLiteral("&Enable Layer Mask"));
+                            ? tr("&Disable Layer Mask")
+                            : tr("&Enable Layer Mask"));
     }
     if (QAction* paint = actions_.value(QStringLiteral("editmask"))) {
         paint->setText(hasMask && active->maskSelected()
-                           ? QStringLiteral("&Paint in Layer")
-                           : QStringLiteral("&Paint in Mask"));
+                           ? tr("&Paint in Layer")
+                           : tr("&Paint in Mask"));
     }
     enable(QStringLiteral("editadjustment"), active && active->isAdjustment());
     enable(QStringLiteral("deletelayer"), manyLayers);
@@ -1563,8 +1563,8 @@ void MainWindow::updateActionStates()
     if (repeatAction_) {
         repeatAction_->setEnabled(lastEffect_ != nullptr);
         repeatAction_->setText(lastEffect_
-                                   ? QStringLiteral("Repeat %1").arg(lastEffect_->name())
-                                   : QStringLiteral("Repeat Last Effect"));
+                                   ? tr("Repeat %1").arg(lastEffect_->name())
+                                   : tr("Repeat Last Effect"));
     }
 }
 
@@ -1576,7 +1576,7 @@ void MainWindow::updateZoomControls()
     updatingZoom_ = true;
     const double percent = view->zoom() * 100.0;
     zoomCombo_->setCurrentText(view->isFitMode()
-                                   ? QStringLiteral("Window")
+                                   ? tr("Window")
                                    : QStringLiteral("%1%").arg(percent, 0, 'f',
                                                                percent < 10 ? 1 : 0));
     zoomSlider_->setValue(int(std::lround(std::log10(view->zoom()) * 100.0)));
@@ -1692,7 +1692,7 @@ void MainWindow::addAdjustmentLayer(Effect* effect)
     const QString id = effect->id();
     const QString name = effect->name();
     const ParamValues values = ParamValues::defaults(effect->params());
-    structuralEdit(QStringLiteral("New Adjustment Layer"), QStringLiteral("adjust"),
+    structuralEdit(tr("New Adjustment Layer"), QStringLiteral("adjust"),
                    [doc, id, name, values] {
                        doc->addAdjustmentLayer(id, values, name);
                    });
@@ -1712,7 +1712,7 @@ void MainWindow::editAdjustmentLayer()
     Effect* effect =
         EffectRegistry::instance().byId(layer->effects().front().effectId);
     if (!effect || effect->params().empty()) {
-        hintLabel_->setText(QStringLiteral("%1 has no settings")
+        hintLabel_->setText(tr("%1 has no settings")
                                 .arg(effect ? effect->name() : layer->name));
         return;
     }
@@ -1760,7 +1760,7 @@ void MainWindow::doCopy(bool merged)
         }
     }
     QGuiApplication::clipboard()->setImage(cut.toQImage());
-    hintLabel_->setText(QStringLiteral("Copied %1 x %2 pixels")
+    hintLabel_->setText(tr("Copied %1 x %2 pixels")
                             .arg(bounds.w).arg(bounds.h));
     updateActionStates();
 }
@@ -1775,7 +1775,7 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
 {
     const QImage clip = QGuiApplication::clipboard()->image();
     if (clip.isNull()) {
-        hintLabel_->setText(QStringLiteral("The clipboard holds no image"));
+        hintLabel_->setText(tr("The clipboard holds no image"));
         return;
     }
     Image pasted = Image::fromQImage(clip);
@@ -1783,7 +1783,7 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
         auto doc = std::make_unique<Document>(pasted.width(), pasted.height(),
                                               Rgba(0, 0, 0, 0));
         doc->activeLayer()->image = pasted;
-        doc->setTitle(QStringLiteral("Untitled %1").arg(untitledCounter_++));
+        doc->setTitle(tr("Untitled %1").arg(untitledCounter_++));
         doc->invalidate();
         doc->setModified(true);
         addView(new CanvasView(std::move(doc), this));
@@ -1800,7 +1800,7 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
     if (pasted.width() > doc->width() || pasted.height() > doc->height()) {
         // Too big to drop straight in, so hand it to the placement tool rather
         // than trimming it on the way and leaving nothing to drag back.
-        placePicture(std::move(pasted), QStringLiteral("Pasted"), intoNewLayer);
+        placePicture(std::move(pasted), tr("Pasted"), intoNewLayer);
         return;
     }
 
@@ -1809,12 +1809,12 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
                                                     : Rect(0, 0, doc->width(), doc->height());
     const int x = bounds.x;
     const int y = bounds.y;
-    const QString name = intoNewLayer ? QStringLiteral("Paste Into New Layer")
-                                      : QStringLiteral("Paste");
+    const QString name = intoNewLayer ? tr("Paste Into New Layer")
+                                      : tr("Paste");
     DocumentState before = doc->snapshot();
     if (intoNewLayer) {
         auto layer = std::make_unique<Layer>(Image(doc->width(), doc->height()),
-                                             doc->uniqueLayerName(QStringLiteral("Pasted")));
+                                             doc->uniqueLayerName(tr("Pasted")));
         layer->image.blit(pasted, x, y);
         doc->addLayer(std::move(layer));
     } else {
@@ -1844,7 +1844,7 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
     view->refresh();
     chooseTool(QStringLiteral("move-selected"));
     updateEverything();
-    hintLabel_->setText(QStringLiteral("Pasted %1 x %2 pixels at %3, %4")
+    hintLabel_->setText(tr("Pasted %1 x %2 pixels at %3, %4")
                             .arg(pasted.width()).arg(pasted.height()).arg(x).arg(y));
 }
 
@@ -1862,7 +1862,7 @@ void MainWindow::eraseSelection()
     const Rect bounds = selection.isActive() ? selection.bounds() : doc->rect();
     if (bounds.isEmpty())
         return;
-    EditScope scope(*doc, *view->history(), layer, QStringLiteral("Erase Selection"),
+    EditScope scope(*doc, *view->history(), layer, tr("Erase Selection"),
                     QStringLiteral("delete"), bounds);
     if (const Mask* mask = selection.clipMask()) {
         Mask copy = *mask;
@@ -1888,7 +1888,7 @@ void MainWindow::fillSelection()
     const Rect bounds = selection.isActive() ? selection.bounds() : doc->rect();
     if (bounds.isEmpty())
         return;
-    EditScope scope(*doc, *view->history(), layer, QStringLiteral("Fill Selection"),
+    EditScope scope(*doc, *view->history(), layer, tr("Fill Selection"),
                     QStringLiteral("bucket"), bounds);
     Mask mask = selection.isActive() ? *selection.clipMask()
                                      : Mask(doc->width(), doc->height(), 1.0f);
@@ -1919,7 +1919,7 @@ void MainWindow::cropToSelection()
     const Rect bounds = doc->selection().bounds();
     if (bounds.isEmpty())
         return;
-    structuralEdit(QStringLiteral("Crop to Selection"), QStringLiteral("crop"),
+    structuralEdit(tr("Crop to Selection"), QStringLiteral("crop"),
                    [doc, bounds] { doc->cropTo(bounds); });
     if (CanvasView* view = currentView())
         view->zoomToFit();
@@ -1930,7 +1930,7 @@ void MainWindow::resizeImage()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    ResizeDialog dialog(QStringLiteral("Resize Image"), doc->width(), doc->height(),
+    ResizeDialog dialog(tr("Resize Image"), doc->width(), doc->height(),
                         doc->resolution(), unit_, false, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -1944,7 +1944,7 @@ void MainWindow::resizeImage()
         && (width != doc->width() || height != doc->height());
     if (!resample && std::abs(resolution - doc->resolution()) < 1e-9)
         return;
-    structuralEdit(QStringLiteral("Resize Image"), QStringLiteral("resize"),
+    structuralEdit(tr("Resize Image"), QStringLiteral("resize"),
                    [doc, width, height, resolution, smooth, resample] {
                        doc->setResolution(resolution);
                        if (!resample)
@@ -1969,14 +1969,14 @@ void MainWindow::changeCanvasSize()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    ResizeDialog dialog(QStringLiteral("Canvas Size"), doc->width(), doc->height(),
+    ResizeDialog dialog(tr("Canvas Size"), doc->width(), doc->height(),
                         doc->resolution(), unit_, true, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const int width = dialog.newWidth();
     const int height = dialog.newHeight();
     const Anchor anchor = dialog.anchor();
-    structuralEdit(QStringLiteral("Canvas Size"), QStringLiteral("canvas"),
+    structuralEdit(tr("Canvas Size"), QStringLiteral("canvas"),
                    [doc, width, height, anchor] {
                        doc->resizeCanvas(width, height, anchor, false);
                    });
@@ -1999,7 +1999,7 @@ void MainWindow::flattenImage()
     Document* doc = currentDocument();
     if (!doc || doc->layerCount() < 2)
         return;
-    structuralEdit(QStringLiteral("Flatten"), QStringLiteral("flatten"),
+    structuralEdit(tr("Flatten"), QStringLiteral("flatten"),
                    [doc] { doc->flatten(); });
 }
 
@@ -2007,35 +2007,47 @@ void MainWindow::showSettings()
 {
     QSettings settings;
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Settings"));
+    dialog.setWindowTitle(tr("Settings"));
     dialog.setWindowIcon(icons::get(QStringLiteral("settings"), 22));
     auto* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    auto* appearance = new QGroupBox(QStringLiteral("Appearance"), &dialog);
+    auto* appearance = new QGroupBox(tr("Appearance"), &dialog);
     auto* appearanceForm = new QFormLayout(appearance);
     auto* themeCombo = new QComboBox(appearance);
-    themeCombo->addItems({QStringLiteral("Dark"), QStringLiteral("Light")});
+    themeCombo->addItems({tr("Dark"), tr("Light")});
     themeCombo->setCurrentIndex(theme::current() == theme::Mode::Dark ? 0 : 1);
-    appearanceForm->addRow(QStringLiteral("Theme"), themeCombo);
+    appearanceForm->addRow(tr("Theme"), themeCombo);
+    // The locale name travels as the item's data, so the labels can be
+    // translated without the setting changing with them.
+    auto* languageCombo = new QComboBox(appearance);
+    languageCombo->setObjectName(QStringLiteral("language"));
+    languageCombo->addItem(tr("System"), QStringLiteral("system"));
+    languageCombo->addItem(tr("English"), QStringLiteral("en"));
+    languageCombo->addItem(tr("Russian"), QStringLiteral("ru"));
+    const QString language =
+        settings.value(QStringLiteral("language"), QStringLiteral("system")).toString();
+    const int languageIndex = languageCombo->findData(language);
+    languageCombo->setCurrentIndex(languageIndex < 0 ? 0 : languageIndex);
+    appearanceForm->addRow(tr("Language"), languageCombo);
     root->addWidget(appearance);
 
-    auto* defaults = new QGroupBox(QStringLiteral("New images"), &dialog);
+    auto* defaults = new QGroupBox(tr("New images"), &dialog);
     auto* defaultsForm = new QFormLayout(defaults);
     auto* width = new QSpinBox(defaults);
     width->setRange(1, 60000);
     width->setValue(settings.value(QStringLiteral("newWidth"), 800).toInt());
-    width->setSuffix(QStringLiteral(" px"));
+    width->setSuffix(tr(" px"));
     auto* height = new QSpinBox(defaults);
     height->setRange(1, 60000);
     height->setValue(settings.value(QStringLiteral("newHeight"), 600).toInt());
-    height->setSuffix(QStringLiteral(" px"));
-    defaultsForm->addRow(QStringLiteral("Default width"), width);
-    defaultsForm->addRow(QStringLiteral("Default height"), height);
+    height->setSuffix(tr(" px"));
+    defaultsForm->addRow(tr("Default width"), width);
+    defaultsForm->addRow(tr("Default height"), height);
     root->addWidget(defaults);
 
-    auto* historyBox = new QGroupBox(QStringLiteral("History"), &dialog);
+    auto* historyBox = new QGroupBox(tr("History"), &dialog);
     auto* historyForm = new QFormLayout(historyBox);
     auto* steps = new QSpinBox(historyBox);
     steps->setRange(10, 10000);
@@ -2043,16 +2055,16 @@ void MainWindow::showSettings()
     auto* memory = new QSpinBox(historyBox);
     memory->setRange(64, 64000);
     memory->setSingleStep(64);
-    memory->setSuffix(QStringLiteral(" MB"));
+    memory->setSuffix(tr(" MB"));
     memory->setValue(settings.value(QStringLiteral("historyMemory"), 2048).toInt());
-    historyForm->addRow(QStringLiteral("Maximum steps"), steps);
-    historyForm->addRow(QStringLiteral("Memory budget"), memory);
+    historyForm->addRow(tr("Maximum steps"), steps);
+    historyForm->addRow(tr("Memory budget"), memory);
     root->addWidget(historyBox);
 
-    auto* savingBox = new QGroupBox(QStringLiteral("Saving work"), &dialog);
+    auto* savingBox = new QGroupBox(tr("Saving work"), &dialog);
     auto* savingForm = new QFormLayout(savingBox);
     auto* autosave = new QCheckBox(
-        QStringLiteral("Keep a recovery copy of every changed image"), savingBox);
+        tr("Keep a recovery copy of every changed image"), savingBox);
     autosave->setObjectName(QStringLiteral("autosave"));
     autosave->setChecked(recoveryOptions_.autosave);
     auto* autosaveMinutes = new QSpinBox(savingBox);
@@ -2060,27 +2072,27 @@ void MainWindow::showSettings()
     autosaveMinutes->setRange(recovery::kMinAutosaveMinutes,
                               recovery::kMaxAutosaveMinutes);
     autosaveMinutes->setValue(recoveryOptions_.autosaveMinutes);
-    autosaveMinutes->setSuffix(QStringLiteral(" min"));
+    autosaveMinutes->setSuffix(tr(" min"));
     autosaveMinutes->setEnabled(recoveryOptions_.autosave);
     connect(autosave, &QCheckBox::toggled, autosaveMinutes, &QWidget::setEnabled);
     auto* restoreSession = new QCheckBox(
-        QStringLiteral("Offer to reopen the images from the last session"), savingBox);
+        tr("Offer to reopen the images from the last session"), savingBox);
     restoreSession->setObjectName(QStringLiteral("restoreSession"));
     restoreSession->setChecked(recoveryOptions_.restoreSession);
     auto* keepDays = new QSpinBox(savingBox);
     keepDays->setObjectName(QStringLiteral("keepDays"));
     keepDays->setRange(recovery::kMinKeepDays, recovery::kMaxKeepDays);
     keepDays->setValue(recoveryOptions_.keepDays);
-    keepDays->setSuffix(QStringLiteral(" days"));
+    keepDays->setSuffix(tr(" days"));
     savingForm->addRow(autosave);
-    savingForm->addRow(QStringLiteral("Autosave every"), autosaveMinutes);
+    savingForm->addRow(tr("Autosave every"), autosaveMinutes);
     savingForm->addRow(restoreSession);
-    savingForm->addRow(QStringLiteral("Keep recovery files for"), keepDays);
+    savingForm->addRow(tr("Keep recovery files for"), keepDays);
     root->addWidget(savingBox);
 
-    auto* layoutBox = new QGroupBox(QStringLiteral("Window"), &dialog);
+    auto* layoutBox = new QGroupBox(tr("Window"), &dialog);
     auto* layoutRow = new QHBoxLayout(layoutBox);
-    auto* resetLayout = new QPushButton(QStringLiteral("Reset panel layout"), layoutBox);
+    auto* resetLayout = new QPushButton(tr("Reset panel layout"), layoutBox);
     layoutRow->addWidget(resetLayout);
     layoutRow->addStretch(1);
     root->addWidget(layoutBox);
@@ -2107,6 +2119,16 @@ void MainWindow::showSettings()
         refreshIcons();
         settings.setValue(QStringLiteral("theme"), dark ? QStringLiteral("dark")
                                                         : QStringLiteral("light"));
+    }
+    // Everything the window shows was built in the language it started in,
+    // from the menus to the names of the undo steps already recorded, so the
+    // change waits for the next run rather than leaving the two mixed.
+    const QString chosenLanguage = languageCombo->currentData().toString();
+    if (chosenLanguage != language) {
+        settings.setValue(QStringLiteral("language"), chosenLanguage);
+        QMessageBox::information(
+            this, tr("Language"),
+            tr("Tessel will be in the new language the next time it starts."));
     }
     settings.setValue(QStringLiteral("newWidth"), width->value());
     settings.setValue(QStringLiteral("newHeight"), height->value());
@@ -2166,18 +2188,18 @@ QList<ShortcutEntry> MainWindow::collectShortcuts() const
     }
     for (const QString& key : keyOrder) {
         const QStringList names = byKey.value(key);
-        entries.append({QStringLiteral("Tools"),
+        entries.append({tr("Tools"),
                         names.size() > 1
-                            ? QStringLiteral("%1 (press again to cycle, Shift to go back)")
+                            ? tr("%1 (press again to cycle, Shift to go back)")
                                   .arg(names.join(QStringLiteral(", ")))
                             : names.first(),
                         key});
     }
-    entries.append({QStringLiteral("Tools"), QStringLiteral("Open the tool list"),
+    entries.append({tr("Tools"), tr("Open the tool list"),
                     QStringLiteral("Alt+T")});
-    entries.append({QStringLiteral("Tools"), QStringLiteral("Swap the palette colours"),
+    entries.append({tr("Tools"), tr("Swap the palette colours"),
                     QStringLiteral("X")});
-    entries.append({QStringLiteral("Tools"), QStringLiteral("Reset the palette colours"),
+    entries.append({tr("Tools"), tr("Reset the palette colours"),
                     QStringLiteral("D")});
 
     // Everything else is read back out of the menus that were actually built.
@@ -2201,17 +2223,17 @@ QList<ShortcutEntry> MainWindow::collectShortcuts() const
             walk(clean(menuAction->text()), menu);
     }
 
-    entries.append({QStringLiteral("Canvas"), QStringLiteral("Zoom around the pointer"),
+    entries.append({tr("Canvas"), tr("Zoom around the pointer"),
                     QStringLiteral("Ctrl+Wheel")});
-    entries.append({QStringLiteral("Canvas"), QStringLiteral("Pan"),
-                    QStringLiteral("Middle drag, or hold Space")});
-    entries.append({QStringLiteral("Canvas"),
-                    QStringLiteral("Paint with the secondary colour"),
-                    QStringLiteral("Right drag")});
-    entries.append({QStringLiteral("Canvas"),
-                    QStringLiteral("Finish, then deselect"), QStringLiteral("Enter")});
-    entries.append({QStringLiteral("Canvas"),
-                    QStringLiteral("Abandon, then deselect"), QStringLiteral("Esc")});
+    entries.append({tr("Canvas"), tr("Pan"),
+                    tr("Middle drag, or hold Space")});
+    entries.append({tr("Canvas"),
+                    tr("Paint with the secondary colour"),
+                    tr("Right drag")});
+    entries.append({tr("Canvas"),
+                    tr("Finish, then deselect"), QStringLiteral("Enter")});
+    entries.append({tr("Canvas"),
+                    tr("Abandon, then deselect"), QStringLiteral("Esc")});
     return entries;
 }
 
@@ -2223,13 +2245,13 @@ void MainWindow::printImage()
     QPrinter printer(QPrinter::HighResolution);
     printer.setDocName(doc->displayName());
     QPrintDialog dialog(&printer, this);
-    dialog.setWindowTitle(QStringLiteral("Print Image"));
+    dialog.setWindowTitle(tr("Print Image"));
     if (dialog.exec() != QDialog::Accepted)
         return;
     QPainter painter;
     if (!painter.begin(&printer)) {
-        QMessageBox::warning(this, QStringLiteral("Cannot print"),
-                             QStringLiteral("The printer could not be opened."));
+        QMessageBox::warning(this, tr("Cannot print"),
+                             tr("The printer could not be opened."));
         return;
     }
     // White paper shows through anything transparent.
@@ -2243,14 +2265,14 @@ void MainWindow::printImage()
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.drawImage(target, image);
     painter.end();
-    hintLabel_->setText(QStringLiteral("Sent %1 to the printer").arg(doc->displayName()));
+    hintLabel_->setText(tr("Sent %1 to the printer").arg(doc->displayName()));
 }
 
 void MainWindow::copySelection()
 {
     Document* doc = currentDocument();
     if (!doc || !doc->selection().isActive()) {
-        hintLabel_->setText(QStringLiteral("There is no selection to copy"));
+        hintLabel_->setText(tr("There is no selection to copy"));
         return;
     }
     // The outline travels as a greyscale PNG under a private MIME type, so it
@@ -2272,7 +2294,7 @@ void MainWindow::copySelection()
     auto* data = new QMimeData;
     data->setData(QStringLiteral("application/x-tessel-selection"), payload);
     QGuiApplication::clipboard()->setMimeData(data);
-    hintLabel_->setText(QStringLiteral("Copied the selection outline"));
+    hintLabel_->setText(tr("Copied the selection outline"));
 }
 
 void MainWindow::pasteSelection()
@@ -2282,7 +2304,7 @@ void MainWindow::pasteSelection()
         return;
     const QMimeData* data = QGuiApplication::clipboard()->mimeData();
     if (!data || !data->hasFormat(QStringLiteral("application/x-tessel-selection"))) {
-        hintLabel_->setText(QStringLiteral("The clipboard holds no selection"));
+        hintLabel_->setText(tr("The clipboard holds no selection"));
         return;
     }
     QImage grey;
@@ -2296,7 +2318,7 @@ void MainWindow::pasteSelection()
         for (int x = 0; x < std::min(grey.width(), doc->width()); ++x)
             line[x] = qRed(grey.pixel(x, y)) / 255.0f;
     }
-    recordSelectionEdit(*doc, *view->history(), QStringLiteral("Paste Selection"),
+    recordSelectionEdit(*doc, *view->history(), tr("Paste Selection"),
                         [&] { doc->selection().setMask(std::move(mask)); });
     view->refresh();
     updateEverything();
@@ -2313,7 +2335,7 @@ void MainWindow::setLayerVisible(int index, bool visible)
     const int uid = layer->uid();
     const bool before = layer->visible;
     view->history()->push(std::make_unique<PropertyEdit>(
-        visible ? QStringLiteral("Show Layer") : QStringLiteral("Hide Layer"),
+        visible ? tr("Show Layer") : tr("Hide Layer"),
         QStringLiteral("visible"),
         [uid, before](Document& doc) {
             if (Layer* target = doc.layerByUid(uid)) {
@@ -2345,7 +2367,7 @@ void MainWindow::goToLayer(int index)
     refreshPanels();
     updateStatusBar();
     if (const Layer* layer = doc->activeNode())
-        hintLabel_->setText(QStringLiteral("Active layer: %1").arg(layer->name));
+        hintLabel_->setText(tr("Active layer: %1").arg(layer->name));
 }
 
 // ----------------------------------------------------------------- layers
@@ -2355,7 +2377,7 @@ void MainWindow::addLayer()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    structuralEdit(QStringLiteral("Add New Layer"), QStringLiteral("layer-add"),
+    structuralEdit(tr("Add New Layer"), QStringLiteral("layer-add"),
                    [doc] { doc->addEmptyLayer(); });
 }
 
@@ -2365,7 +2387,7 @@ void MainWindow::deleteLayer()
     if (!doc || doc->layerCount() < 2)
         return;
     const int index = doc->activeIndex();
-    structuralEdit(QStringLiteral("Delete Layer"), QStringLiteral("layer-delete"),
+    structuralEdit(tr("Delete Layer"), QStringLiteral("layer-delete"),
                    [doc, index] { doc->removeLayer(index); });
 }
 
@@ -2374,7 +2396,7 @@ void MainWindow::duplicateLayer()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    structuralEdit(QStringLiteral("Duplicate Layer"), QStringLiteral("layer-duplicate"),
+    structuralEdit(tr("Duplicate Layer"), QStringLiteral("layer-duplicate"),
                    [doc] { doc->duplicateLayer(doc->activeIndex()); });
 }
 
@@ -2387,7 +2409,7 @@ void MainWindow::mergeLayerDown()
     if (!doc || !active || active->indexInParent() <= 0)
         return;
     const int index = doc->activeIndex();
-    structuralEdit(QStringLiteral("Merge Layer Down"), QStringLiteral("layer-merge"),
+    structuralEdit(tr("Merge Layer Down"), QStringLiteral("layer-merge"),
                    [doc, index] { doc->mergeLayerDown(index); });
 }
 
@@ -2398,7 +2420,7 @@ void MainWindow::importLayerFromFile()
     if (!view || !doc)
         return;
     const QString path = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Import as Layer"), lastDirectory_, io::openFilter());
+        this, tr("Import as Layer"), lastDirectory_, io::openFilter());
     if (path.isEmpty())
         return;
     QString error;
@@ -2406,7 +2428,7 @@ void MainWindow::importLayerFromFile()
     // goes, so an oversized picture can still be dragged around afterwards.
     Image picture = io::openFlattened(path, &error);
     if (picture.isNull()) {
-        QMessageBox::warning(this, QStringLiteral("Cannot import image"), error);
+        QMessageBox::warning(this, tr("Cannot import image"), error);
         return;
     }
     lastDirectory_ = QFileInfo(path).absolutePath();
@@ -2427,18 +2449,17 @@ void MainWindow::placePicture(Image picture, const QString& name, bool onNewLaye
         && picture.height() <= doc->height();
     if (!fits) {
         QMessageBox question(this);
-        question.setWindowTitle(QStringLiteral("Picture is larger than the canvas"));
-        question.setText(QStringLiteral(
-            "%1 is %2 x %3, and the canvas is %4 x %5.")
+        question.setWindowTitle(tr("Picture is larger than the canvas"));
+        question.setText(tr("%1 is %2 x %3, and the canvas is %4 x %5.")
                              .arg(name)
                              .arg(picture.width()).arg(picture.height())
                              .arg(doc->width()).arg(doc->height()));
-        question.setInformativeText(QStringLiteral(
-            "Grow the canvas to fit it, or place it by hand and keep only the "
-            "part that lands on the canvas."));
-        QPushButton* grow = question.addButton(QStringLiteral("Grow Canvas"),
+        question.setInformativeText(
+            tr("Grow the canvas to fit it, or place it by hand and keep only the "
+               "part that lands on the canvas."));
+        QPushButton* grow = question.addButton(tr("Grow Canvas"),
                                                QMessageBox::AcceptRole);
-        QPushButton* place = question.addButton(QStringLiteral("Place by Hand"),
+        QPushButton* place = question.addButton(tr("Place by Hand"),
                                                 QMessageBox::ActionRole);
         question.addButton(QMessageBox::Cancel);
         question.setDefaultButton(grow);
@@ -2446,7 +2467,7 @@ void MainWindow::placePicture(Image picture, const QString& name, bool onNewLaye
         if (question.clickedButton() == grow) {
             const int width = std::max(doc->width(), picture.width());
             const int height = std::max(doc->height(), picture.height());
-            structuralEdit(QStringLiteral("Grow Canvas"), QStringLiteral("canvas"),
+            structuralEdit(tr("Grow Canvas"), QStringLiteral("canvas"),
                            [doc, width, height] {
                                doc->resizeCanvas(width, height, Anchor::TopLeft, false);
                            });
@@ -2459,7 +2480,7 @@ void MainWindow::placePicture(Image picture, const QString& name, bool onNewLaye
     chooseTool(QStringLiteral("place"));
     ToolContext context = view->makeContext();
     if (!startPlacement(context, std::move(picture), name, onNewLayer)) {
-        hintLabel_->setText(QStringLiteral("Nothing to place"));
+        hintLabel_->setText(tr("Nothing to place"));
         return;
     }
     view->setFocus();
@@ -2475,8 +2496,8 @@ void MainWindow::moveLayer(int delta)
     const int to = from + delta;
     if (to < 0 || to >= doc->layerCount())
         return;
-    structuralEdit(delta > 0 ? QStringLiteral("Move Layer Up")
-                             : QStringLiteral("Move Layer Down"),
+    structuralEdit(delta > 0 ? tr("Move Layer Up")
+                             : tr("Move Layer Down"),
                    delta > 0 ? QStringLiteral("up") : QStringLiteral("down"),
                    [doc, from, to] { doc->moveLayer(from, to); });
 }
@@ -2581,7 +2602,7 @@ bool MainWindow::openRecovered(const recovery::Entry& entry)
     QString error;
     std::unique_ptr<Document> doc = io::openDocument(entry.path, &error);
     if (!doc) {
-        QMessageBox::warning(this, QStringLiteral("Cannot recover image"), error);
+        QMessageBox::warning(this, tr("Cannot recover image"), error);
         return false;
     }
     // openDocument names a document after the file it read, which here is the
@@ -2589,10 +2610,10 @@ bool MainWindow::openRecovered(const recovery::Entry& entry)
     // left modified, so that saving it cannot touch the copy and closing it
     // cannot happen without a prompt.
     doc->setFilePath(entry.originalPath);
-    doc->setTitle(QStringLiteral("Recovered %1").arg(untitledCounter_++));
+    doc->setTitle(tr("Recovered %1").arg(untitledCounter_++));
     doc->setModified(true);
     addView(new CanvasView(std::move(doc), this));
-    hintLabel_->setText(QStringLiteral("Recovered %1").arg(entry.displayName()));
+    hintLabel_->setText(tr("Recovered %1").arg(entry.displayName()));
     return true;
 }
 
@@ -2634,11 +2655,11 @@ void MainWindow::offerLastSession()
     if (last.paths.isEmpty())
         return;
     const QString question = last.paths.size() == 1
-        ? QStringLiteral("Reopen %1 from the last session?")
+        ? tr("Reopen %1 from the last session?")
               .arg(QFileInfo(last.paths.first()).fileName())
-        : QStringLiteral("Reopen the %1 images from the last session?")
-              .arg(last.paths.size());
-    if (QMessageBox::question(this, QStringLiteral("Reopen last session?"), question,
+        : tr("Reopen the %n images from the last session?", "",
+             int(last.paths.size()));
+    if (QMessageBox::question(this, tr("Reopen last session?"), question,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes)
         != QMessageBox::Yes) {
         return;

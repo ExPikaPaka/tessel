@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <QCoreApplication>
+
 #include <zlib.h>
 
 namespace tessel {
@@ -231,14 +233,14 @@ bool ZipReader::parse()
         }
     }
     if (eocd < 0) {
-        error_ = QStringLiteral("not a zip archive");
+        error_ = QCoreApplication::translate("Core", "not a zip archive");
         return false;
     }
     const int count = get16(blob_, eocd + 10);
     int offset = static_cast<int>(get32(blob_, eocd + 16));
     for (int i = 0; i < count; ++i) {
         if (get32(blob_, offset) != kCentralSig) {
-            error_ = QStringLiteral("damaged central directory");
+            error_ = QCoreApplication::translate("Core", "damaged central directory");
             return false;
         }
         Entry entry;

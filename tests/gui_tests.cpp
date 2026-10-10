@@ -25,16 +25,20 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QMenuBar>
 #include <QStatusBar>
 #include <QTemporaryDir>
+#include <QTranslator>
 #include <QTreeWidget>
 #include <QTest>
+#include <QXmlStreamReader>
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QThread>
 #include <QTimer>
 
 #include "core/ImageOps.h"
+#include "core/Strings.h"
 #include "effects/EffectPlugin.h"
 #include "effects/EffectPluginHost.h"
 #include "core/Io.h"
@@ -94,8 +98,7 @@ public:
     void registerEffects(EffectRegistry& registry) override
     {
         fx::add(registry, "gui_fake_effect", "Gui Fake Effect", "Gui Plugin",
-                {ParamSpec::intParam(QStringLiteral("amount"), QStringLiteral("Amount"),
-                                     0, 255, 10)},
+                {ParamSpec::intParam(QStringLiteral("amount"), "Amount", 0, 255, 10)},
                 [](const EffectContext& context, const ParamValues& values) {
                     const int amount = values.intValue(QStringLiteral("amount"), 10);
                     return fx::mapPixels(context, [amount](Rgba c, int, int) {
@@ -330,6 +333,185 @@ int main(int argc, char** argv)
     theme::apply(app, theme::Mode::Dark);
     registerBuiltinTools();
     registerBuiltinEffects();
+
+    // ------------------------------------------------------------ translations
+    addTest("the Russian translation reaches the interface", [] {
+#ifdef TESSEL_HAS_TRANSLATIONS
+        // The .qm travels inside the executable, exactly as it does in the
+        // real program, so this is the same lookup src/main.cpp performs.
+        auto* translator = new QTranslator(qApp);
+        CHECK(translator->load(QStringLiteral(":/i18n/tessel_ru.qm")));
+        const QString englishTool =
+            ToolRegistry::instance().byId(QStringLiteral("brush"))->name();
+        const QString englishBlend = blendModeLabel(BlendMode::Normal);
+        CHECK(QApplication::installTranslator(translator));
+
+        // One string per translation context that has no QObject of its own.
+        CHECK(ToolRegistry::instance().byId(QStringLiteral("brush"))->name()
+              == QString::fromUtf8("Кисть"));
+        CHECK(blendModeLabel(BlendMode::Normal) == QString::fromUtf8("Обычный"));
+        CHECK(QCoreApplication::translate("Effects", "Gaussian Blur")
+              == QString::fromUtf8("Размытие по Гауссу"));
+        CHECK(QCoreApplication::translate("Core", "Layer %1").arg(2)
+              == QString::fromUtf8("Слой 2"));
+        CHECK(effectCategoryLabel(QStringLiteral("Blurs"))
+              == QString::fromUtf8("Размытие"));
+        // A category a plugin invented is shown as the plugin named it.
+        CHECK(effectCategoryLabel(QStringLiteral("Gui Plugin"))
+              == QStringLiteral("Gui Plugin"));
+
+        // Russian needs three plural forms, and the count has to survive.
+        CHECK(QCoreApplication::translate("tessel::MainWindow", "Saved %n image(s)",
+                                          nullptr, 1)
+              == QString::fromUtf8("Сохранено 1 изображение"));
+        CHECK(QCoreApplication::translate("tessel::MainWindow", "Saved %n image(s)",
+                                          nullptr, 3)
+              == QString::fromUtf8("Сохранено 3 изображения"));
+        CHECK(QCoreApplication::translate("tessel::MainWindow", "Saved %n image(s)",
+                                          nullptr, 7)
+              == QString::fromUtf8("Сохранено 7 изображений"));
+
+        {
+            // A window built with the translator in place: the menus, the
+            // panels and the status bar all come back in Russian.
+            MainWindow window;
+            window.newDocument(32, 24, Rgba(255, 255, 255, 255));
+            QStringList menus;
+            for (QAction* action : window.menuBar()->actions())
+                menus.append(action->text());
+            CHECK(menus.contains(QString::fromUtf8("&Файл")));
+            CHECK(menus.contains(QString::fromUtf8("&Слои")));
+            // Every menu keeps a mnemonic, which is what makes Alt usable.
+            for (const QString& title : menus)
+                check(title.contains(QLatin1Char('&')), "menu mnemonic", __LINE__);
+            if (QAction* undo = window.findChild<QAction*>(QStringLiteral("undo")))
+                CHECK(undo->text() == QString::fromUtf8("&Отменить"));
+            if (QLabel* size = window.findChild<QLabel*>(QStringLiteral("imagesize")))
+                CHECK(size->text() == QStringLiteral("32 x 24 px"));
+            const QList<CanvasView*> views = window.findChildren<CanvasView*>();
+            CHECK(!views.isEmpty());
+            if (!views.isEmpty()) {
+                CHECK(views.last()->document()->activeLayer()->name
+                      == QString::fromUtf8("Фон"));
+            }
+        }
+
+        QApplication::removeTranslator(translator);
+        // Taking the translator away puts the English source text back, which
+        // is what a build with no translation at all shows.
+        CHECK(ToolRegistry::instance().byId(QStringLiteral("brush"))->name()
+              == englishTool);
+        CHECK(ToolRegistry::instance().byId(QStringLiteral("brush"))->name()
+              == QStringLiteral("Paintbrush"));
+        CHECK(blendModeLabel(BlendMode::Normal) == englishBlend);
+        CHECK(QCoreApplication::translate("Effects", "Gaussian Blur")
+              == QStringLiteral("Gaussian Blur"));
+        delete translator;
+#endif
+    });
+
+    addTest("every translated string keeps its placeholders", [] {
+        // Read from the .ts rather than the .qm: this is the file a
+        // translator edits, and a dropped %1 in it is the mistake that turns
+        // a message into nonsense at runtime.
+        QFile file(QStringLiteral(TESSEL_TRANSLATIONS_DIR "/tessel_ru.ts"));
+        CHECK(file.open(QIODevice::ReadOnly));
+        const auto markers = [](const QString& text) {
+            QStringList found;
+            for (int i = 0; i + 1 < text.size(); ++i) {
+                if (text.at(i) != QLatin1Char('%'))
+                    continue;
+                const QChar next = text.at(i + 1);
+                if (next.isDigit() || next == QLatin1Char('n'))
+                    found.append(text.mid(i, 2));
+            }
+            found.sort();
+            return found;
+        };
+        QXmlStreamReader xml(&file);
+        QString source;
+        int messages = 0;
+        int translations = 0;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (!xml.isStartElement())
+                continue;
+            if (xml.name() == QLatin1String("source")) {
+                source = xml.readElementText();
+                ++messages;
+                continue;
+            }
+            if (xml.name() != QLatin1String("translation"))
+                continue;
+            // A plural message holds one numerusform per Russian form, an
+            // ordinary one holds its text directly.
+            const auto compare = [&](const QString& text) {
+                if (text.trimmed().isEmpty())
+                    return;
+                ++translations;
+                check(markers(text) == markers(source),
+                      source.toLocal8Bit().constData(), __LINE__);
+            };
+            xml.readNext();
+            while (!(xml.isEndElement() && xml.name() == QLatin1String("translation"))
+                   && !xml.atEnd()) {
+                if (xml.isCharacters())
+                    compare(xml.text().toString());
+                else if (xml.isStartElement()
+                         && xml.name() == QLatin1String("numerusform"))
+                    compare(xml.readElementText());
+                xml.readNext();
+            }
+        }
+        CHECK(!xml.hasError());
+        // A translation for every string, so nothing is left half done.
+        CHECK(messages > 800);
+        CHECK(translations >= messages);
+    });
+
+    addTest("the settings dialog chooses the language", [] {
+        QSettings settings;
+        const QVariant before = settings.value(QStringLiteral("language"));
+        settings.setValue(QStringLiteral("language"), QStringLiteral("system"));
+        MainWindow window;
+        // The dialog is modal, so it is answered from inside the loop it runs.
+        QTimer::singleShot(0, &window, [] {
+            QDialog* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            auto* combo = dialog->findChild<QComboBox*>(QStringLiteral("language"));
+            check(combo != nullptr, "language box", __LINE__);
+            if (combo) {
+                check(combo->count() == 3, "three languages", __LINE__);
+                check(combo->itemData(0).toString() == QLatin1String("system"),
+                      "system first", __LINE__);
+                check(combo->itemData(2).toString() == QLatin1String("ru"),
+                      "russian last", __LINE__);
+                check(combo->currentIndex() == 0, "reads the setting", __LINE__);
+                combo->setCurrentIndex(2);
+            }
+            dialog->accept();
+            // Accepting it pops the box that says the language waits for a
+            // restart, which is answered the same way.
+            QTimer::singleShot(0, qApp, [] {
+                if (QWidget* modal = QApplication::activeModalWidget())
+                    modal->close();
+            });
+        });
+        QTimer::singleShot(3000, &window, [] {
+            if (QWidget* modal = QApplication::activeModalWidget())
+                modal->close();
+        });
+        if (auto* button = window.findChild<QToolButton*>(
+                QStringLiteral("settingsButton"))) {
+            button->click();
+        }
+        // The locale name is what is stored, not the label, so the setting
+        // does not change with the language it is written in.
+        CHECK(settings.value(QStringLiteral("language")).toString()
+              == QStringLiteral("ru"));
+        settings.setValue(QStringLiteral("language"), before);
+    });
 
     // ------------------------------------------------------------ icons
     addTest("icons render", [] {
@@ -3516,13 +3698,13 @@ int main(int argc, char** argv)
             CHECK(list->topLevelItemCount() == 2);
             CHECK(list->topLevelItem(0)->text(0) == QStringLiteral("beach.png"));
             CHECK(!list->topLevelItem(0)->text(1).isEmpty());
-            CHECK(list->topLevelItem(0)->text(2) == QStringLiteral("10 minutes ago"));
+            CHECK(list->topLevelItem(0)->text(2) == QStringLiteral("10 minute(s) ago"));
             CHECK(list->topLevelItem(0)->toolTip(0).endsWith(QStringLiteral("beach.png")));
             CHECK(list->topLevelItem(1)->text(0) == QStringLiteral("Untitled 3"));
             CHECK(list->topLevelItem(1)->toolTip(0).contains(QStringLiteral("Never saved")));
         }
         CHECK(RecoveryDialog::describe(saved).contains(QStringLiteral("beach.png")));
-        CHECK(RecoveryDialog::describe(saved).contains(QStringLiteral("10 minutes ago")));
+        CHECK(RecoveryDialog::describe(saved).contains(QStringLiteral("10 minute(s) ago")));
 
         // Nothing is chosen until a button is pressed, and only recovering and
         // discarding accept.

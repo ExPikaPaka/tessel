@@ -755,7 +755,7 @@ void CanvasView::keyPressEvent(QKeyEvent* event)
             return;
         }
         if (doc_->selection().isActive()) {
-            recordSelectionEdit(*doc_, *history_, QStringLiteral("Deselect"),
+            recordSelectionEdit(*doc_, *history_, tr("Deselect"),
                                 [this] { doc_->selection().clear(); });
             viewport()->update();
             emit documentChanged();

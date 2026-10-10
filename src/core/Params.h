@@ -34,18 +34,21 @@ struct ParamSpec {
     QString suffix;
     Rgba color{0, 0, 0, 255};
 
-    static ParamSpec intParam(QString id, QString label, int minimum, int maximum,
+    // `label` is a source string in the "Effects" context, marked at the call
+    // site with QT_TRANSLATE_NOOP and looked up here, so that the dialog shows
+    // it in the language the program is running in.
+    static ParamSpec intParam(QString id, const char* label, int minimum, int maximum,
                               int defaultValue, QString suffix = QString());
-    static ParamSpec doubleParam(QString id, QString label, double minimum,
+    static ParamSpec doubleParam(QString id, const char* label, double minimum,
                                  double maximum, double defaultValue,
                                  double step = 0.1, int decimals = 2,
                                  QString suffix = QString());
-    static ParamSpec boolParam(QString id, QString label, bool defaultValue);
-    static ParamSpec choiceParam(QString id, QString label, QStringList choices,
+    static ParamSpec boolParam(QString id, const char* label, bool defaultValue);
+    static ParamSpec choiceParam(QString id, const char* label, QStringList choices,
                                  int defaultIndex = 0);
-    static ParamSpec colorParam(QString id, QString label, Rgba defaultColor);
-    static ParamSpec angleParam(QString id, QString label, double defaultDegrees);
-    static ParamSpec offsetParam(QString id, QString label, double x = 0.0,
+    static ParamSpec colorParam(QString id, const char* label, Rgba defaultColor);
+    static ParamSpec angleParam(QString id, const char* label, double defaultDegrees);
+    static ParamSpec offsetParam(QString id, const char* label, double x = 0.0,
                                  double y = 0.0);
 };
 

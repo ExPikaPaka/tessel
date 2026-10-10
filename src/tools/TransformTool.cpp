@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 #include <QKeyEvent>
 #include <QPolygonF>
 
@@ -19,12 +21,16 @@ enum class Grip { None, Body, Corner, Rotate, Pivot };
 class TransformTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("transform"); }
-    QString name() const override { return QStringLiteral("Rotate / Zoom"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Rotate / Zoom");
+    }
     QString iconName() const override { return QStringLiteral("rotate-cw"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag inside to move, a corner to scale, the top handle "
-                              "to rotate. Enter applies, Escape cancels.");
+        return QCoreApplication::translate(
+            "Tools", "Drag inside to move, a corner to scale, the top handle "
+                     "to rotate. Enter applies, Escape cancels.");
     }
     QCursor cursor() const override { return QCursor(Qt::OpenHandCursor); }
 
@@ -174,16 +180,22 @@ public:
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addDouble(QStringLiteral("angle"), QStringLiteral("Angle"), -360.0, 360.0,
+        bar.addDouble(QStringLiteral("angle"),
+                      QCoreApplication::translate("Tools", "Angle"), -360.0, 360.0,
                       angle_, 1.0, 2, QStringLiteral(" deg"));
-        bar.addDouble(QStringLiteral("zoom"), QStringLiteral("Zoom"), 0.02, 32.0, zoom_,
+        bar.addDouble(QStringLiteral("zoom"),
+                      QCoreApplication::translate("Tools", "Zoom"), 0.02, 32.0, zoom_,
                       0.05, 3);
-        bar.addCheck(QStringLiteral("tile"), QStringLiteral("Tile"), tile_);
-        bar.addCombo(QStringLiteral("sampling"), QStringLiteral("Sampling"),
-                     {QStringLiteral("Smooth"), QStringLiteral("Nearest")},
+        bar.addCheck(QStringLiteral("tile"),
+                     QCoreApplication::translate("Tools", "Tile"), tile_);
+        bar.addCombo(QStringLiteral("sampling"),
+                     QCoreApplication::translate("Tools", "Sampling"),
+                     {QCoreApplication::translate("Tools", "Smooth"),
+                      QCoreApplication::translate("Tools", "Nearest")},
                      smooth_ ? 0 : 1);
         bar.addToggle(QStringLiteral("reset"), QStringLiteral("undo"),
-                      QStringLiteral("Reset the transform"), false);
+                      QCoreApplication::translate("Tools", "Reset the transform"),
+                      false);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -348,7 +360,9 @@ private:
         context.doc->setPreview(layerUid_, &preview_);
         previewing_ = true;
         context.repaintAll();
-        context.say(QStringLiteral("Angle %1 deg   Zoom %2   Offset %3, %4")
+        context.say(
+                    QCoreApplication::translate(
+                        "Tools", "Angle %1 deg   Zoom %2   Offset %3, %4")
                         .arg(angle_, 0, 'f', 1)
                         .arg(zoom_, 0, 'f', 3)
                         .arg(int(std::lround(offset_.x())))

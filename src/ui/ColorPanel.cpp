@@ -243,8 +243,8 @@ void RampSlider::mouseMoveEvent(QMouseEvent* event)
 SwatchPair::SwatchPair(QWidget* parent) : QWidget(parent)
 {
     setFixedSize(78, 60);
-    setToolTip(QStringLiteral("Primary and secondary colours. Click a swatch to make "
-                              "it active, use the arrows to swap or reset."));
+    setToolTip(tr("Primary and secondary colours. Click a swatch to make "
+                  "it active, use the arrows to swap or reset."));
 }
 
 void SwatchPair::setColors(Rgba primary, Rgba secondary)
@@ -319,8 +319,8 @@ void SwatchPair::mousePressEvent(QMouseEvent* event)
 PaletteGrid::PaletteGrid(QWidget* parent) : QWidget(parent)
 {
     colors_ = defaultPalette();
-    setToolTip(QStringLiteral("Click for the primary colour, right click for the "
-                              "secondary colour."));
+    setToolTip(tr("Click for the primary colour, right click for the "
+                  "secondary colour."));
 }
 
 QVector<Rgba> PaletteGrid::defaultPalette()
@@ -440,7 +440,7 @@ ScreenPickOverlay::ScreenPickOverlay(const QImage& grab, QRect bounds, QWidget* 
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
                    | Qt::X11BypassWindowManagerHint);
     setAttribute(Qt::WA_DeleteOnClose);
-    setWindowTitle(QStringLiteral("Pick a colour"));
+    setWindowTitle(tr("Pick a colour"));
     setCursor(Qt::CrossCursor);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -547,10 +547,10 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     valueSlider_ = new RampSlider(RampSlider::Value, this);
     alphaSlider_ = new RampSlider(RampSlider::Alpha, this);
     auto* valueRow = new QHBoxLayout;
-    valueRow->addWidget(new QLabel(QStringLiteral("V"), this));
+    valueRow->addWidget(new QLabel(tr("V"), this));
     valueRow->addWidget(valueSlider_, 1);
     auto* alphaRow = new QHBoxLayout;
-    alphaRow->addWidget(new QLabel(QStringLiteral("A"), this));
+    alphaRow->addWidget(new QLabel(tr("A"), this));
     alphaRow->addWidget(alphaSlider_, 1);
     root->addLayout(valueRow);
     root->addLayout(alphaRow);
@@ -567,13 +567,13 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         return button;
     };
 
-    moreButton_ = new QPushButton(QStringLiteral("More  >>"), this);
+    moreButton_ = new QPushButton(tr("More  >>"), this);
     moreButton_->setCheckable(true);
     moreButton_->setFlat(true);
     pickButton_ = makeSmallButton(
-        QStringLiteral("Screen pick"), QStringLiteral("screenPick"),
-        QStringLiteral("Take a colour from anywhere on screen. Click to pick, "
-                       "Escape to cancel."));
+        tr("Screen pick"), QStringLiteral("screenPick"),
+        tr("Take a colour from anywhere on screen. Click to pick, "
+           "Escape to cancel."));
     auto* actionRow = new QHBoxLayout;
     actionRow->setSpacing(4);
     actionRow->addWidget(moreButton_);
@@ -601,51 +601,51 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     spinA_ = makeSpin(255);
     hexField_ = new QLineEdit(details_);
     hexField_->setMaxLength(9);
-    hexField_->setPlaceholderText(QStringLiteral("#RRGGBB"));
+    hexField_->setPlaceholderText(tr("#RRGGBB"));
 
-    grid->addWidget(new QLabel(QStringLiteral("R"), details_), 0, 0);
+    grid->addWidget(new QLabel(tr("R"), details_), 0, 0);
     grid->addWidget(spinR_, 0, 1);
-    grid->addWidget(new QLabel(QStringLiteral("H"), details_), 0, 2);
+    grid->addWidget(new QLabel(tr("H"), details_), 0, 2);
     grid->addWidget(spinH_, 0, 3);
-    grid->addWidget(new QLabel(QStringLiteral("G"), details_), 1, 0);
+    grid->addWidget(new QLabel(tr("G"), details_), 1, 0);
     grid->addWidget(spinG_, 1, 1);
-    grid->addWidget(new QLabel(QStringLiteral("S"), details_), 1, 2);
+    grid->addWidget(new QLabel(tr("S"), details_), 1, 2);
     grid->addWidget(spinS_, 1, 3);
-    grid->addWidget(new QLabel(QStringLiteral("B"), details_), 2, 0);
+    grid->addWidget(new QLabel(tr("B"), details_), 2, 0);
     grid->addWidget(spinB_, 2, 1);
-    grid->addWidget(new QLabel(QStringLiteral("V"), details_), 2, 2);
+    grid->addWidget(new QLabel(tr("V"), details_), 2, 2);
     grid->addWidget(spinV_, 2, 3);
-    grid->addWidget(new QLabel(QStringLiteral("Alpha"), details_), 3, 0);
+    grid->addWidget(new QLabel(tr("Alpha"), details_), 3, 0);
     grid->addWidget(spinA_, 3, 1);
-    grid->addWidget(new QLabel(QStringLiteral("Hex"), details_), 3, 2);
+    grid->addWidget(new QLabel(tr("Hex"), details_), 3, 2);
     grid->addWidget(hexField_, 3, 3);
     details_->setVisible(false);
     root->addWidget(details_);
 
-    auto* recentLabel = new QLabel(QStringLiteral("Recent"), this);
+    auto* recentLabel = new QLabel(tr("Recent"), this);
     root->addWidget(recentLabel);
     recentGrid_ = new PaletteGrid(this);
     recentGrid_->setColors({});
     recentGrid_->setColumns(kRecentLimit);
     recentGrid_->setMinimumRows(1);
-    recentGrid_->setToolTip(QStringLiteral("Recently used colours. Click for the "
-                                           "primary colour, right click for the "
-                                           "secondary colour."));
+    recentGrid_->setToolTip(tr("Recently used colours. Click for the "
+                               "primary colour, right click for the "
+                               "secondary colour."));
     root->addWidget(recentGrid_);
 
     auto* paletteRow = new QHBoxLayout;
     paletteRow->setSpacing(4);
-    paletteRow->addWidget(new QLabel(QStringLiteral("Palette"), this));
+    paletteRow->addWidget(new QLabel(tr("Palette"), this));
     paletteRow->addStretch(1);
     loadPaletteButton_ = makeSmallButton(
-        QStringLiteral("Load"), QStringLiteral("paletteLoad"),
-        QStringLiteral("Load a .gpl or hex palette."));
+        tr("Load"), QStringLiteral("paletteLoad"),
+        tr("Load a .gpl or hex palette."));
     savePaletteButton_ = makeSmallButton(
-        QStringLiteral("Save"), QStringLiteral("paletteSave"),
-        QStringLiteral("Save the palette as .gpl or hex."));
+        tr("Save"), QStringLiteral("paletteSave"),
+        tr("Save the palette as .gpl or hex."));
     resetPaletteButton_ = makeSmallButton(
-        QStringLiteral("Reset"), QStringLiteral("paletteReset"),
-        QStringLiteral("Restore the built in palette."));
+        tr("Reset"), QStringLiteral("paletteReset"),
+        tr("Restore the built in palette."));
     paletteRow->addWidget(loadPaletteButton_);
     paletteRow->addWidget(savePaletteButton_);
     paletteRow->addWidget(resetPaletteButton_);
@@ -658,7 +658,7 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     // ---------------------------------------------------------- wiring
     connect(moreButton_, &QPushButton::toggled, this, [this](bool on) {
         details_->setVisible(on);
-        moreButton_->setText(on ? QStringLiteral("Less  <<") : QStringLiteral("More  >>"));
+        moreButton_->setText(on ? tr("Less  <<") : tr("More  >>"));
     });
     connect(swatches_, &SwatchPair::activeChanged, this, [this](bool primary) {
         activeIsPrimary_ = primary;
@@ -694,19 +694,19 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         QSettings settings;
         const QString last = settings.value(QStringLiteral("paletteDir")).toString();
         const QString path = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Load palette"), last, Palette::openFilter());
+            this, tr("Load palette"), last, Palette::openFilter());
         if (path.isEmpty())
             return;
         settings.setValue(QStringLiteral("paletteDir"), QFileInfo(path).absolutePath());
         QString error;
         if (!loadPaletteFile(path, &error))
-            showPaletteError(QStringLiteral("Cannot load palette"), error);
+            showPaletteError(tr("Cannot load palette"), error);
     });
     connect(savePaletteButton_, &QPushButton::clicked, this, [this] {
         QSettings settings;
         const QString last = settings.value(QStringLiteral("paletteDir")).toString();
         QString path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Save palette"), last, Palette::saveFilter());
+            this, tr("Save palette"), last, Palette::saveFilter());
         if (path.isEmpty())
             return;
         // The dialog may return a bare name, and a palette with no extension
@@ -716,13 +716,13 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         settings.setValue(QStringLiteral("paletteDir"), QFileInfo(path).absolutePath());
         QString error;
         if (!savePaletteFile(path, &error))
-            showPaletteError(QStringLiteral("Cannot save palette"), error);
+            showPaletteError(tr("Cannot save palette"), error);
     });
     connect(resetPaletteButton_, &QPushButton::clicked, this, &ColorPanel::resetPalette);
     connect(pickButton_, &QPushButton::clicked, this, [this] {
         QString error;
         if (!beginScreenPick(&error))
-            showPaletteError(QStringLiteral("Cannot pick from the screen"), error);
+            showPaletteError(tr("Cannot pick from the screen"), error);
     });
 
     // Recent colours are written back on a timer so that dragging across the
@@ -976,9 +976,9 @@ bool ColorPanel::loadPaletteFile(const QString& path, QString* error)
     paletteName_ = loaded.name();
     palette_->setColumns(loaded.columns());
     palette_->setColors(loaded.colors());
-    palette_->setToolTip(QStringLiteral("%1 (%2 colours). Click for the primary "
-                                       "colour, right click for the secondary "
-                                       "colour.")
+    palette_->setToolTip(tr("%1 (%2 colours). Click for the primary "
+                            "colour, right click for the secondary "
+                            "colour.")
                              .arg(paletteName_)
                              .arg(loaded.size()));
     return true;
@@ -997,14 +997,14 @@ void ColorPanel::resetPalette()
     paletteName_.clear();
     palette_->setColumns(16);
     palette_->setColors(PaletteGrid::defaultPalette());
-    palette_->setToolTip(QStringLiteral("Click for the primary colour, right click "
-                                       "for the secondary colour."));
+    palette_->setToolTip(tr("Click for the primary colour, right click "
+                            "for the secondary colour."));
 }
 
 void ColorPanel::showPaletteError(const QString& title, const QString& message)
 {
     QMessageBox::warning(this, title,
-                         message.isEmpty() ? QStringLiteral("Unknown error.") : message);
+                         message.isEmpty() ? tr("Unknown error.") : message);
 }
 
 // ----------------------------------------------------------------- screen pick
@@ -1092,11 +1092,11 @@ bool ColorPanel::beginScreenPick(QString* error)
     const QImage grab = grabScreens();
     if (!isUsableGrab(grab)) {
         if (error) {
-            *error = QStringLiteral(
-                "Tessel could not read the screen.\n\nThis session does not allow "
-                "an application to capture the desktop, which is the case on most "
-                "Wayland compositors. Use the colour picker tool on the canvas "
-                "instead, or run Tessel on an X11 session.");
+            *error = tr("Tessel could not read the screen.\n\nThis session does "
+                        "not allow an application to capture the desktop, which is "
+                        "the case on most Wayland compositors. Use the colour picker "
+                        "tool on the canvas instead, or run Tessel on an X11 "
+                        "session.");
         }
         return false;
     }

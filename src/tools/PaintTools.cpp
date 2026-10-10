@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImage>
@@ -14,6 +15,7 @@
 
 #include "core/ImageOps.h"
 #include "core/Parallel.h"
+#include "core/Strings.h"
 
 namespace tessel {
 
@@ -57,25 +59,24 @@ void colorReplace(Image& dst, const Mask& mask, Rgba color, const Rect& region)
 // Antialiasing used to be a yes or no switch. These are the steps that
 // replaced it, from no ramp beyond the unavoidable one to the widest ramp
 // worth having.
-const QStringList& antialiasLevelNames()
+QStringList antialiasLevelNames()
 {
-    static const QStringList names = {
-        QStringLiteral("None"), QStringLiteral("Low"), QStringLiteral("Normal"),
-        QStringLiteral("High"), QStringLiteral("Maximum"),
+    return {
+        QCoreApplication::translate("Tools", "None"),
+        QCoreApplication::translate("Tools", "Low"),
+        QCoreApplication::translate("Tools", "Normal"),
+        QCoreApplication::translate("Tools", "High"),
+        QCoreApplication::translate("Tools", "Maximum"),
     };
-    return names;
 }
 
 // The Blending box of the stroke tools: the layer blend modes, and one entry
 // past them for Overwrite, which is not a blend at all.
-const QStringList& strokeBlendNames()
+QStringList strokeBlendNames()
 {
-    static const QStringList names = [] {
-        QStringList out = blendModeNames();
-        out.append(QStringLiteral("Overwrite"));
-        return out;
-    }();
-    return names;
+    QStringList out = blendModeLabels();
+    out.append(QCoreApplication::translate("Tools", "Overwrite"));
+    return out;
 }
 
 // Tablet pressure maps straight onto the setting it drives, with a floor so
@@ -583,14 +584,18 @@ protected:
 
     void buildCommonOptions(ToolOptionsBar& bar, bool withBlendMode = true)
     {
-        bar.addSpin(QStringLiteral("width"), QStringLiteral("Width"), 1, 2000,
+        bar.addSpin(QStringLiteral("width"),
+                    QCoreApplication::translate("Tools", "Width"), 1, 2000,
                     int(std::lround(width_)), QStringLiteral(" px"));
-        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+        bar.addPercent(QStringLiteral("opacity"),
+                       QCoreApplication::translate("Tools", "Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCombo(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+        bar.addCombo(QStringLiteral("antialias"),
+                     QCoreApplication::translate("Tools", "Antialiasing"),
                      antialiasLevelNames(), antialiasLevel_);
         if (withBlendMode) {
-            bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
+            bar.addCombo(QStringLiteral("blend"),
+                         QCoreApplication::translate("Tools", "Blending"),
                          strokeBlendNames(),
                          overwrite_ ? int(blendModeNames().size()) : int(blend_));
         }
@@ -601,24 +606,27 @@ protected:
     void buildPressureOptions(ToolOptionsBar& bar, bool withWidth = true)
     {
         bar.addSeparator();
-        bar.addLabel(QStringLiteral("Pressure"));
+        bar.addLabel(QCoreApplication::translate("Tools", "Pressure"));
         if (withWidth) {
             bar.addTextToggle(QStringLiteral("pressureWidth"),
-                              QStringLiteral("Width"),
-                              QStringLiteral("Tablet pressure sets how wide the "
-                                             "brush is"),
+                              QCoreApplication::translate("Tools", "Width"),
+                              QCoreApplication::translate(
+                                  "Tools", "Tablet pressure sets how wide the "
+                                           "brush is"),
                               pressureWidth_);
         }
         bar.addTextToggle(QStringLiteral("pressureOpacity"),
-                          QStringLiteral("Opacity"),
-                          QStringLiteral("Tablet pressure sets how opaque the "
-                                         "stroke is"),
+                          QCoreApplication::translate("Tools", "Opacity"),
+                          QCoreApplication::translate(
+                              "Tools", "Tablet pressure sets how opaque the "
+                                       "stroke is"),
                           pressureOpacity_);
     }
 
     void buildStabiliseOption(ToolOptionsBar& bar)
     {
-        bar.addPercent(QStringLiteral("stabilise"), QStringLiteral("Stabilisation"),
+        bar.addPercent(QStringLiteral("stabilise"),
+                       QCoreApplication::translate("Tools", "Stabilisation"),
                        stabilisation_, 0, 100);
     }
 
@@ -704,11 +712,15 @@ private:
 class PaintbrushTool : public StrokeTool {
 public:
     QString id() const override { return QStringLiteral("brush"); }
-    QString name() const override { return QStringLiteral("Paintbrush"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Paintbrush");
+    }
     QString shortcut() const override { return QStringLiteral("B"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag to paint. Right drag paints with the secondary colour.");
+        return QCoreApplication::translate(
+            "Tools", "Drag to paint. Right drag paints with the secondary colour.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
@@ -716,11 +728,13 @@ public:
         syncTip();
         buildCommonOptions(bar);
         bar.addSeparator();
-        bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
+        bar.addPercent(QStringLiteral("hardness"),
+                       QCoreApplication::translate("Tools", "Hardness"),
                        int(std::lround(hardness_ * 100.0)));
         buildStabiliseOption(bar);
         bar.addSeparator();
-        tipCombo_ = bar.addCombo(QStringLiteral("tip"), QStringLiteral("Tip"),
+        tipCombo_ = bar.addCombo(QStringLiteral("tip"),
+                                 QCoreApplication::translate("Tools", "Tip"),
                                  tipItems(), tipIndex());
         buildPressureOptions(bar);
     }
@@ -769,10 +783,10 @@ private:
     // Round first, then the remembered tips, then the way to add one.
     QStringList tipItems() const
     {
-        QStringList items{QStringLiteral("Round")};
+        QStringList items{QCoreApplication::translate("Tools", "Round")};
         for (const QString& path : brushtips::remembered())
             items.append(QFileInfo(path).completeBaseName());
-        items.append(QStringLiteral("Load from file..."));
+        items.append(QCoreApplication::translate("Tools", "Load from file..."));
         return items;
     }
 
@@ -806,8 +820,8 @@ private:
     {
         const QString path = QFileDialog::getOpenFileName(
             tipCombo_ ? tipCombo_->window() : nullptr,
-            QStringLiteral("Choose a brush tip"), QString(),
-            QStringLiteral("Brush tips (*.png *.PNG)"));
+            QCoreApplication::translate("Tools", "Choose a brush tip"), QString(),
+            QCoreApplication::translate("Tools", "Brush tips (*.png *.PNG)"));
         const int before = int(brushtips::remembered().size());
         if (!path.isEmpty())
             loadTip(path);
@@ -846,16 +860,21 @@ public:
     PencilTool() { width_ = 1.0; }
 
     QString id() const override { return QStringLiteral("pencil"); }
-    QString name() const override { return QStringLiteral("Pencil"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Pencil");
+    }
     QString shortcut() const override { return QStringLiteral("P"); }
     QString hint() const override
     {
-        return QStringLiteral("Draws single hard pixels, with no antialiasing.");
+        return QCoreApplication::translate(
+            "Tools", "Draws single hard pixels, with no antialiasing.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
+        bar.addCombo(QStringLiteral("blend"),
+                     QCoreApplication::translate("Tools", "Blending"),
                      strokeBlendNames(),
                      overwrite_ ? int(blendModeNames().size()) : int(blend_));
         buildStabiliseOption(bar);
@@ -882,19 +901,24 @@ public:
     EraserTool() { width_ = 24.0; }
 
     QString id() const override { return QStringLiteral("eraser"); }
-    QString name() const override { return QStringLiteral("Eraser"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Eraser");
+    }
     QString iconName() const override { return QStringLiteral("eraser"); }
     QString shortcut() const override { return QStringLiteral("E"); }
     QString hint() const override
     {
-        return QStringLiteral("Erases to transparency. Right drag erases softly.");
+        return QCoreApplication::translate(
+            "Tools", "Erases to transparency. Right drag erases softly.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
         buildCommonOptions(bar, false);
         bar.addSeparator();
-        bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
+        bar.addPercent(QStringLiteral("hardness"),
+                       QCoreApplication::translate("Tools", "Hardness"),
                        int(std::lround(hardness_ * 100.0)));
         buildStabiliseOption(bar);
         buildPressureOptions(bar);
@@ -935,19 +959,25 @@ public:
     CloneStampTool() { width_ = 40.0; }
 
     QString id() const override { return QStringLiteral("clone"); }
-    QString name() const override { return QStringLiteral("Clone Stamp"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Clone Stamp");
+    }
     QString shortcut() const override { return QStringLiteral("L"); }
     QString hint() const override
     {
-        return QStringLiteral("Ctrl+click sets the source, then drag to paint copies of it.");
+        return QCoreApplication::translate(
+            "Tools", "Ctrl+click sets the source, then drag to paint copies of it.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
         buildCommonOptions(bar, false);
         bar.addSeparator();
-        bar.addCheck(QStringLiteral("aligned"), QStringLiteral("Aligned"), aligned_);
-        bar.addCheck(QStringLiteral("merged"), QStringLiteral("Sample merged"), merged_);
+        bar.addCheck(QStringLiteral("aligned"),
+                     QCoreApplication::translate("Tools", "Aligned"), aligned_);
+        bar.addCheck(QStringLiteral("merged"),
+                     QCoreApplication::translate("Tools", "Sample merged"), merged_);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -965,13 +995,18 @@ public:
         if (event.modifiers.testFlag(Qt::ControlModifier)) {
             origin_ = event.pos;
             hasOrigin_ = true;
-            context.say(QStringLiteral("Clone source set to %1, %2")
+            context.say(
+                        QCoreApplication::translate("Tools",
+                                                    "Clone source set to %1, %2")
                             .arg(event.pixel.x())
                             .arg(event.pixel.y()));
             return;
         }
         if (!hasOrigin_) {
-            context.say(QStringLiteral("Ctrl+click first to pick the clone source."));
+            context.say(
+                        QCoreApplication::translate(
+                            "Tools",
+                            "Ctrl+click first to pick the clone source."));
             return;
         }
         StrokeTool::press(context, event);
@@ -1021,19 +1056,24 @@ public:
     RecolorTool() { width_ = 30.0; }
 
     QString id() const override { return QStringLiteral("recolor"); }
-    QString name() const override { return QStringLiteral("Recolor"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Recolor");
+    }
     QString shortcut() const override { return QStringLiteral("R"); }
     QString hint() const override
     {
-        return QStringLiteral("Paints the primary colour only over pixels that match "
-                              "the secondary colour.");
+        return QCoreApplication::translate(
+            "Tools", "Paints the primary colour only over pixels that match "
+                     "the secondary colour.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
         buildCommonOptions(bar, false);
         bar.addSeparator();
-        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+        bar.addPercent(QStringLiteral("tolerance"),
+                       QCoreApplication::translate("Tools", "Tolerance"),
                        int(std::lround(tolerance_ * 100.0)), 0, 100);
     }
 
@@ -1081,28 +1121,39 @@ private:
 class PaintBucketTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("bucket"); }
-    QString name() const override { return QStringLiteral("Paint Bucket"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Paint Bucket");
+    }
     QString shortcut() const override { return QStringLiteral("F"); }
     QString hint() const override
     {
-        return QStringLiteral("Fills an area of similar colour. Right click fills with "
-                              "the secondary colour.");
+        return QCoreApplication::translate(
+            "Tools", "Fills an area of similar colour. Right click fills with "
+                     "the secondary colour.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addCombo(QStringLiteral("mode"), QStringLiteral("Fill"),
-                     {QStringLiteral("Contiguous"), QStringLiteral("Global")},
+        bar.addCombo(QStringLiteral("mode"),
+                     QCoreApplication::translate("Tools", "Fill"),
+                     {QCoreApplication::translate("Tools", "Contiguous"),
+                      QCoreApplication::translate("Tools", "Global")},
                      contiguous_ ? 0 : 1);
-        bar.addPercent(QStringLiteral("tolerance"), QStringLiteral("Tolerance"),
+        bar.addPercent(QStringLiteral("tolerance"),
+                       QCoreApplication::translate("Tools", "Tolerance"),
                        int(std::lround(tolerance_ * 100.0)), 0, 100);
-        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+        bar.addPercent(QStringLiteral("opacity"),
+                       QCoreApplication::translate("Tools", "Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+        bar.addCheck(QStringLiteral("antialias"),
+                     QCoreApplication::translate("Tools", "Antialiasing"),
                      antialias_);
-        bar.addCheck(QStringLiteral("merged"), QStringLiteral("Sample merged"), merged_);
-        bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                     blendModeNames(), int(blend_));
+        bar.addCheck(QStringLiteral("merged"),
+                     QCoreApplication::translate("Tools", "Sample merged"), merged_);
+        bar.addCombo(QStringLiteral("blend"),
+                     QCoreApplication::translate("Tools", "Blending"),
+                     blendModeLabels(), int(blend_));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -1135,7 +1186,7 @@ public:
         clipToSelection(mask, *context.doc, mask.rect());
         const Rect area = mask.boundsAbove(0.004f);
         if (area.isEmpty()) {
-            context.say(QStringLiteral("Nothing to fill here."));
+            context.say(QCoreApplication::translate("Tools", "Nothing to fill here."));
             return;
         }
         Rgba color = event.isSecondary() ? context.secondary : context.primary;
@@ -1147,7 +1198,9 @@ public:
         context.repaint(area);
         if (context.documentChanged)
             context.documentChanged();
-        context.say(QStringLiteral("Filled %1 pixels").arg(mask.countAbove(0.5f)));
+        context.say(
+                    QCoreApplication::translate("Tools", "Filled %1 pixels")
+                        .arg(mask.countAbove(0.5f)));
     }
 
 private:
@@ -1166,29 +1219,41 @@ public:
     enum Shape { Linear, LinearReflected, Radial, Conical, Diamond };
 
     QString id() const override { return QStringLiteral("gradient"); }
-    QString name() const override { return QStringLiteral("Gradient"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Gradient");
+    }
     QString shortcut() const override { return QStringLiteral("G"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag to lay down a gradient. Hold Shift to constrain "
-                              "the angle, right drag to swap the colours.");
+        return QCoreApplication::translate(
+            "Tools", "Drag to lay down a gradient. Hold Shift to constrain "
+                     "the angle, right drag to swap the colours.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addCombo(QStringLiteral("shape"), QStringLiteral("Shape"),
-                     {QStringLiteral("Linear"), QStringLiteral("Linear reflected"),
-                      QStringLiteral("Radial"), QStringLiteral("Conical"),
-                      QStringLiteral("Diamond")},
+        bar.addCombo(QStringLiteral("shape"),
+                     QCoreApplication::translate("Tools", "Shape"),
+                     {QCoreApplication::translate("Tools", "Linear"),
+                      QCoreApplication::translate("Tools", "Linear reflected"),
+                      QCoreApplication::translate("Tools", "Radial"),
+                      QCoreApplication::translate("Tools", "Conical"),
+                      QCoreApplication::translate("Tools", "Diamond")},
                      int(shape_));
-        bar.addCombo(QStringLiteral("channel"), QStringLiteral("Mode"),
-                     {QStringLiteral("Colour"), QStringLiteral("Transparency")},
+        bar.addCombo(QStringLiteral("channel"),
+                     QCoreApplication::translate("Tools", "Mode"),
+                     {QCoreApplication::translate("Tools", "Colour"),
+                      QCoreApplication::translate("Tools", "Transparency")},
                      transparencyMode_ ? 1 : 0);
-        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+        bar.addPercent(QStringLiteral("opacity"),
+                       QCoreApplication::translate("Tools", "Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCheck(QStringLiteral("dither"), QStringLiteral("Dither"), dither_);
-        bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                     blendModeNames(), int(blend_));
+        bar.addCheck(QStringLiteral("dither"),
+                     QCoreApplication::translate("Tools", "Dither"), dither_);
+        bar.addCombo(QStringLiteral("blend"),
+                     QCoreApplication::translate("Tools", "Blending"),
+                     blendModeLabels(), int(blend_));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
