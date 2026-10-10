@@ -56,32 +56,44 @@ void ColorWheel::showEvent(QShowEvent* event)
 
 void ColorWheel::rebuild()
 {
+    const qreal ratio = devicePixelRatioF();
     const int side = std::max(16, std::min(width(), height()));
-    disc_ = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
-    disc_.fill(Qt::transparent);
-    const double radius = side / 2.0;
-    for (int y = 0; y < side; ++y) {
-        QRgb* line = reinterpret_cast<QRgb*>(disc_.scanLine(y));
-        for (int x = 0; x < side; ++x) {
+    const int target = std::max(16, int(std::lround(side * ratio)));
+
+    // The disc is drawn at three times the final resolution and scaled back
+    // down, which gives the rim proper antialiasing instead of the single
+    // pixel feather that left it looking stair stepped.
+    constexpr int kSupersample = 3;
+    const int big = target * kSupersample;
+    QImage canvas(big, big, QImage::Format_ARGB32_Premultiplied);
+    canvas.fill(Qt::transparent);
+    const double radius = big / 2.0;
+
+    for (int y = 0; y < big; ++y) {
+        QRgb* line = reinterpret_cast<QRgb*>(canvas.scanLine(y));
+        const double dy = y - radius + 0.5;
+        for (int x = 0; x < big; ++x) {
             const double dx = x - radius + 0.5;
-            const double dy = y - radius + 0.5;
             const double distance = std::hypot(dx, dy);
             if (distance > radius) {
-                line[x] = qRgba(0, 0, 0, 0);
+                line[x] = 0;
                 continue;
             }
             const double angle = std::atan2(-dy, dx) * 180.0 / M_PI;
             float r = 0, g = 0, b = 0;
-            // The disc always shows full brightness so it stays readable; the
-            // value slider next to it does the dimming.
+            // Full brightness keeps the disc readable; the value slider beside
+            // it does the dimming.
             ops::hsvToRgb(float(angle), float(std::min(1.0, distance / radius)), 1.0f,
                           r, g, b);
-            // Feather the rim so the disc edge is not jagged.
-            const double edge = std::clamp(radius - distance, 0.0, 1.0);
-            const int alpha = int(std::lround(edge * 255.0));
-            line[x] = qPremultiply(qRgba(int(r * 255), int(g * 255), int(b * 255), alpha));
+            const double coverage = std::clamp(radius - distance, 0.0, 1.0);
+            const int alpha = int(std::lround(coverage * 255.0));
+            line[x] = qPremultiply(qRgba(toByte(r), toByte(g), toByte(b), alpha));
         }
     }
+
+    disc_ = canvas.scaled(target, target, Qt::IgnoreAspectRatio,
+                          Qt::SmoothTransformation);
+    disc_.setDevicePixelRatio(ratio);
 }
 
 void ColorWheel::paintEvent(QPaintEvent*)
@@ -90,6 +102,7 @@ void ColorWheel::paintEvent(QPaintEvent*)
     painter.setRenderHint(QPainter::Antialiasing, true);
     const int side = std::min(width(), height());
     const QPointF offset((width() - side) / 2.0, (height() - side) / 2.0);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.drawImage(offset, disc_);
 
     const double radius = side / 2.0;
