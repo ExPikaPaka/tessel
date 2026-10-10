@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish
+        required: true
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ zlib1g-dev \
+            qt6-base-dev libgl1-mesa-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Screenshots
+        run: tools/screenshots.sh build/tessel screenshots
+
+      - name: Package
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          stage="tessel-${tag#v}-linux-x86_64"
+          mkdir -p "$stage"
+          cp build/tessel "$stage/"
+          cp README.md "$stage/"
+          cp resources/org.tessel.Tessel.desktop "$stage/"
+          cp resources/org.tessel.Tessel.svg "$stage/"
+          strip "$stage/tessel"
+          tar czf "$stage.tar.gz" "$stage"
+          sha256sum "$stage.tar.gz" > "$stage.tar.gz.sha256"
+          ls -l
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release create "$tag" \
+            --title "Tessel $tag" \
+            --notes-file .github/release-notes.md \
+            --verify-tag \
+            tessel-*.tar.gz tessel-*.tar.gz.sha256 screenshots/*.png
