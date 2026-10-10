@@ -22,6 +22,7 @@
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QWheelEvent>
 #include <QThread>
 #include <QTimer>
 
@@ -1115,6 +1116,36 @@ int main(int argc, char** argv)
         view.refresh();
         CHECK(view.document()->activeLayer()->image.at(70, 70).g == 0);
         CHECK(view.document()->selection().isActive());
+    });
+
+    addTest("the wheel zooms the canvas without a modifier", [] {
+        auto doc = std::make_unique<Document>(400, 300);
+        CanvasView view(std::move(doc));
+        view.resize(500, 400);
+        view.show();
+        view.setZoom(1.0);
+        QApplication::processEvents();
+
+        auto roll = [&view](int notches, Qt::KeyboardModifiers modifiers) {
+            const QPointF at(250, 200);
+            QWheelEvent wheel(at, view.viewport()->mapToGlobal(at), QPoint(),
+                              QPoint(0, notches * 120), Qt::NoButton, modifiers,
+                              Qt::NoScrollPhase, false);
+            QApplication::sendEvent(view.viewport(), &wheel);
+            QApplication::processEvents();
+        };
+
+        roll(1, Qt::NoModifier);
+        CHECK(view.zoom() > 1.0);          // a plain roll forward zooms in
+        const double larger = view.zoom();
+        roll(-1, Qt::NoModifier);
+        CHECK(view.zoom() < larger);       // and back out again
+        roll(1, Qt::ControlModifier);
+        CHECK(view.zoom() > 1.0);          // Ctrl still zooms, as it always did
+        // Shift is left for scrolling sideways, so it must not zoom.
+        const double held = view.zoom();
+        roll(1, Qt::ShiftModifier);
+        CHECK(std::abs(view.zoom() - held) < 1.0e-9);
     });
 
     addTest("escape clears the selection", [] {

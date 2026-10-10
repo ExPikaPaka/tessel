@@ -614,7 +614,10 @@ void CanvasView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void CanvasView::wheelEvent(QWheelEvent* event)
 {
-    if (event->modifiers().testFlag(Qt::ControlModifier)) {
+    // The wheel zooms about the pointer, with or without Ctrl: on a canvas that
+    // is what the wheel is for. Shift scrolls sideways and the plain scroll
+    // bars, the middle button and the space bar still move the view.
+    if (!event->modifiers().testFlag(Qt::ShiftModifier)) {
         const double steps = event->angleDelta().y() / 120.0;
         const QPointF anchor = docFromView(event->position());
         if (steps > 0) {
