@@ -15,7 +15,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QBuffer>
 #include <QImageWriter>
 #include <QScrollArea>
@@ -35,6 +34,9 @@
 namespace tessel {
 
 namespace {
+
+// The widest image the spin boxes offer, in pixels.
+constexpr int kMaxPixels = 60000;
 
 struct Preset {
     const char* name;
@@ -185,9 +187,32 @@ Rgba NewImageDialog::background() const
 
 // ----------------------------------------------------------------- resize
 
+namespace {
+
+const Unit kResizeUnits[4] = {Unit::Pixels, Unit::Inches, Unit::Centimetres,
+                              Unit::Percent};
+
+int indexOfUnit(Unit unit)
+{
+    for (int i = 0; i < 4; ++i) {
+        if (kResizeUnits[i] == unit)
+            return i;
+    }
+    return 0;
+}
+
+} // namespace
+
 ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHeight,
-                           bool withAnchor, QWidget* parent)
-    : QDialog(parent), originalWidth_(currentWidth), originalHeight_(currentHeight)
+                           double currentResolution, Unit unit, bool withAnchor,
+                           QWidget* parent)
+    : QDialog(parent), unit_(unit),
+      originalWidth_(std::max(1, currentWidth)),
+      originalHeight_(std::max(1, currentHeight)),
+      originalResolution_(units::sanitize(currentResolution)),
+      pixelWidth_(std::max(1, currentWidth)),
+      pixelHeight_(std::max(1, currentHeight)),
+      resolution_(units::sanitize(currentResolution))
 {
     setWindowTitle(title);
     setWindowIcon(icons::get(withAnchor ? QStringLiteral("canvas")
@@ -196,38 +221,50 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    auto* mode = new QGroupBox(QStringLiteral("Resize by"), this);
-    auto* modeLayout = new QGridLayout(mode);
-    byPercent_ = new QRadioButton(QStringLiteral("Percentage"), mode);
-    byAbsolute_ = new QRadioButton(QStringLiteral("Absolute size"), mode);
-    byAbsolute_->setChecked(true);
-    percent_ = new QSpinBox(mode);
-    percent_->setRange(1, 2000);
-    percent_->setValue(100);
-    percent_->setSuffix(QStringLiteral("%"));
-    percent_->setEnabled(false);
-    modeLayout->addWidget(byPercent_, 0, 0);
-    modeLayout->addWidget(percent_, 0, 1);
-    modeLayout->addWidget(byAbsolute_, 1, 0, 1, 2);
-    root->addWidget(mode);
-
     auto* form = new QFormLayout;
     form->setSpacing(8);
-    width_ = new QSpinBox(this);
-    width_->setRange(1, 60000);
-    width_->setValue(currentWidth);
-    width_->setSuffix(QStringLiteral(" px"));
-    height_ = new QSpinBox(this);
-    height_->setRange(1, 60000);
-    height_->setValue(currentHeight);
-    height_->setSuffix(QStringLiteral(" px"));
-    keepRatio_ = new QCheckBox(QStringLiteral("Maintain aspect ratio"), this);
-    keepRatio_->setChecked(true);
+
+    unitCombo_ = new QComboBox(this);
+    unitCombo_->setObjectName(QStringLiteral("units"));
+    for (Unit candidate : kResizeUnits)
+        unitCombo_->addItem(units::unitName(candidate));
+    unitCombo_->setCurrentIndex(indexOfUnit(unit_));
+    form->addRow(QStringLiteral("Units"), unitCombo_);
+
+    width_ = new QDoubleSpinBox(this);
+    width_->setObjectName(QStringLiteral("width"));
+    width_->setKeyboardTracking(false);
+    height_ = new QDoubleSpinBox(this);
+    height_->setObjectName(QStringLiteral("height"));
+    height_->setKeyboardTracking(false);
     form->addRow(QStringLiteral("Width"), width_);
     form->addRow(QStringLiteral("Height"), height_);
+
+    keepRatio_ = new QCheckBox(QStringLiteral("Maintain aspect ratio"), this);
+    keepRatio_->setObjectName(QStringLiteral("keepratio"));
+    keepRatio_->setChecked(true);
     form->addRow(QString(), keepRatio_);
+
     if (!withAnchor) {
+        resolutionBox_ = new QDoubleSpinBox(this);
+        resolutionBox_->setObjectName(QStringLiteral("resolution"));
+        resolutionBox_->setRange(units::kMinResolution, units::kMaxResolution);
+        resolutionBox_->setDecimals(2);
+        resolutionBox_->setSuffix(QStringLiteral(" ppi"));
+        resolutionBox_->setKeyboardTracking(false);
+        resolutionBox_->setValue(resolution_);
+        form->addRow(QStringLiteral("Resolution"), resolutionBox_);
+
+        resample_ = new QCheckBox(QStringLiteral("Resample image"), this);
+        resample_->setObjectName(QStringLiteral("resample"));
+        resample_->setChecked(true);
+        resample_->setToolTip(QStringLiteral(
+            "Off: changing the resolution only changes the print size, and the "
+            "pixels are left alone."));
+        form->addRow(QString(), resample_);
+
         resampling_ = new QComboBox(this);
+        resampling_->setObjectName(QStringLiteral("resampling"));
         resampling_->addItems({QStringLiteral("Smooth (best quality)"),
                                QStringLiteral("Nearest neighbour (hard pixels)")});
         form->addRow(QStringLiteral("Resampling"), resampling_);
@@ -262,9 +299,15 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
         root->addWidget(group);
     }
 
+    const QString quiet = QStringLiteral("color: %1; font-size: 8pt;")
+                              .arg(theme::textColor().darker(140).name());
+    printSize_ = new QLabel(this);
+    printSize_->setObjectName(QStringLiteral("printsize"));
+    printSize_->setStyleSheet(quiet);
+    root->addWidget(printSize_);
     summary_ = new QLabel(this);
-    summary_->setStyleSheet(QStringLiteral("color: %1; font-size: 8pt;")
-                                .arg(theme::textColor().darker(140).name()));
+    summary_->setObjectName(QStringLiteral("summary"));
+    summary_->setStyleSheet(quiet);
     root->addWidget(summary_);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
@@ -273,61 +316,175 @@ ResizeDialog::ResizeDialog(const QString& title, int currentWidth, int currentHe
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(buttons);
 
-    connect(byPercent_, &QRadioButton::toggled, this, [this](bool on) {
-        percent_->setEnabled(on);
-        width_->setEnabled(!on);
-        height_->setEnabled(!on);
-        if (on)
-            syncFromPercent();
+    connect(unitCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (index >= 0 && index < 4)
+            unit_ = kResizeUnits[index];
+        // Only the presentation changes: the pixels stay exactly as they are.
+        applyUnitToFields();
     });
-    connect(percent_, &QSpinBox::valueChanged, this, [this] { syncFromPercent(); });
-    connect(width_, &QSpinBox::valueChanged, this, [this] { syncFromAbsolute(true); });
-    connect(height_, &QSpinBox::valueChanged, this, [this] { syncFromAbsolute(false); });
-    updateLabel();
-}
-
-void ResizeDialog::syncFromPercent()
-{
-    if (updating_)
-        return;
-    updating_ = true;
-    const double factor = percent_->value() / 100.0;
-    width_->setValue(std::max(1, int(std::lround(originalWidth_ * factor))));
-    height_->setValue(std::max(1, int(std::lround(originalHeight_ * factor))));
-    updating_ = false;
-    updateLabel();
-}
-
-void ResizeDialog::syncFromAbsolute(bool widthLed)
-{
-    if (updating_)
-        return;
-    if (keepRatio_->isChecked()) {
-        updating_ = true;
-        const double ratio = double(originalWidth_) / std::max(1, originalHeight_);
-        if (widthLed)
-            height_->setValue(std::max(1, int(std::lround(width_->value() / ratio))));
-        else
-            width_->setValue(std::max(1, int(std::lround(height_->value() * ratio))));
-        updating_ = false;
+    connect(width_, &QDoubleSpinBox::valueChanged, this, [this] { commitWidth(true); });
+    connect(height_, &QDoubleSpinBox::valueChanged, this, [this] { commitWidth(false); });
+    if (resolutionBox_) {
+        connect(resolutionBox_, &QDoubleSpinBox::valueChanged, this,
+                [this](double value) {
+                    if (updating_)
+                        return;
+                    const double next = units::sanitize(value);
+                    if (resamples()) {
+                        // Resampling holds the print size, so a denser image
+                        // needs proportionally more pixels.
+                        const double inchesW = pixelWidth_ / resolution_;
+                        const double inchesH = pixelHeight_ / resolution_;
+                        resolution_ = next;
+                        pixelWidth_ = std::clamp(int(std::lround(inchesW * next)),
+                                                 1, kMaxPixels);
+                        pixelHeight_ = std::clamp(int(std::lround(inchesH * next)),
+                                                  1, kMaxPixels);
+                    } else {
+                        resolution_ = next;
+                    }
+                    refreshFields();
+                });
     }
-    updateLabel();
+    if (resample_) {
+        connect(resample_, &QCheckBox::toggled, this, [this] { refreshFields(); });
+    }
+    applyUnitToFields();
 }
 
-void ResizeDialog::updateLabel()
+void ResizeDialog::applyUnitToFields()
 {
-    summary_->setText(QStringLiteral("Was %1 x %2  ->  %3")
-                          .arg(originalWidth_).arg(originalHeight_)
-                          .arg(describeSize(width_->value(), height_->value())));
+    const int places = units::decimals(unit_);
+    const double reference = std::max(originalWidth_, originalHeight_);
+    double minimum = 0.0;
+    double maximum = 0.0;
+    if (unit_ == Unit::Percent) {
+        minimum = 0.1;
+        maximum = 10000.0;
+    } else {
+        minimum = units::fromPixels(1, unit_, resolution_, reference);
+        maximum = units::fromPixels(kMaxPixels, unit_, resolution_, reference);
+        if (places > 0)
+            minimum = std::max(minimum, std::pow(10.0, -places));
+    }
+    // Narrowing the range clamps whatever value is still in the box, which
+    // would otherwise be read back as a size in the new unit.
+    updating_ = true;
+    for (QDoubleSpinBox* box : {width_, height_}) {
+        box->setDecimals(places);
+        box->setRange(minimum, maximum);
+        box->setSingleStep(units::singleStep(unit_));
+        box->setSuffix(units::unitSuffix(unit_));
+    }
+    updating_ = false;
+    refreshFields();
 }
 
-int ResizeDialog::newWidth() const { return width_->value(); }
-int ResizeDialog::newHeight() const { return height_->value(); }
+void ResizeDialog::refreshFields()
+{
+    updating_ = true;
+    width_->setValue(units::fromPixels(pixelWidth_, unit_, resolution_, originalWidth_));
+    height_->setValue(units::fromPixels(pixelHeight_, unit_, resolution_, originalHeight_));
+    if (resolutionBox_)
+        resolutionBox_->setValue(resolution_);
+    updating_ = false;
+
+    // With resampling off the pixel count is frozen, so the only way to change
+    // the size is through a physical unit, which moves the resolution instead.
+    const bool physical = unit_ == Unit::Inches || unit_ == Unit::Centimetres;
+    const bool frozen = !resamples();
+    width_->setEnabled(!frozen || physical);
+    height_->setEnabled(!frozen || physical);
+    keepRatio_->setEnabled(!frozen);
+    if (resampling_)
+        resampling_->setEnabled(!frozen);
+    refreshLabels();
+}
+
+void ResizeDialog::refreshLabels()
+{
+    printSize_->setText(QStringLiteral("Print size: %1")
+                            .arg(units::describePrintSize(pixelWidth_, pixelHeight_,
+                                                          resolution_, unit_)));
+    summary_->setText(QStringLiteral("Was %1 x %2 px at %3 ppi  ->  %4")
+                          .arg(originalWidth_).arg(originalHeight_)
+                          .arg(originalResolution_, 0, 'g', 6)
+                          .arg(describeSize(pixelWidth_, pixelHeight_)));
+}
+
+void ResizeDialog::commitWidth(bool widthLed)
+{
+    if (updating_)
+        return;
+    const double value = widthLed ? width_->value() : height_->value();
+    const bool physical = unit_ == Unit::Inches || unit_ == Unit::Centimetres;
+    if (!resamples()) {
+        if (!physical)
+            return;
+        // The pixels are fixed, so asking for a different printed size is
+        // really asking for a different resolution.
+        const double inches = unit_ == Unit::Centimetres
+            ? value / units::kCentimetresPerInch
+            : value;
+        if (inches <= 0.0)
+            return;
+        const double pixels = widthLed ? pixelWidth_ : pixelHeight_;
+        resolution_ = units::sanitize(pixels / inches);
+        refreshFields();
+        return;
+    }
+
+    const double reference = widthLed ? originalWidth_ : originalHeight_;
+    const int pixels = std::clamp(
+        int(std::lround(units::toPixels(value, unit_, resolution_, reference))),
+        1, kMaxPixels);
+    if (widthLed)
+        pixelWidth_ = pixels;
+    else
+        pixelHeight_ = pixels;
+    if (keepRatio_->isChecked()) {
+        const double ratio = double(originalWidth_) / originalHeight_;
+        if (widthLed)
+            pixelHeight_ = std::clamp(int(std::lround(pixelWidth_ / ratio)), 1, kMaxPixels);
+        else
+            pixelWidth_ = std::clamp(int(std::lround(pixelHeight_ * ratio)), 1, kMaxPixels);
+    }
+    refreshFields();
+}
 
 bool ResizeDialog::smoothResampling() const
 {
     return resampling_ ? resampling_->currentIndex() == 0 : true;
 }
+
+bool ResizeDialog::resamples() const
+{
+    return resample_ ? resample_->isChecked() : true;
+}
+
+void ResizeDialog::setUnit(Unit unit)
+{
+    unitCombo_->setCurrentIndex(indexOfUnit(unit));
+}
+
+void ResizeDialog::setDisplayedWidth(double value) { width_->setValue(value); }
+void ResizeDialog::setDisplayedHeight(double value) { height_->setValue(value); }
+
+void ResizeDialog::setResolution(double resolution)
+{
+    if (resolutionBox_)
+        resolutionBox_->setValue(resolution);
+}
+
+void ResizeDialog::setResample(bool on)
+{
+    if (resample_)
+        resample_->setChecked(on);
+}
+
+double ResizeDialog::displayedWidth() const { return width_->value(); }
+double ResizeDialog::displayedHeight() const { return height_->value(); }
+QString ResizeDialog::printSizeText() const { return printSize_->text(); }
 
 // ----------------------------------------------------------------- layer props
 

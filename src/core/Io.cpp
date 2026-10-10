@@ -1,5 +1,8 @@
 #include "core/Io.h"
 
+#include <cmath>
+#include <optional>
+
 #include <QBuffer>
 #include <QFileInfo>
 #include <QImageReader>
@@ -12,6 +15,7 @@
 #include <QXmlStreamWriter>
 
 #include "core/ImageOps.h"
+#include "core/Units.h"
 #include "core/Zip.h"
 
 namespace tessel::io {
@@ -74,6 +78,31 @@ QByteArray encodePng(const Image& image)
     QImageWriter writer(&buffer, "PNG");
     writer.write(toQImage(image));
     return out;
+}
+
+// Qt stamps every QImage with the platform's default density, so a value on its
+// own cannot tell a file that carried a pHYs chunk (or a JPEG density) from one
+// that did not. A blank image of the same format reports that default, so any
+// difference is the decoder having overwritten it.
+std::optional<double> resolutionOf(const QImage& image)
+{
+    if (image.isNull())
+        return std::nullopt;
+    const QImage blank(1, 1, image.format());
+    if (image.dotsPerMeterX() == blank.dotsPerMeterX())
+        return std::nullopt;
+    return units::sanitize(
+        units::resolutionFromDotsPerMetre(image.dotsPerMeterX()));
+}
+
+// Stamps the document resolution onto an image about to be written. PNG turns
+// this into pHYs and JPEG into its density fields; formats that cannot carry a
+// density ignore it.
+void applyResolution(QImage& image, double resolution)
+{
+    const int dpm = int(std::lround(units::dotsPerMetre(resolution)));
+    image.setDotsPerMeterX(dpm);
+    image.setDotsPerMeterY(dpm);
 }
 
 Image decodeImageBytes(const QByteArray& data, const char* format = nullptr)
@@ -180,6 +209,8 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
     }
     doc->layerAt(0)->visible = true;
     doc->setActiveIndex(0);
+    if (const std::optional<double> dpi = resolutionOf(first))
+        doc->setResolution(*dpi);
     return doc;
 }
 
@@ -209,6 +240,9 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
         return nullptr;
     }
     auto doc = std::make_unique<Document>(width, height);
+    // A manifest written before resolutions existed leaves the default alone.
+    doc->setResolution(units::sanitize(
+        root.value(QStringLiteral("resolution")).toDouble(units::kDefaultResolution)));
     doc->takeLayer(0); // drop the placeholder background
     int index = 0;
     for (const QJsonValue& value : layerArray) {
@@ -275,14 +309,22 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
     }
     QXmlStreamReader xml(stackBytes);
     int width = 0, height = 0;
+    double resolution = units::kDefaultResolution;
     std::vector<OraEntry> entries;
     while (!xml.atEnd()) {
         xml.readNext();
         if (!xml.isStartElement())
             continue;
         if (xml.name() == QLatin1String("image")) {
-            width = xml.attributes().value(QLatin1String("w")).toInt();
-            height = xml.attributes().value(QLatin1String("h")).toInt();
+            const QXmlStreamAttributes imageAttrs = xml.attributes();
+            width = imageAttrs.value(QLatin1String("w")).toInt();
+            height = imageAttrs.value(QLatin1String("h")).toInt();
+            // OpenRaster allows separate horizontal and vertical densities.
+            // Tessel keeps a single value, so the horizontal one wins.
+            bool ok = false;
+            const double xres = imageAttrs.value(QLatin1String("xres")).toDouble(&ok);
+            if (ok && xres > 0.0)
+                resolution = units::sanitize(xres);
         } else if (xml.name() == QLatin1String("stack")) {
             collectOraLayers(xml, entries, 0, 0, 0);
         }
@@ -293,6 +335,7 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
         return nullptr;
     }
     auto doc = std::make_unique<Document>(width, height);
+    doc->setResolution(resolution);
     doc->takeLayer(0); // drop the placeholder background
     // stack.xml lists layers top first; Tessel stores them bottom first.
     int index = 0;
@@ -324,7 +367,8 @@ std::unique_ptr<Document> readPdn(const QString& path, QString* error)
     return nullptr;
 }
 
-bool writeFlat(const Image& image, const QString& path, QString* error, int quality)
+bool writeFlat(const Image& image, double resolution, const QString& path,
+               QString* error, int quality)
 {
     const QString extension = extensionOf(path);
     Image source = image;
@@ -342,6 +386,8 @@ bool writeFlat(const Image& image, const QString& path, QString* error, int qual
         const int side = std::min(256, std::max(out.width(), out.height()));
         out = out.scaled(side, side, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
+    // Last, because every conversion above hands back a fresh image.
+    applyResolution(out, resolution);
 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
@@ -389,6 +435,7 @@ bool writeTessel(const Document& doc, const QString& path, QString* error)
         root[QStringLiteral("version")] = kFormatVersion;
         root[QStringLiteral("width")] = doc.width();
         root[QStringLiteral("height")] = doc.height();
+        root[QStringLiteral("resolution")] = doc.resolution();
         root[QStringLiteral("active")] = doc.activeIndex();
         QJsonArray layerArray;
         for (int i = 0; i < doc.layerCount(); ++i) {
@@ -460,6 +507,10 @@ bool writeOra(const Document& doc, const QString& path, QString* error)
         xml.writeAttribute(QStringLiteral("w"), QString::number(doc.width()));
         xml.writeAttribute(QStringLiteral("h"), QString::number(doc.height()));
         xml.writeAttribute(QStringLiteral("version"), QStringLiteral("0.0.3"));
+        // OpenRaster specifies xres / yres as whole pixels per inch.
+        const QString density = QString::number(std::lround(doc.resolution()));
+        xml.writeAttribute(QStringLiteral("xres"), density);
+        xml.writeAttribute(QStringLiteral("yres"), density);
         xml.writeStartElement(QStringLiteral("stack"));
         int index = 0;
         for (int i = doc.layerCount() - 1; i >= 0; --i) {
@@ -713,7 +764,7 @@ bool saveDocument(const Document& doc, const QString& path, QString* error,
             *error = QStringLiteral("Tessel cannot write '.%1' files.").arg(extension);
         return false;
     }
-    return writeFlat(doc.composite(), path, error, quality);
+    return writeFlat(doc.composite(), doc.resolution(), path, error, quality);
 }
 
 } // namespace tessel::io

@@ -1,3 +1,13 @@
+![Tessel](https://raw.githubusercontent.com/ExPikaPaka/tessel/main/docs/screenshots/main-dark.png)
+
+![Painting a stroke and warping it with an effect](https://raw.githubusercontent.com/ExPikaPaka/tessel/main/docs/screenshots/demo.gif)
+
+| Rotate and zoom gizmo | Curves | Effects |
+| --- | --- | --- |
+| ![Gizmo](https://raw.githubusercontent.com/ExPikaPaka/tessel/main/docs/screenshots/gizmo.png) | ![Curves](https://raw.githubusercontent.com/ExPikaPaka/tessel/main/docs/screenshots/dialog-curves.png) | ![Effects](https://raw.githubusercontent.com/ExPikaPaka/tessel/main/docs/screenshots/effects-gallery.png) |
+
+Documentation and a usage guide: https://expikapaka.github.io/tessel/
+
 A layered raster image editor for Linux, written in C++20 with Qt 6.
 
 ## Installing
@@ -20,6 +30,8 @@ README covers it.
 
 ## What is in this release
 
+Everything below is new, since this is the first release.
+
 * 19 tools: four selection tools with five combine modes, move selected pixels
   with scaling handles, move selection, paintbrush, pencil, eraser, paint
   bucket, gradient in five shapes, clone stamp, recolor, colour picker, text,
@@ -34,6 +46,12 @@ README covers it.
 * A native layered format (`.tessel`), OpenRaster for exchanging layered images
   with Krita, GIMP and MyPaint, plus PNG, JPEG, BMP, TIFF, WebP, TGA, GIF and
   ICO
+* An interactive Rotate / Zoom gizmo on Ctrl+Shift+Z: drag to move, a corner to
+  scale about the pivot, the arm to turn, with live preview and tiling
+* Selection editing: feather, grow, shrink and border, built on an exact
+  Euclidean distance transform, plus free transform with rotation
+* Palettes that load and save as .gpl or plain hex, a recent colours row, and a
+  screen wide colour picker where the display server allows it
 * Dark and light themes, and icons drawn at runtime rather than loaded from
   files
 

@@ -9,6 +9,7 @@
 #include "core/Blend.h"
 #include "core/Image.h"
 #include "core/Selection.h"
+#include "core/Units.h"
 
 namespace tessel {
 
@@ -39,6 +40,7 @@ private:
 struct DocumentState {
     int width = 0;
     int height = 0;
+    double resolution = units::kDefaultResolution;
     int active = 0;
     struct LayerState {
         Image image;
@@ -69,6 +71,11 @@ public:
     int height() const { return height_; }
     Rect rect() const { return Rect(0, 0, width_, height_); }
     QSize size() const { return QSize(width_, height_); }
+
+    // Pixels per inch. Purely metadata: it never changes a pixel, it only
+    // tells the interface and the file formats how large the image prints.
+    double resolution() const { return resolution_; }
+    void setResolution(double resolution);
 
     // ---------------------------------------------------------- layers
     int layerCount() const { return static_cast<int>(layers_.size()); }
@@ -131,6 +138,7 @@ private:
 
     int width_ = 0;
     int height_ = 0;
+    double resolution_ = units::kDefaultResolution;
     int activeIndex_ = 0;
     int uidCounter_ = 0;
     int layerSerial_ = 1;

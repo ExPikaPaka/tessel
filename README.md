@@ -8,6 +8,12 @@ how big the selection is and what the zoom level is.
 
 ![The Tessel window](docs/screenshots/main-dark.png)
 
+![Painting a stroke and warping it with an effect](docs/screenshots/demo.gif)
+
+| Panels | Rotate and zoom gizmo | Effects |
+| --- | --- | --- |
+| ![Layers panel](docs/screenshots/panel-layers.png) | ![The rotate and zoom gizmo](docs/screenshots/gizmo.png) | ![A gallery of effects](docs/screenshots/effects-gallery.png) |
+
 | Curves | Levels | Effect dialogs |
 | --- | --- | --- |
 | ![Curves](docs/screenshots/dialog-curves.png) | ![Levels](docs/screenshots/dialog-levels.png) | ![Clouds](docs/screenshots/dialog-effect.png) |

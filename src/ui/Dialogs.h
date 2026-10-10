@@ -7,13 +7,13 @@
 
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/Units.h"
 
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
-class QRadioButton;
 class QSlider;
 class QSpinBox;
 class QSlider;
@@ -49,35 +49,63 @@ private:
 };
 
 // Image > Resize Image, and Image > Canvas Size when `withAnchor` is set.
+//
+// The dialog keeps the pixel dimensions and the resolution as its state and
+// derives whatever the chosen unit shows, so switching units only re-labels
+// the same image. Canvas Size gets the unit choice but no resolution field:
+// padding a canvas cannot change how densely it prints.
 class ResizeDialog : public QDialog {
     Q_OBJECT
 
 public:
     ResizeDialog(const QString& title, int currentWidth, int currentHeight,
-                 bool withAnchor, QWidget* parent = nullptr);
+                 double currentResolution, Unit unit, bool withAnchor,
+                 QWidget* parent = nullptr);
 
-    int newWidth() const;
-    int newHeight() const;
+    int newWidth() const { return pixelWidth_; }
+    int newHeight() const { return pixelHeight_; }
+    double newResolution() const { return resolution_; }
     Anchor anchor() const { return anchor_; }
     bool smoothResampling() const;
+    // False when the user cleared "Resample image", in which case the pixel
+    // dimensions must be left exactly as they were.
+    bool resamples() const;
+
+    // Used by the tests to drive the dialog the way a user would.
+    void setUnit(Unit unit);
+    Unit unit() const { return unit_; }
+    void setDisplayedWidth(double value);
+    void setDisplayedHeight(double value);
+    void setResolution(double resolution);
+    void setResample(bool on);
+    double displayedWidth() const;
+    double displayedHeight() const;
+    QString printSizeText() const;
 
 private:
-    void syncFromPercent();
-    void syncFromAbsolute(bool widthLed);
-    void updateLabel();
+    void applyUnitToFields();
+    void refreshFields();
+    void refreshLabels();
+    void commitWidth(bool widthLed);
 
-    QRadioButton* byPercent_ = nullptr;
-    QRadioButton* byAbsolute_ = nullptr;
-    QSpinBox* percent_ = nullptr;
-    QSpinBox* width_ = nullptr;
-    QSpinBox* height_ = nullptr;
+    QComboBox* unitCombo_ = nullptr;
+    QDoubleSpinBox* width_ = nullptr;
+    QDoubleSpinBox* height_ = nullptr;
+    QDoubleSpinBox* resolutionBox_ = nullptr;
     QCheckBox* keepRatio_ = nullptr;
+    QCheckBox* resample_ = nullptr;
     QComboBox* resampling_ = nullptr;
+    QLabel* printSize_ = nullptr;
     QLabel* summary_ = nullptr;
     QToolButton* anchorButtons_[9] = {};
     Anchor anchor_ = Anchor::Center;
+    Unit unit_ = Unit::Pixels;
     int originalWidth_;
     int originalHeight_;
+    double originalResolution_;
+    int pixelWidth_;
+    int pixelHeight_;
+    double resolution_;
     bool updating_ = false;
 };
 
