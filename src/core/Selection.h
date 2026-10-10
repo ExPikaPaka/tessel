@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <QPainterPath>
+#include <QTransform>
 
 #include "core/Image.h"
 
@@ -34,6 +35,15 @@ public:
     void resizeCanvas(int width, int height, bool scaleContent);
     void transform(bool flipH, bool flipV, int turns);
     void translate(int dx, int dy);
+
+    // Edge operations. All of them need something selected to work on, so they
+    // do nothing while the selection is inactive.
+    void feather(double radius);
+    void grow(int pixels);   // negative values erode
+    void border(int pixels);
+    // Resamples the mask through a transform in canvas coordinates, used when
+    // floated pixels are scaled or rotated and the outline has to follow.
+    void transformBy(const QTransform& transform);
 
     // Null when nothing is selected, meaning "no clipping".
     const Mask* clipMask() const { return active_ ? &mask_ : nullptr; }

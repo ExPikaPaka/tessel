@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QTemporaryDir>
+#include <QTransform>
 
 #include "core/Blend.h"
 #include "core/Document.h"
@@ -295,6 +296,123 @@ int main(int argc, char** argv)
         // Translating the last pixel off the canvas clears the selection.
         sel.translate(-100, 0);
         CHECK(!sel.isActive());
+    });
+
+    addTest("selection feather", [] {
+        Selection sel(64, 64);
+        Mask rect(64, 64);
+        for (int y = 20; y < 44; ++y)
+            for (int x = 20; x < 44; ++x)
+                rect.setAt(x, y, 1.0f);
+        sel.setMask(rect);
+        CHECK(sel.clipMask()->at(19, 32) == 0.0f); // a hard edge to begin with
+
+        sel.feather(4.0);
+        const Mask* mask = sel.clipMask();
+        CHECK(mask != nullptr);
+        // The core stays solid and the edge becomes a ramp that straddles it.
+        CHECK(mask->at(32, 32) == 1.0f);
+        CHECK(mask->at(20, 32) > 0.0f && mask->at(20, 32) < 1.0f);
+        CHECK(mask->at(19, 32) > 0.0f && mask->at(19, 32) < 0.5f);
+        CHECK(mask->at(32, 20) > 0.0f && mask->at(32, 20) < 1.0f);
+        // The ramp is as wide as the radius and no wider.
+        CHECK(mask->at(10, 32) == 0.0f);
+        CHECK(mask->at(32, 53) == 0.0f);
+        // Feathering moves weight across the edge without moving the edge.
+        CHECK_NEAR(double(sel.pixelCount()), 24.0 * 24.0, 24.0 * 4.0);
+
+        // Nothing selected means everything, which has no edge to soften.
+        Selection empty(16, 16);
+        empty.feather(3.0);
+        CHECK(!empty.isActive());
+    });
+
+    addTest("selection grow and shrink", [] {
+        Selection sel(80, 80);
+        Mask rect(80, 80);
+        for (int y = 30; y < 50; ++y)
+            for (int x = 30; x < 50; ++x)
+                rect.setAt(x, y, 1.0f);
+        sel.setMask(rect);
+        const size_t area = sel.pixelCount();
+        CHECK(area == 400);
+
+        sel.grow(5);
+        CHECK(sel.pixelCount() > area);
+        Rect bounds = sel.bounds();
+        CHECK(bounds.x == 25 && bounds.y == 25);
+        CHECK(bounds.w == 30 && bounds.h == 30);
+        // Dilation stays round, so the corners are cut rather than square.
+        CHECK(sel.pixelCount() < 900);
+        CHECK(!sel.contains(26, 26));
+        CHECK(sel.contains(26, 40));
+
+        // Eroding by the same amount comes back to roughly where it started.
+        sel.grow(-5);
+        bounds = sel.bounds();
+        CHECK(std::abs(bounds.x - 30) <= 1 && std::abs(bounds.y - 30) <= 1);
+        CHECK(std::abs(bounds.w - 20) <= 2 && std::abs(bounds.h - 20) <= 2);
+        CHECK_NEAR(double(sel.pixelCount()), double(area), 40.0);
+
+        // Shrinking on its own takes area away.
+        sel.setMask(rect);
+        sel.grow(-4);
+        CHECK(sel.pixelCount() < area);
+        bounds = sel.bounds();
+        CHECK(bounds.x == 34 && bounds.w == 12);
+
+        // Eroding everything away leaves nothing selected.
+        sel.setMask(rect);
+        sel.grow(-40);
+        CHECK(!sel.isActive());
+    });
+
+    addTest("selection border", [] {
+        Selection sel(60, 60);
+        Mask rect(60, 60);
+        for (int y = 10; y < 40; ++y)
+            for (int x = 10; x < 40; ++x)
+                rect.setAt(x, y, 1.0f);
+        sel.setMask(rect);
+        const Rect before = sel.bounds();
+        const size_t area = sel.pixelCount();
+
+        sel.border(3);
+        const Rect after = sel.bounds();
+        // The band lies inside the old edge, so the bounds do not move.
+        CHECK(after.x == before.x && after.y == before.y);
+        CHECK(after.w == before.w && after.h == before.h);
+        // It is a ring: the rim is in and the middle is not.
+        CHECK(sel.contains(10, 25) && sel.contains(39, 25));
+        CHECK(sel.contains(25, 10) && sel.contains(25, 39));
+        CHECK(sel.contains(12, 25) && !sel.contains(13, 25));
+        CHECK(!sel.contains(25, 25));
+        CHECK(sel.pixelCount() == area - 24 * 24);
+    });
+
+    addTest("selection follows a transform", [] {
+        Selection sel(41, 41);
+        Mask rect(41, 41);
+        for (int y = 10; y < 20; ++y)
+            for (int x = 4; x < 8; ++x)
+                rect.setAt(x, y, 1.0f);
+        sel.setMask(rect);
+
+        sel.transformBy(QTransform::fromTranslate(3, 0));
+        Rect bounds = sel.bounds();
+        CHECK(bounds.x == 7 && bounds.y == 10);
+        CHECK(bounds.w == 4 && bounds.h == 10);
+        CHECK(sel.pixelCount() == 40);
+
+        // A quarter turn about the canvas centre swaps the extents.
+        QTransform turn;
+        turn.translate(20.5, 20.5);
+        turn.rotate(90.0);
+        turn.translate(-20.5, -20.5);
+        sel.transformBy(turn);
+        bounds = sel.bounds();
+        CHECK(bounds.w == 10 && bounds.h == 4);
+        CHECK_NEAR(double(sel.pixelCount()), 40.0, 6.0);
     });
 
     // ------------------------------------------------------------ document

@@ -236,6 +236,34 @@ void MainWindow::createActions()
                  updateEverything();
              }
          });
+    auto selectionOp = [this](SelectionOpDialog::Op op) {
+        CanvasView* view = currentView();
+        if (!view || !view->document()->selection().isActive())
+            return;
+        view->commitPendingTool();
+        SelectionOpDialog dialog(op, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        SelectionOpDialog::applyDirect(op, *view->document(), *view->history(),
+                                       dialog.amount());
+        view->refresh();
+        updateEverything();
+    };
+    make(QStringLiteral("feather"), QStringLiteral("&Feather..."),
+         QStringLiteral("select-ellipse"), QKeySequence(QStringLiteral("Ctrl+Alt+F")),
+         [selectionOp] { selectionOp(SelectionOpDialog::Op::Feather); });
+    make(QStringLiteral("grow"), QStringLiteral("&Grow..."),
+         QStringLiteral("select-all"), QKeySequence(),
+         [selectionOp] { selectionOp(SelectionOpDialog::Op::Grow); });
+    make(QStringLiteral("shrink"), QStringLiteral("S&hrink..."),
+         QStringLiteral("deselect"), QKeySequence(),
+         [selectionOp] { selectionOp(SelectionOpDialog::Op::Shrink); });
+    make(QStringLiteral("border"), QStringLiteral("&Border..."),
+         QStringLiteral("select-rect"), QKeySequence(),
+         [selectionOp] { selectionOp(SelectionOpDialog::Op::Border); });
+    make(QStringLiteral("freetransform"), QStringLiteral("Free &Transform"),
+         QStringLiteral("move-selected"), QKeySequence(QStringLiteral("Ctrl+T")),
+         [this] { chooseTool(QStringLiteral("move-selected")); });
     make(QStringLiteral("erase"), QStringLiteral("&Erase Selection"), QStringLiteral("delete"),
          QKeySequence::Delete, [this] { eraseSelection(); });
     make(QStringLiteral("fill"), QStringLiteral("&Fill Selection"), QStringLiteral("bucket"),
@@ -491,6 +519,14 @@ void MainWindow::createMenus()
     add(edit, QStringLiteral("invertselection"));
     add(edit, QStringLiteral("copyselection"));
     add(edit, QStringLiteral("pasteselection"));
+    QMenu* selectionMenu = edit->addMenu(QStringLiteral("Se&lection"));
+    add(selectionMenu, QStringLiteral("feather"));
+    selectionMenu->addSeparator();
+    add(selectionMenu, QStringLiteral("grow"));
+    add(selectionMenu, QStringLiteral("shrink"));
+    add(selectionMenu, QStringLiteral("border"));
+    selectionMenu->addSeparator();
+    add(selectionMenu, QStringLiteral("freetransform"));
     edit->addSeparator();
     add(edit, QStringLiteral("erase"));
     add(edit, QStringLiteral("fill"));
@@ -1236,6 +1272,11 @@ void MainWindow::updateActionStates()
                           : QStringLiteral("&Redo"));
     }
     enable(QStringLiteral("crop"), hasSelection);
+    for (const QString& key : {QStringLiteral("feather"), QStringLiteral("grow"),
+                               QStringLiteral("shrink"), QStringLiteral("border")}) {
+        enable(key, hasSelection);
+    }
+    enable(QStringLiteral("freetransform"), hasDoc);
     enable(QStringLiteral("zoomselection"), hasSelection);
     enable(QStringLiteral("deletelayer"), manyLayers);
     enable(QStringLiteral("mergedown"), manyLayers && doc->activeIndex() > 0);

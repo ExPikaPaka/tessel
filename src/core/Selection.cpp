@@ -248,6 +248,34 @@ void Selection::translate(int dx, int dy)
     setMask(std::move(out));
 }
 
+void Selection::feather(double radius)
+{
+    if (!active_ || radius <= 0.0)
+        return;
+    setMask(ops::featherMask(mask_, radius));
+}
+
+void Selection::grow(int pixels)
+{
+    if (!active_ || pixels == 0)
+        return;
+    setMask(ops::growMask(mask_, pixels));
+}
+
+void Selection::border(int pixels)
+{
+    if (!active_ || pixels <= 0)
+        return;
+    setMask(ops::borderMask(mask_, pixels));
+}
+
+void Selection::transformBy(const QTransform& transform)
+{
+    if (!active_ || transform.isIdentity() || !transform.isInvertible())
+        return;
+    setMask(ops::transformMask(mask_, transform, w_, h_));
+}
+
 Mask Selection::maskOrFull() const
 {
     if (active_)

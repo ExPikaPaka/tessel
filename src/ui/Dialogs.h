@@ -147,6 +147,27 @@ private:
     bool previewActive_ = false;
 };
 
+// Edit > Selection > Feather / Grow / Shrink / Border. One spin box, because
+// every one of these operations is driven by a single radius in pixels.
+class SelectionOpDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    enum class Op { Feather, Grow, Shrink, Border };
+
+    SelectionOpDialog(Op op, QWidget* parent = nullptr);
+
+    int amount() const;
+
+    // Edits the selection the way accepting the dialog does, as one undo step.
+    static void applyDirect(Op op, Document& doc, History& history, int amount);
+    static QString title(Op op);
+
+private:
+    Op op_;
+    QSpinBox* amount_ = nullptr;
+};
+
 // Asked for before writing a lossy format, with a live size estimate.
 class SaveOptionsDialog : public QDialog {
     Q_OBJECT

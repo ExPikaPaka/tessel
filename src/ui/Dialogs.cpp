@@ -584,6 +584,99 @@ void RotateZoomDialog::done(int result)
 
 // ----------------------------------------------------------------- save options
 
+// ----------------------------------------------------------------- selection ops
+
+namespace {
+
+struct SelectionOpInfo {
+    const char* title;
+    const char* label;
+    const char* hint;
+    const char* icon;
+    int maximum;
+};
+
+SelectionOpInfo selectionOpInfo(SelectionOpDialog::Op op)
+{
+    switch (op) {
+    case SelectionOpDialog::Op::Feather:
+        return {"Feather Selection", "Radius",
+                "Softens the selection edge so edits fade out across the radius.",
+                "select-ellipse", 250};
+    case SelectionOpDialog::Op::Grow:
+        return {"Grow Selection", "Amount",
+                "Pushes the selection edge outwards.", "select-all", 500};
+    case SelectionOpDialog::Op::Shrink:
+        return {"Shrink Selection", "Amount",
+                "Pulls the selection edge inwards.", "deselect", 500};
+    default:
+        return {"Border Selection", "Width",
+                "Replaces the selection with a band along the inside of its edge.",
+                "select-rect", 500};
+    }
+}
+
+} // namespace
+
+SelectionOpDialog::SelectionOpDialog(Op op, QWidget* parent)
+    : QDialog(parent), op_(op)
+{
+    const SelectionOpInfo info = selectionOpInfo(op);
+    setWindowTitle(QString::fromLatin1(info.title));
+    setWindowIcon(icons::get(QString::fromLatin1(info.icon), 22));
+
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
+
+    auto* hint = new QLabel(QString::fromLatin1(info.hint), this);
+    hint->setWordWrap(true);
+    root->addWidget(hint);
+
+    auto* row = new QHBoxLayout;
+    row->addWidget(new QLabel(QString::fromLatin1(info.label), this));
+    amount_ = new QSpinBox(this);
+    amount_->setRange(op == Op::Border ? 1 : 0, info.maximum);
+    amount_->setValue(op == Op::Feather ? 4 : (op == Op::Border ? 4 : 2));
+    amount_->setSuffix(QStringLiteral(" px"));
+    row->addWidget(amount_, 1);
+    root->addLayout(row);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                        this);
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    root->addWidget(buttons);
+
+    amount_->setFocus();
+    setMinimumWidth(320);
+}
+
+int SelectionOpDialog::amount() const
+{
+    return amount_ ? amount_->value() : 0;
+}
+
+QString SelectionOpDialog::title(Op op)
+{
+    return QString::fromLatin1(selectionOpInfo(op).title);
+}
+
+void SelectionOpDialog::applyDirect(Op op, Document& doc, History& history, int amount)
+{
+    if (amount <= 0 || !doc.selection().isActive())
+        return;
+    recordSelectionEdit(doc, history, title(op), [&] {
+        Selection& selection = doc.selection();
+        switch (op) {
+        case Op::Feather: selection.feather(amount); break;
+        case Op::Grow: selection.grow(amount); break;
+        case Op::Shrink: selection.grow(-amount); break;
+        case Op::Border: selection.border(amount); break;
+        }
+    });
+}
+
 SaveOptionsDialog::SaveOptionsDialog(const Image& image, const QString& path,
                                      int quality, QWidget* parent)
     : QDialog(parent), image_(image), path_(path)
