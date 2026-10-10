@@ -30,6 +30,10 @@ struct OraEntry {
     bool visible = true;
     uint8_t opacity = 255;
     BlendMode mode = BlendMode::Normal;
+    // A nested stack becomes a layer group. Its children are listed the way
+    // stack.xml lists them, which is top first.
+    bool group = false;
+    std::vector<OraEntry> children;
 };
 
 QString blendToOra(BlendMode mode)
@@ -116,6 +120,17 @@ Image decodeImageBytes(const QByteArray& data, const char* format = nullptr)
     return fromQImage(image);
 }
 
+void readOraCommon(const QXmlStreamAttributes& attrs, OraEntry& entry)
+{
+    entry.name = attrs.value(QLatin1String("name")).toString();
+    entry.visible = attrs.value(QLatin1String("visibility")) != QLatin1String("hidden");
+    const double opacity = attrs.hasAttribute(QLatin1String("opacity"))
+        ? attrs.value(QLatin1String("opacity")).toDouble()
+        : 1.0;
+    entry.opacity = static_cast<uint8_t>(std::clamp(int(std::lround(opacity * 255.0)), 0, 255));
+    entry.mode = blendFromOra(attrs.value(QLatin1String("composite-op")).toString());
+}
+
 void collectOraLayers(QXmlStreamReader& xml, std::vector<OraEntry>& out, int ox,
                       int oy, int depth)
 {
@@ -129,8 +144,19 @@ void collectOraLayers(QXmlStreamReader& xml, std::vector<OraEntry>& out, int ox,
         const int x = ox + static_cast<int>(attrs.value(QLatin1String("x")).toDouble());
         const int y = oy + static_cast<int>(attrs.value(QLatin1String("y")).toDouble());
         if (xml.name() == QLatin1String("stack")) {
+            OraEntry entry;
+            entry.group = true;
+            readOraCommon(attrs, entry);
+            if (entry.name.isEmpty())
+                entry.name = QStringLiteral("Group");
+            // A stack nested past the limit is folded into its parent rather
+            // than dropped, so no pixels are lost to a pathological file.
             if (depth < 8)
+                collectOraLayers(xml, entry.children, x, y, depth + 1);
+            else
                 collectOraLayers(xml, out, x, y, depth + 1);
+            if (!entry.children.empty())
+                out.push_back(std::move(entry));
             continue;
         }
         if (xml.name() != QLatin1String("layer"))
@@ -139,19 +165,23 @@ void collectOraLayers(QXmlStreamReader& xml, std::vector<OraEntry>& out, int ox,
         entry.src = attrs.value(QLatin1String("src")).toString();
         if (entry.src.isEmpty())
             continue;
-        entry.name = attrs.value(QLatin1String("name")).toString();
+        readOraCommon(attrs, entry);
         if (entry.name.isEmpty())
             entry.name = QStringLiteral("Layer");
         entry.x = x;
         entry.y = y;
-        entry.visible = attrs.value(QLatin1String("visibility")) != QLatin1String("hidden");
-        const double opacity = attrs.hasAttribute(QLatin1String("opacity"))
-            ? attrs.value(QLatin1String("opacity")).toDouble()
-            : 1.0;
-        entry.opacity = static_cast<uint8_t>(std::clamp(int(std::lround(opacity * 255.0)), 0, 255));
-        entry.mode = blendFromOra(attrs.value(QLatin1String("composite-op")).toString());
         out.push_back(entry);
     }
+}
+
+// Counts the layers a stack holds, groups aside, so a file with nothing to
+// show can still be reported as damaged.
+size_t countOraLayers(const std::vector<OraEntry>& entries)
+{
+    size_t total = 0;
+    for (const OraEntry& entry : entries)
+        total += entry.group ? countOraLayers(entry.children) : 1;
+    return total;
 }
 
 std::unique_ptr<Document> readFlat(const QString& path, QString* error)
@@ -214,6 +244,52 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
     return doc;
 }
 
+// Builds the layer tree held by a document.json layers array. A group carries
+// a "children" array instead of a "src", and a mask is a small object beside
+// the pixels, so a manifest written before either existed still reads.
+void readTesselLayers(Document& doc, Layer* parent, const QJsonArray& array,
+                      ZipReader& zip, int depth)
+{
+    for (const QJsonValue& value : array) {
+        const QJsonObject entry = value.toObject();
+        const QString name =
+            entry.value(QStringLiteral("name")).toString(QStringLiteral("Layer"));
+        Layer* added = nullptr;
+        if (entry.value(QStringLiteral("group")).toBool(false)) {
+            added = doc.addChild(parent, Layer::makeGroup(name));
+            if (added && depth < 16) {
+                readTesselLayers(doc, added, entry.value(QStringLiteral("children")).toArray(),
+                                 zip, depth + 1);
+            }
+        } else {
+            Image pixels = decodeImageBytes(
+                zip.read(entry.value(QStringLiteral("src")).toString()), "PNG");
+            if (pixels.isNull())
+                pixels = Image(doc.width(), doc.height());
+            added = doc.addChild(parent,
+                                 std::make_unique<Layer>(std::move(pixels), name));
+        }
+        if (!added)
+            continue;
+        added->visible = entry.value(QStringLiteral("visible")).toBool(true);
+        added->opacity = static_cast<uint8_t>(
+            std::clamp(entry.value(QStringLiteral("opacity")).toInt(255), 0, 255));
+        added->mode = blendModeFromName(
+            entry.value(QStringLiteral("blendMode")).toString());
+        added->expanded = entry.value(QStringLiteral("expanded")).toBool(true);
+        const QJsonObject maskEntry = entry.value(QStringLiteral("mask")).toObject();
+        if (maskEntry.isEmpty())
+            continue;
+        Image maskPixels = decodeImageBytes(
+            zip.read(maskEntry.value(QStringLiteral("src")).toString()), "PNG");
+        if (maskPixels.isNull())
+            continue;
+        doc.setMask(added, std::move(maskPixels),
+                    maskEntry.value(QStringLiteral("enabled")).toBool(true));
+        added->setMaskSelected(maskEntry.value(QStringLiteral("selected")).toBool(false));
+    }
+}
+
 std::unique_ptr<Document> readTessel(const QString& path, QString* error)
 {
     ZipReader zip(path);
@@ -244,28 +320,7 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
     doc->setResolution(units::sanitize(
         root.value(QStringLiteral("resolution")).toDouble(units::kDefaultResolution)));
     doc->takeLayer(0); // drop the placeholder background
-    int index = 0;
-    for (const QJsonValue& value : layerArray) {
-        const QJsonObject entry = value.toObject();
-        Image pixels = decodeImageBytes(
-            zip.read(entry.value(QStringLiteral("src")).toString()), "PNG");
-        if (pixels.isNull())
-            pixels = Image(width, height);
-        if (pixels.width() != width || pixels.height() != height) {
-            Image sized(width, height);
-            sized.blit(pixels, 0, 0);
-            pixels = std::move(sized);
-        }
-        auto layer = std::make_unique<Layer>(
-            std::move(pixels),
-            entry.value(QStringLiteral("name")).toString(QStringLiteral("Layer")));
-        layer->visible = entry.value(QStringLiteral("visible")).toBool(true);
-        layer->opacity = static_cast<uint8_t>(
-            std::clamp(entry.value(QStringLiteral("opacity")).toInt(255), 0, 255));
-        layer->mode = blendModeFromName(
-            entry.value(QStringLiteral("blendMode")).toString());
-        doc->addLayer(std::move(layer), index++);
-    }
+    readTesselLayers(*doc, doc->rootGroup(), layerArray, zip, 0);
     if (doc->layerCount() == 0) {
         if (error)
             *error = QStringLiteral("Damaged Tessel image: no layers could be read.");
@@ -291,6 +346,32 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
         }
     }
     return doc;
+}
+
+void buildOraLayers(Document& doc, Layer* parent, const std::vector<OraEntry>& entries,
+                    ZipReader& zip)
+{
+    // stack.xml lists layers top first; Tessel stores them bottom first.
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+        Layer* added = nullptr;
+        if (it->group) {
+            added = doc.addChild(parent, Layer::makeGroup(it->name));
+            if (added)
+                buildOraLayers(doc, added, it->children, zip);
+        } else {
+            Image tile = decodeImageBytes(zip.read(it->src), "PNG");
+            Image pixels(doc.width(), doc.height());
+            if (!tile.isNull())
+                pixels.blit(tile, it->x, it->y);
+            added = doc.addChild(parent,
+                                 std::make_unique<Layer>(std::move(pixels), it->name));
+        }
+        if (!added)
+            continue;
+        added->visible = it->visible;
+        added->opacity = it->opacity;
+        added->mode = it->mode;
+    }
 }
 
 std::unique_ptr<Document> readOra(const QString& path, QString* error)
@@ -329,7 +410,7 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
             collectOraLayers(xml, entries, 0, 0, 0);
         }
     }
-    if (width <= 0 || height <= 0 || entries.empty()) {
+    if (width <= 0 || height <= 0 || countOraLayers(entries) == 0) {
         if (error)
             *error = QStringLiteral("Damaged OpenRaster image: no layers found.");
         return nullptr;
@@ -337,19 +418,7 @@ std::unique_ptr<Document> readOra(const QString& path, QString* error)
     auto doc = std::make_unique<Document>(width, height);
     doc->setResolution(resolution);
     doc->takeLayer(0); // drop the placeholder background
-    // stack.xml lists layers top first; Tessel stores them bottom first.
-    int index = 0;
-    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
-        Image tile = decodeImageBytes(zip.read(it->src), "PNG");
-        Image pixels(width, height);
-        if (!tile.isNull())
-            pixels.blit(tile, it->x, it->y);
-        auto layer = std::make_unique<Layer>(std::move(pixels), it->name);
-        layer->visible = it->visible;
-        layer->opacity = it->opacity;
-        layer->mode = it->mode;
-        doc->addLayer(std::move(layer), index++);
-    }
+    buildOraLayers(*doc, doc->rootGroup(), entries, zip);
     doc->setActiveIndex(doc->layerCount() - 1);
     return doc;
 }
@@ -417,6 +486,44 @@ bool writeFlat(const Image& image, double resolution, const QString& path,
     return true;
 }
 
+// Mirrors readTesselLayers: one JSON object per layer, nested for groups, with
+// the pixels and any mask written beside it as PNG members of the zip.
+QJsonArray writeTesselLayers(ZipWriter& zip, const Layer* parent, int& serial)
+{
+    QJsonArray array;
+    for (int i = 0; i < parent->childCount(); ++i) {
+        const Layer* layer = parent->childAt(i);
+        const int number = serial++;
+        QJsonObject entry;
+        entry[QStringLiteral("name")] = layer->name;
+        entry[QStringLiteral("visible")] = layer->visible;
+        entry[QStringLiteral("opacity")] = int(layer->opacity);
+        entry[QStringLiteral("blendMode")] = blendModeName(layer->mode);
+        if (layer->isGroup()) {
+            entry[QStringLiteral("group")] = true;
+            entry[QStringLiteral("expanded")] = layer->expanded;
+            entry[QStringLiteral("children")] = writeTesselLayers(zip, layer, serial);
+        } else {
+            const QString src = QStringLiteral("layers/layer%1.png")
+                                    .arg(number, 3, 10, QLatin1Char('0'));
+            entry[QStringLiteral("src")] = src;
+            zip.add(src, encodePng(layer->image));
+        }
+        if (layer->hasMask()) {
+            const QString src = QStringLiteral("layers/mask%1.png")
+                                    .arg(number, 3, 10, QLatin1Char('0'));
+            QJsonObject mask;
+            mask[QStringLiteral("src")] = src;
+            mask[QStringLiteral("enabled")] = layer->maskEnabled();
+            mask[QStringLiteral("selected")] = layer->maskSelected();
+            entry[QStringLiteral("mask")] = mask;
+            zip.add(src, encodePng(*layer->maskImage()));
+        }
+        array.append(entry);
+    }
+    return array;
+}
+
 bool writeTessel(const Document& doc, const QString& path, QString* error)
 {
     const QString temp = path + QStringLiteral(".tesselpart");
@@ -437,21 +544,9 @@ bool writeTessel(const Document& doc, const QString& path, QString* error)
         root[QStringLiteral("height")] = doc.height();
         root[QStringLiteral("resolution")] = doc.resolution();
         root[QStringLiteral("active")] = doc.activeIndex();
-        QJsonArray layerArray;
-        for (int i = 0; i < doc.layerCount(); ++i) {
-            const Layer* layer = doc.layerAt(i);
-            const QString src = QStringLiteral("layers/layer%1.png")
-                                    .arg(i, 3, 10, QLatin1Char('0'));
-            QJsonObject entry;
-            entry[QStringLiteral("name")] = layer->name;
-            entry[QStringLiteral("src")] = src;
-            entry[QStringLiteral("visible")] = layer->visible;
-            entry[QStringLiteral("opacity")] = int(layer->opacity);
-            entry[QStringLiteral("blendMode")] = blendModeName(layer->mode);
-            layerArray.append(entry);
-            zip.add(src, encodePng(layer->image));
-        }
-        root[QStringLiteral("layers")] = layerArray;
+        int serial = 0;
+        root[QStringLiteral("layers")] =
+            writeTesselLayers(zip, doc.rootGroup(), serial);
         zip.add(QStringLiteral("document.json"),
                 QJsonDocument(root).toJson(QJsonDocument::Indented));
         zip.add(QStringLiteral("mergedimage.png"), encodePng(doc.composite()));
@@ -486,6 +581,42 @@ bool writeTessel(const Document& doc, const QString& path, QString* error)
     return true;
 }
 
+// Writes one stack level, top layer first, which is the order OpenRaster
+// expects. Groups become nested stacks. OpenRaster has no notion of a layer
+// mask, so a mask is baked into the pixels that are written; a group that
+// carries one is flattened for the same reason.
+void writeOraStack(QXmlStreamWriter& xml, ZipWriter& zip, const Document& doc,
+                   const Layer* parent, int& serial)
+{
+    for (int i = parent->childCount() - 1; i >= 0; --i) {
+        const Layer* layer = parent->childAt(i);
+        const bool asStack = layer->isGroup()
+            && !(layer->hasMask() && layer->maskEnabled());
+        xml.writeStartElement(asStack ? QStringLiteral("stack")
+                                      : QStringLiteral("layer"));
+        xml.writeAttribute(QStringLiteral("name"), layer->name);
+        if (!asStack) {
+            const QString src = QStringLiteral("data/layer%1.png")
+                                    .arg(serial++, 3, 10, QLatin1Char('0'));
+            xml.writeAttribute(QStringLiteral("src"), src);
+            zip.add(src, encodePng(doc.renderLayer(*layer)));
+        }
+        xml.writeAttribute(QStringLiteral("x"), QStringLiteral("0"));
+        xml.writeAttribute(QStringLiteral("y"), QStringLiteral("0"));
+        xml.writeAttribute(QStringLiteral("opacity"),
+                           QString::number(layer->opacity / 255.0, 'f', 4));
+        xml.writeAttribute(QStringLiteral("visibility"),
+                           layer->visible ? QStringLiteral("visible")
+                                          : QStringLiteral("hidden"));
+        xml.writeAttribute(QStringLiteral("composite-op"), blendToOra(layer->mode));
+        if (asStack) {
+            xml.writeAttribute(QStringLiteral("isolation"), QStringLiteral("isolate"));
+            writeOraStack(xml, zip, doc, layer, serial);
+        }
+        xml.writeEndElement();
+    }
+}
+
 bool writeOra(const Document& doc, const QString& path, QString* error)
 {
     const QString temp = path + QStringLiteral(".orapart");
@@ -512,25 +643,8 @@ bool writeOra(const Document& doc, const QString& path, QString* error)
         xml.writeAttribute(QStringLiteral("xres"), density);
         xml.writeAttribute(QStringLiteral("yres"), density);
         xml.writeStartElement(QStringLiteral("stack"));
-        int index = 0;
-        for (int i = doc.layerCount() - 1; i >= 0; --i) {
-            const Layer* layer = doc.layerAt(i);
-            const QString src = QStringLiteral("data/layer%1.png")
-                                    .arg(index++, 3, 10, QLatin1Char('0'));
-            xml.writeStartElement(QStringLiteral("layer"));
-            xml.writeAttribute(QStringLiteral("name"), layer->name);
-            xml.writeAttribute(QStringLiteral("src"), src);
-            xml.writeAttribute(QStringLiteral("x"), QStringLiteral("0"));
-            xml.writeAttribute(QStringLiteral("y"), QStringLiteral("0"));
-            xml.writeAttribute(QStringLiteral("opacity"),
-                               QString::number(layer->opacity / 255.0, 'f', 4));
-            xml.writeAttribute(QStringLiteral("visibility"),
-                               layer->visible ? QStringLiteral("visible")
-                                              : QStringLiteral("hidden"));
-            xml.writeAttribute(QStringLiteral("composite-op"), blendToOra(layer->mode));
-            xml.writeEndElement();
-            zip.add(src, encodePng(layer->image));
-        }
+        int serial = 0;
+        writeOraStack(xml, zip, doc, doc.rootGroup(), serial);
         xml.writeEndElement(); // stack
         xml.writeEndElement(); // image
         xml.writeEndDocument();
