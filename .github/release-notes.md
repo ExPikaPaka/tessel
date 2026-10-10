@@ -39,6 +39,6 @@ README covers it.
 
 ## Verification
 
-Every published build runs 857 headless core checks and 322 interface checks
-before the release is created. The screenshots attached here come from that
-same run.
+Every published build runs the full headless core and interface test suites
+before the release is created. Screenshots of the interface are in the
+repository under docs/screenshots.

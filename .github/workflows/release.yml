@@ -27,16 +27,13 @@ jobs:
             qt6-base-dev libgl1-mesa-dev
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTESSEL_BUILD_SCREENSHOT_TOOL=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
-
-      - name: Screenshots
-        run: ./build/tessel_screenshots screenshots
 
       - name: Package
         run: |
@@ -61,4 +58,4 @@ jobs:
             --title "Tessel $tag" \
             --notes-file .github/release-notes.md \
             --verify-tag \
-            tessel-*.tar.gz tessel-*.tar.gz.sha256 screenshots/*.png
+            tessel-*.tar.gz tessel-*.tar.gz.sha256
