@@ -14,8 +14,10 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
+class QListWidget;
 class QSlider;
 class QSpinBox;
+class QVBoxLayout;
 class QSlider;
 class QToolButton;
 
@@ -110,6 +112,15 @@ private:
 };
 
 // Layers > Layer Properties, with a live preview of the changes.
+//
+// It also holds the layer's non destructive effect stack, which is why that
+// list lives here rather than in a dock of its own: a stack belongs to one
+// layer exactly as its opacity, blend mode and mask do, it is read beside
+// them, and the window has no room to spare for a panel that would be empty
+// for most layers. The fields above the list are previewed and taken back by
+// Cancel, as they always were; the list is a set of actions rather than a
+// field, so each of them applies at once and is recorded as its own undo step,
+// the way the buttons of the Layers panel are.
 class LayerPropertiesDialog : public QDialog {
     Q_OBJECT
 
@@ -126,6 +137,18 @@ protected:
 
 private:
     void apply();
+    // Pushes the undo step for the fields, and takes what they hold now as the
+    // state Cancel would go back to.
+    void commitProperties();
+    void buildEffectsSection(QVBoxLayout* root);
+    void refreshEffects();
+    // Which of the list's buttons apply to the row that is selected.
+    void updateEffectButtons();
+    // Replaces the layer's stack and records the change under `name`.
+    void recordEffects(const QString& name, const QString& icon,
+                       std::vector<LayerEffect> after);
+    void editEffectEntry(int index);
+    int selectedEffect() const;
 
     Document* doc_;
     History* history_;
@@ -134,7 +157,14 @@ private:
     QComboBox* blend_ = nullptr;
     QSlider* opacity_ = nullptr;
     QSpinBox* opacityValue_ = nullptr;
+    QListWidget* effects_ = nullptr;
+    QToolButton* editEffect_ = nullptr;
+    QToolButton* upEffect_ = nullptr;
+    QToolButton* downEffect_ = nullptr;
+    QToolButton* removeEffect_ = nullptr;
+    QToolButton* flattenEffects_ = nullptr;
     std::function<void()> repaint_;
+    bool updatingEffects_ = false;
 
     QString originalName_;
     bool originalVisible_ = true;

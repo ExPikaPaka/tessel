@@ -6,12 +6,82 @@
 
 #include "core/ImageOps.h"
 #include "core/Units.h"
+#include "effects/Effect.h"
 
 namespace tessel {
 
 namespace {
 
 constexpr Rgba kReveal(255, 255, 255, 255);
+
+// Folds one more term into a cache key. Not commutative, so two layers that
+// swap places do not hash the same.
+inline uint64_t mixKey(uint64_t key, uint64_t term)
+{
+    key ^= term + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2);
+    return key * 1099511628211ull;
+}
+
+uint64_t effectKey(const LayerEffect& entry)
+{
+    uint64_t key = mixKey(1469598103934665603ull,
+                          uint64_t(qHash(entry.effectId)));
+    return mixKey(key, entry.values.hash());
+}
+
+// Mixes the result an adjustment layer computed back into the backdrop it was
+// computed from.
+//
+// Unlike an ordinary layer an adjustment adds no coverage of its own, so the
+// mix is a plain interpolation towards the adjusted pixels rather than a
+// composite: the backdrop keeps its own shape, and the mask and the opacity
+// only decide how far the change reaches. A blend mode other than Normal is
+// applied between the backdrop and the result, which is what makes a
+// Multiply adjustment layer darken rather than replace.
+void mixAdjustment(Image& backdrop, const Image& result, const Image* mask,
+                   uint8_t opacity, BlendMode mode)
+{
+    if (result.isNull() || opacity == 0)
+        return;
+    const float layerScale = opacity * (1.0f / 255.0f);
+    const int height = std::min(backdrop.height(), result.height());
+    const int width = std::min(backdrop.width(), result.width());
+    for (int y = 0; y < height; ++y) {
+        Rgba* dst = backdrop.row(y);
+        const Rgba* src = result.row(y);
+        const Rgba* maskRow = (mask && y < mask->height()) ? mask->row(y) : nullptr;
+        for (int x = 0; x < width; ++x) {
+            float k = layerScale;
+            if (mask) {
+                const uint8_t value = (maskRow && x < mask->width())
+                    ? Layer::maskValue(maskRow[x])
+                    : 0;
+                k *= value * (1.0f / 255.0f);
+            }
+            if (k <= 0.0f)
+                continue;
+            const Rgba back = dst[x];
+            Rgba front = src[x];
+            if (mode != BlendMode::Normal) {
+                front.r = toByte(blendChannel(mode, back.r * (1.0f / 255.0f),
+                                              front.r * (1.0f / 255.0f)));
+                front.g = toByte(blendChannel(mode, back.g * (1.0f / 255.0f),
+                                              front.g * (1.0f / 255.0f)));
+                front.b = toByte(blendChannel(mode, back.b * (1.0f / 255.0f),
+                                              front.b * (1.0f / 255.0f)));
+            }
+            if (k >= 1.0f) {
+                dst[x] = front;
+                continue;
+            }
+            const auto lerp = [k](uint8_t from, uint8_t to) {
+                return uint8_t(from + (to - from) * k + 0.5f);
+            };
+            dst[x] = Rgba(lerp(back.r, front.r), lerp(back.g, front.g),
+                          lerp(back.b, front.b), lerp(back.a, front.a));
+        }
+    }
+}
 
 // Scales an image's alpha by a grey mask, which is how a layer mask hides and
 // reveals what the layer draws. Anything the mask does not cover is hidden,
@@ -50,6 +120,31 @@ std::unique_ptr<Layer> Layer::makeGroup(QString groupName)
     return group;
 }
 
+std::unique_ptr<Layer> Layer::makeAdjustment(QString layerName, QString effectId,
+                                             ParamValues values)
+{
+    // No pixels: an adjustment layer is the one entry it carries.
+    auto layer = std::make_unique<Layer>(Image(), std::move(layerName));
+    layer->adjustment_ = true;
+    layer->effects_.push_back({std::move(effectId), std::move(values), true});
+    return layer;
+}
+
+bool Layer::hasActiveEffects() const
+{
+    for (const LayerEffect& entry : effects_) {
+        if (entry.enabled)
+            return true;
+    }
+    return false;
+}
+
+void Layer::dropEffectCache() const
+{
+    fxCache_.clear();
+    fxKeys_.clear();
+}
+
 uint8_t Layer::maskValue(Rgba pixel)
 {
     // Luminance weighted the usual way, scaled by the alpha so that erasing a
@@ -66,6 +161,8 @@ std::unique_ptr<Layer> Layer::clone(const QString& newName) const
     copy->mode = mode;
     copy->expanded = expanded;
     copy->group_ = group_;
+    copy->adjustment_ = adjustment_;
+    copy->effects_ = effects_;
     copy->maskEnabled_ = maskEnabled_;
     copy->maskSelected_ = maskSelected_;
     if (mask_) {
@@ -82,6 +179,10 @@ std::unique_ptr<Layer> Layer::clone(const QString& newName) const
 
 bool Layer::isEmpty() const
 {
+    // An adjustment layer has no pixels but is never nothing: what it does is
+    // the entry it carries.
+    if (adjustment_)
+        return effects_.empty();
     if (group_) {
         for (const auto& child : children_) {
             if (!child->isEmpty())
@@ -321,7 +422,8 @@ QString Document::uniqueLayerName(const QString& base) const
 
 void Document::fitToCanvas(Layer* layer)
 {
-    if (!layer->isGroup() && (layer->width() != width_ || layer->height() != height_)) {
+    if (!layer->isGroup() && !layer->isAdjustment()
+        && (layer->width() != width_ || layer->height() != height_)) {
         Image sized(width_, height_);
         sized.blit(layer->image, 0, 0);
         layer->image = std::move(sized);
@@ -552,12 +654,30 @@ bool Document::mergeLayerDown(int index)
     Layer* parent = upper->parent_;
     Layer* lower = parent->children_[static_cast<size_t>(position - 1)].get();
     Image lowerPixels = renderLayer(*lower);
-    Image upperPixels = renderLayer(*upper);
-    std::vector<CompositeLayer> pair = {
-        {&lowerPixels, lower->opacity, lower->mode, true},
-        {&upperPixels, upper->opacity, upper->mode, true},
-    };
-    Image merged = compositeLayers(pair, width_, height_);
+    Image merged;
+    if (upper->isAdjustment()) {
+        // Merging an adjustment layer down is how it is baked into the one
+        // layer it was sitting on.
+        std::vector<CompositeLayer> single = {
+            {&lowerPixels, lower->opacity, lower->mode, true},
+        };
+        merged = compositeLayers(single, width_, height_);
+        Image adjusted = merged;
+        for (const LayerEffect& entry : upper->effects_) {
+            if (entry.enabled)
+                adjusted = runLayerEffect(entry, adjusted);
+        }
+        mixAdjustment(merged, adjusted,
+                      upper->maskEnabled() ? upper->maskImage() : nullptr,
+                      upper->opacity, upper->mode);
+    } else {
+        Image upperPixels = renderLayer(*upper);
+        std::vector<CompositeLayer> pair = {
+            {&lowerPixels, lower->opacity, lower->mode, true},
+            {&upperPixels, upper->opacity, upper->mode, true},
+        };
+        merged = compositeLayers(pair, width_, height_);
+    }
     // The result is flat pixels, so a group that takes part in a merge
     // collapses into an ordinary layer and keeps the lower layer's name.
     lower->image = std::move(merged);
@@ -569,6 +689,12 @@ bool Document::mergeLayerDown(int index)
     lower->opacity = 255;
     lower->mode = BlendMode::Normal;
     lower->visible = true;
+    // The pixels above already went through the lower layer's own stack, so
+    // its entries are part of them now and must not run a second time.
+    lower->adjustment_ = false;
+    lower->effects_.clear();
+    lower->dropEffectCache();
+    ++lower->revision_;
     const int keep = lower->uid();
     detach(upper);
     activeUid_ = keep;
@@ -585,6 +711,138 @@ void Document::flatten()
     auto layer = std::make_unique<Layer>(std::move(merged), name);
     markStructureChanged();
     addChild(root_.get(), std::move(layer));
+}
+
+// ----------------------------------------------------------------- effects
+
+Layer* Document::addAdjustmentLayer(const QString& effectId, const ParamValues& values,
+                                    const QString& name, int index)
+{
+    auto layer = Layer::makeAdjustment(
+        name.isEmpty() ? uniqueLayerName(QStringLiteral("Adjustment %1")
+                                             .arg(nextLayerSerial()))
+                       : uniqueLayerName(name),
+        effectId, values);
+    return addLayer(std::move(layer), index);
+}
+
+void Document::setLayerEffects(Layer* layer, std::vector<LayerEffect> effects)
+{
+    if (!layer)
+        return;
+    layer->effects_ = std::move(effects);
+    effectsChanged(layer);
+}
+
+void Document::effectsChanged(Layer*)
+{
+    // The cached results are deliberately kept: every one of them carries the
+    // key of the entries it was computed from, so the entries that did not
+    // change are still answered from the cache and only the ones at and above
+    // the change are run again.
+    compositeValid_ = false;
+    modified_ = true;
+}
+
+Image Document::runLayerEffect(const LayerEffect& entry, const Image& source) const
+{
+    Effect* effect = EffectRegistry::instance().byId(entry.effectId);
+    if (!effect || source.isNull())
+        return source;
+    EffectContext context;
+    context.source = &source;
+    context.region = source.rect();
+    // No clip mask and no selection: a stored effect covers the whole layer,
+    // and where it acts is the layer's own mask. The palette colours are left
+    // at the context defaults, because a stored effect has to give the same
+    // answer whatever colours happen to be chosen when the file is opened.
+    context.document = this;
+    return effect->apply(context, entry.values);
+}
+
+const Image* Document::applyEffects(const Layer& layer, const Image& base,
+                                    uint64_t baseKey) const
+{
+    const std::vector<LayerEffect>& list = layer.effects_;
+    if (list.empty())
+        return &base;
+    layer.fxCache_.resize(list.size());
+    layer.fxKeys_.resize(list.size());
+    const Image* input = &base;
+    uint64_t key = baseKey;
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (!list[i].enabled)
+            continue;
+        key = mixKey(key, effectKey(list[i]));
+        Image& cached = layer.fxCache_[i];
+        if (layer.fxKeys_[i] != key || cached.width() != input->width()
+            || cached.height() != input->height()) {
+            cached = runLayerEffect(list[i], *input);
+            layer.fxKeys_[i] = key;
+        }
+        input = &cached;
+    }
+    return input;
+}
+
+uint64_t Document::sourceKey(const Layer& layer) const
+{
+    uint64_t key = mixKey(uint64_t(pixelEpoch_), uint64_t(layer.uid()));
+    if (layer.isGroup()) {
+        for (const auto& child : layer.children_)
+            key = mixKey(key, contributionKey(*child));
+        return key;
+    }
+    key = mixKey(key, uint64_t(layer.revision_));
+    // A preview stands in for the layer's pixels, so the buffer it points at
+    // is part of what the stack above it was computed from.
+    if (previewUid_ >= 0 && previewImage_ && layer.uid() == previewUid_)
+        key = mixKey(key, uint64_t(reinterpret_cast<uintptr_t>(previewImage_)));
+    return key;
+}
+
+uint64_t Document::contributionKey(const Layer& layer) const
+{
+    uint64_t key = sourceKey(layer);
+    key = mixKey(key, uint64_t(layer.visible ? 1 : 0));
+    key = mixKey(key, uint64_t(layer.opacity));
+    key = mixKey(key, uint64_t(layer.mode));
+    for (const LayerEffect& entry : layer.effects_)
+        key = mixKey(key, entry.enabled ? effectKey(entry) : 1ull);
+    if (layer.mask_) {
+        key = mixKey(key, uint64_t(layer.mask_->revision_));
+        key = mixKey(key, uint64_t(layer.maskEnabled_ ? 1 : 0));
+        if (previewUid_ >= 0 && previewImage_ && layer.mask_->uid() == previewUid_)
+            key = mixKey(key, uint64_t(reinterpret_cast<uintptr_t>(previewImage_)));
+    }
+    return key;
+}
+
+bool Document::flattenLayerEffects(Layer* layer)
+{
+    if (!layer || layer->effects_.empty() || layer->isAdjustment())
+        return false;
+    if (!layer->isGroup()) {
+        const Image* result = applyEffects(*layer, layer->image, sourceKey(*layer));
+        if (result && result != &layer->image)
+            layer->image = *result;
+    } else {
+        // A group has no pixels to write into, so baking its stack means
+        // collapsing the children into one ordinary layer.
+        Image merged = renderLayer(*layer);
+        layer->group_ = false;
+        layer->children_.clear();
+        layer->image = std::move(merged);
+        layer->mask_.reset();
+        layer->maskEnabled_ = true;
+        layer->maskSelected_ = false;
+        flatValid_ = false;
+    }
+    layer->effects_.clear();
+    layer->dropEffectCache();
+    ++layer->revision_;
+    invalidate();
+    return true;
 }
 
 // ----------------------------------------------------------------- masks
@@ -625,6 +883,11 @@ bool Document::applyMask(Layer* layer)
 {
     if (!layer || !layer->mask_)
         return false;
+    if (layer->isAdjustment()) {
+        // An adjustment layer has no pixels to bake a mask into, and dropping
+        // the mask would widen what the layer acts on instead of fixing it.
+        return false;
+    }
     if (layer->isGroup()) {
         // A group has no pixels of its own, so baking means flattening the
         // children into one masked layer in the group's place.
@@ -644,26 +907,21 @@ bool Document::applyMask(Layer* layer)
 
 const Image* Document::rasterOf(const Layer& layer, std::deque<Image>& owned) const
 {
+    // An adjustment layer draws nothing of its own: the group that holds it
+    // applies it to what lies below, in flattenChildren.
+    if (layer.isAdjustment())
+        return nullptr;
     const Image* base = nullptr;
     if (layer.isGroup()) {
-        std::deque<Image> children;
-        std::vector<CompositeLayer> entries;
-        entries.reserve(layer.children_.size());
-        for (const auto& child : layer.children_) {
-            if (!child->visible || child->opacity == 0)
-                continue;
-            const Image* raster = rasterOf(*child, children);
-            if (!raster || raster->isNull())
-                continue;
-            entries.push_back({raster, child->opacity, child->mode, true});
-        }
-        owned.push_back(compositeLayers(entries, width_, height_));
+        owned.push_back(flattenChildren(layer));
         base = &owned.back();
     } else {
         base = &layer.image;
         if (previewUid_ >= 0 && previewImage_ && layer.uid() == previewUid_)
             base = previewImage_;
     }
+    if (base && !base->isNull())
+        base = applyEffects(layer, *base, sourceKey(layer));
     if (!base || base->isNull() || !layer.hasMask() || !layer.maskEnabled())
         return base;
     const Image* mask = layer.maskImage();
@@ -683,23 +941,67 @@ Image Document::renderLayer(const Layer& layer) const
     return *raster;
 }
 
-const Image& Document::composite() const
+// Flattens one level of the tree. Without adjustment layers this is the single
+// compositeLayers call it has always been; an adjustment layer splits the level
+// in two, because what it changes is the result of everything below it.
+Image Document::flattenChildren(const Layer& parent, int count) const
 {
-    if (compositeValid_ && composite_.width() == width_
-        && composite_.height() == height_)
-        return composite_;
+    const int total = count < 0 ? parent.childCount()
+                                : std::min(count, parent.childCount());
     std::deque<Image> owned;
     std::vector<CompositeLayer> entries;
-    entries.reserve(root_->children_.size());
-    for (const auto& child : root_->children_) {
+    entries.reserve(parent.children_.size());
+    Image below;
+    bool haveBelow = false;
+    // A running identity of what `below` holds, so an adjustment layer can
+    // tell whether the backdrop it was last computed from has changed.
+    uint64_t belowKey = mixKey(uint64_t(pixelEpoch_), uint64_t(parent.uid()));
+    const auto flush = [&] {
+        std::vector<CompositeLayer> all;
+        all.reserve(entries.size() + 1);
+        if (haveBelow)
+            all.push_back({&below, 255, BlendMode::Normal, true});
+        for (const CompositeLayer& entry : entries)
+            all.push_back(entry);
+        below = compositeLayers(all, width_, height_);
+        haveBelow = true;
+        entries.clear();
+        owned.clear();
+    };
+    for (int i = 0; i < total; ++i) {
+        const Layer* child = parent.childAt(i);
         if (!child->visible || child->opacity == 0)
             continue;
+        if (child->isAdjustment()) {
+            flush();
+            // The backdrop key goes in as it stands: what the effect is run
+            // over is everything below, so dragging this layer's own opacity
+            // or painting its mask must not throw the cached result away.
+            if (const Image* adjusted = applyEffects(*child, below, belowKey)) {
+                mixAdjustment(below, *adjusted,
+                              child->maskEnabled() ? child->maskImage() : nullptr,
+                              child->opacity, child->mode);
+            }
+            belowKey = mixKey(belowKey, contributionKey(*child));
+            continue;
+        }
+        belowKey = mixKey(belowKey, contributionKey(*child));
         const Image* raster = rasterOf(*child, owned);
         if (!raster || raster->isNull())
             continue;
         entries.push_back({raster, child->opacity, child->mode, true});
     }
-    composite_ = compositeLayers(entries, width_, height_);
+    if (!entries.empty() || !haveBelow)
+        flush();
+    return below;
+}
+
+const Image& Document::composite() const
+{
+    if (compositeValid_ && composite_.width() == width_
+        && composite_.height() == height_)
+        return composite_;
+    composite_ = flattenChildren(*root_);
     compositeValid_ = previewUid_ < 0;
     return composite_;
 }
@@ -723,13 +1025,24 @@ Image Document::thumbnail(int maxSize) const
 
 void Document::invalidate()
 {
+    // Nothing is said about which pixels moved, so every cached effect result
+    // has to be treated as out of date.
+    ++pixelEpoch_;
     compositeValid_ = false;
     modified_ = true;
 }
 
-void Document::invalidateLayer(Layer*)
+void Document::invalidateLayer(Layer* layer)
 {
-    invalidate();
+    if (!layer) {
+        invalidate();
+        return;
+    }
+    // Only this layer's pixels changed, so the stacks of the other layers keep
+    // the results they already have.
+    ++layer->revision_;
+    compositeValid_ = false;
+    modified_ = true;
 }
 
 void Document::setPreview(int layerUid, const Image* image)
@@ -749,7 +1062,9 @@ void Document::clearPreview()
 void Document::forEachRaster(const std::function<void(Image&, bool)>& action)
 {
     std::function<void(Layer*)> walk = [&](Layer* node) {
-        if (node != root_.get() && !node->isGroup())
+        // Neither a group nor an adjustment layer owns pixels of its own, so
+        // neither has anything for the canvas operations to resize.
+        if (node != root_.get() && !node->isGroup() && !node->isAdjustment())
             action(node->image, false);
         if (node->mask_)
             action(node->mask_->image, true);
@@ -841,6 +1156,8 @@ void Document::snapshotLayer(const Layer& layer, DocumentState::LayerState& out)
     out.mode = layer.mode;
     out.uid = layer.uid();
     out.group = layer.isGroup();
+    out.adjustment = layer.isAdjustment();
+    out.effects = layer.effects();
     out.expanded = layer.expanded;
     out.hasMask = layer.hasMask();
     out.maskEnabled = layer.maskEnabled();
@@ -879,6 +1196,8 @@ std::unique_ptr<Layer> Document::restoreLayer(const DocumentState::LayerState& s
     layer->mode = state.mode;
     layer->expanded = state.expanded;
     layer->group_ = state.group;
+    layer->adjustment_ = state.adjustment;
+    layer->effects_ = state.effects;
     layer->setUid(state.uid);
     uidCounter_ = std::max(uidCounter_, state.uid);
     if (state.hasMask) {

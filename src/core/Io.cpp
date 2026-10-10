@@ -320,6 +320,40 @@ std::optional<TextItem> textItemFromJson(const QJsonObject& entry, int layerUid)
     return item;
 }
 
+// A layer's stored effects: its non destructive stack, or the single entry an
+// adjustment layer is. One object per entry, with the parameters in the tagged
+// form ParamValues writes, so an effect this build does not have still round
+// trips. A manifest written before stacks existed simply has no key.
+QJsonArray effectsToJson(const std::vector<LayerEffect>& effects)
+{
+    QJsonArray array;
+    for (const LayerEffect& entry : effects) {
+        QJsonObject object;
+        object[QStringLiteral("id")] = entry.effectId;
+        object[QStringLiteral("enabled")] = entry.enabled;
+        object[QStringLiteral("params")] = entry.values.toJson();
+        array.append(object);
+    }
+    return array;
+}
+
+std::vector<LayerEffect> effectsFromJson(const QJsonArray& array)
+{
+    std::vector<LayerEffect> out;
+    for (const QJsonValue& value : array) {
+        const QJsonObject object = value.toObject();
+        LayerEffect entry;
+        entry.effectId = object.value(QStringLiteral("id")).toString();
+        if (entry.effectId.isEmpty())
+            continue;
+        entry.enabled = object.value(QStringLiteral("enabled")).toBool(true);
+        entry.values =
+            ParamValues::fromJson(object.value(QStringLiteral("params")).toObject());
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
 // Builds the layer tree held by a document.json layers array. A group carries
 // a "children" array instead of a "src", and a mask is a small object beside
 // the pixels, so a manifest written before either existed still reads.
@@ -330,6 +364,8 @@ void readTesselLayers(Document& doc, Layer* parent, const QJsonArray& array,
         const QJsonObject entry = value.toObject();
         const QString name =
             entry.value(QStringLiteral("name")).toString(QStringLiteral("Layer"));
+        const std::vector<LayerEffect> effects =
+            effectsFromJson(entry.value(QStringLiteral("effects")).toArray());
         Layer* added = nullptr;
         if (entry.value(QStringLiteral("group")).toBool(false)) {
             added = doc.addChild(parent, Layer::makeGroup(name));
@@ -337,6 +373,16 @@ void readTesselLayers(Document& doc, Layer* parent, const QJsonArray& array,
                 readTesselLayers(doc, added, entry.value(QStringLiteral("children")).toArray(),
                                  zip, depth + 1);
             }
+        } else if (entry.value(QStringLiteral("adjustment")).toBool(false)) {
+            // An adjustment layer whose entry could not be read is nothing at
+            // all, so it is left out rather than added as an empty layer.
+            if (effects.empty())
+                continue;
+            added = doc.addChild(parent,
+                                 Layer::makeAdjustment(name, effects.front().effectId,
+                                                       effects.front().values));
+            if (added)
+                added->effects().front().enabled = effects.front().enabled;
         } else {
             Image pixels = decodeImageBytes(
                 zip.read(entry.value(QStringLiteral("src")).toString()), "PNG");
@@ -353,6 +399,8 @@ void readTesselLayers(Document& doc, Layer* parent, const QJsonArray& array,
         added->mode = blendModeFromName(
             entry.value(QStringLiteral("blendMode")).toString());
         added->expanded = entry.value(QStringLiteral("expanded")).toBool(true);
+        if (!added->isAdjustment())
+            doc.setLayerEffects(added, effects);
         // Editable text rides with the layer it was written on.
         for (const QJsonValue& itemValue :
              entry.value(QStringLiteral("textItems")).toArray()) {
@@ -583,11 +631,16 @@ QJsonArray writeTesselLayers(ZipWriter& zip, const Document& doc,
         entry[QStringLiteral("visible")] = layer->visible;
         entry[QStringLiteral("opacity")] = int(layer->opacity);
         entry[QStringLiteral("blendMode")] = blendModeName(layer->mode);
+        if (!layer->effects().empty())
+            entry[QStringLiteral("effects")] = effectsToJson(layer->effects());
         if (layer->isGroup()) {
             entry[QStringLiteral("group")] = true;
             entry[QStringLiteral("expanded")] = layer->expanded;
             entry[QStringLiteral("children")] =
                 writeTesselLayers(zip, doc, layer, serial);
+        } else if (layer->isAdjustment()) {
+            // No "src": the entry written above is all an adjustment layer is.
+            entry[QStringLiteral("adjustment")] = true;
         } else {
             const QString src = QStringLiteral("layers/layer%1.png")
                                     .arg(number, 3, 10, QLatin1Char('0'));
@@ -685,14 +738,33 @@ bool writeTessel(const Document& doc, const QString& path, QString* error,
 // Writes one stack level, top layer first, which is the order OpenRaster
 // expects. Groups become nested stacks. OpenRaster has no notion of a layer
 // mask, so a mask is baked into the pixels that are written; a group that
-// carries one is flattened for the same reason.
+// carries one is flattened for the same reason, and so is one that carries an
+// effect stack.
+//
+// OpenRaster has no adjustment layers either, and an adjustment layer is about
+// the layers below it rather than about itself. So everything below the
+// topmost one on this level is written as the single layer it composites to,
+// with the adjustments already in those pixels, and the layers above it are
+// written one by one as usual. The result reads back looking the same; what is
+// lost is only the separation of the layers that were folded together.
 void writeOraStack(QXmlStreamWriter& xml, ZipWriter& zip, const Document& doc,
                    const Layer* parent, int& serial)
 {
-    for (int i = parent->childCount() - 1; i >= 0; --i) {
+    int baked = 0; // how many children from the bottom are folded into one
+    for (int i = 0; i < parent->childCount(); ++i) {
+        const Layer* child = parent->childAt(i);
+        if (child->isAdjustment() && child->visible && child->opacity > 0)
+            baked = i + 1;
+    }
+    for (int i = parent->childCount() - 1; i >= baked; --i) {
         const Layer* layer = parent->childAt(i);
+        // A hidden adjustment layer has nothing to contribute and no pixels to
+        // write, so it is left out of the file entirely.
+        if (layer->isAdjustment())
+            continue;
         const bool asStack = layer->isGroup()
-            && !(layer->hasMask() && layer->maskEnabled());
+            && !(layer->hasMask() && layer->maskEnabled())
+            && !layer->hasActiveEffects();
         xml.writeStartElement(asStack ? QStringLiteral("stack")
                                       : QStringLiteral("layer"));
         xml.writeAttribute(QStringLiteral("name"), layer->name);
@@ -716,6 +788,22 @@ void writeOraStack(QXmlStreamWriter& xml, ZipWriter& zip, const Document& doc,
         }
         xml.writeEndElement();
     }
+    if (baked <= 0)
+        return;
+    const QString src = QStringLiteral("data/layer%1.png")
+                            .arg(serial++, 3, 10, QLatin1Char('0'));
+    xml.writeStartElement(QStringLiteral("layer"));
+    // The pixels already carry every opacity, blend mode and adjustment that
+    // went into them, so the element itself is a plain opaque one.
+    xml.writeAttribute(QStringLiteral("name"), parent->childAt(0)->name);
+    xml.writeAttribute(QStringLiteral("src"), src);
+    xml.writeAttribute(QStringLiteral("x"), QStringLiteral("0"));
+    xml.writeAttribute(QStringLiteral("y"), QStringLiteral("0"));
+    xml.writeAttribute(QStringLiteral("opacity"), QStringLiteral("1.0000"));
+    xml.writeAttribute(QStringLiteral("visibility"), QStringLiteral("visible"));
+    xml.writeAttribute(QStringLiteral("composite-op"), blendToOra(BlendMode::Normal));
+    xml.writeEndElement();
+    zip.add(src, encodePng(doc.flattenChildren(*parent, baked)));
 }
 
 bool writeOra(const Document& doc, const QString& path, QString* error)

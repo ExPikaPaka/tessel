@@ -2,6 +2,10 @@
 
 #include <cmath>
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QPolygonF>
+
 namespace tessel {
 
 ParamSpec ParamSpec::intParam(QString id, QString label, int minimum, int maximum,
@@ -165,6 +169,118 @@ ParamValues ParamValues::defaults(const std::vector<ParamSpec>& specs)
         }
     }
     return values;
+}
+
+namespace {
+
+// One value, tagged with the kind it was stored as. A plain QVariant round
+// trips through JSON as a string, which loses a colour's alpha and a curve
+// altogether, so the kind travels with it.
+QJsonObject taggedValue(const QVariant& value)
+{
+    QJsonObject out;
+    switch (value.userType()) {
+    case QMetaType::Bool:
+        out[QStringLiteral("t")] = QStringLiteral("bool");
+        out[QStringLiteral("v")] = value.toBool();
+        return out;
+    case QMetaType::Int:
+    case QMetaType::UInt:
+    case QMetaType::LongLong:
+        out[QStringLiteral("t")] = QStringLiteral("int");
+        out[QStringLiteral("v")] = value.toInt();
+        return out;
+    case QMetaType::Double:
+    case QMetaType::Float:
+        out[QStringLiteral("t")] = QStringLiteral("double");
+        out[QStringLiteral("v")] = value.toDouble();
+        return out;
+    case QMetaType::QColor:
+        out[QStringLiteral("t")] = QStringLiteral("color");
+        out[QStringLiteral("v")] = value.value<QColor>().name(QColor::HexArgb);
+        return out;
+    case QMetaType::QPoint:
+    case QMetaType::QPointF: {
+        const QPointF point = value.toPointF();
+        out[QStringLiteral("t")] = QStringLiteral("point");
+        out[QStringLiteral("v")] = QJsonArray{point.x(), point.y()};
+        return out;
+    }
+    default:
+        break;
+    }
+    // A curve arrives as a polygon, which is written as a flat list of
+    // coordinates.
+    if (value.canConvert<QPolygonF>()) {
+        const QPolygonF polygon = value.value<QPolygonF>();
+        QJsonArray array;
+        for (const QPointF& point : polygon) {
+            array.append(point.x());
+            array.append(point.y());
+        }
+        out[QStringLiteral("t")] = QStringLiteral("points");
+        out[QStringLiteral("v")] = array;
+        return out;
+    }
+    out[QStringLiteral("t")] = QStringLiteral("string");
+    out[QStringLiteral("v")] = value.toString();
+    return out;
+}
+
+QVariant untaggedValue(const QJsonObject& entry)
+{
+    const QString type = entry.value(QStringLiteral("t")).toString();
+    const QJsonValue value = entry.value(QStringLiteral("v"));
+    if (type == QLatin1String("bool"))
+        return value.toBool();
+    if (type == QLatin1String("int"))
+        return value.toInt();
+    if (type == QLatin1String("double"))
+        return value.toDouble();
+    if (type == QLatin1String("color"))
+        return QColor(value.toString());
+    if (type == QLatin1String("point")) {
+        const QJsonArray array = value.toArray();
+        return QPointF(array.size() > 0 ? array.at(0).toDouble() : 0.0,
+                       array.size() > 1 ? array.at(1).toDouble() : 0.0);
+    }
+    if (type == QLatin1String("points")) {
+        const QJsonArray array = value.toArray();
+        QPolygonF polygon;
+        for (int i = 0; i + 1 < array.size(); i += 2)
+            polygon << QPointF(array.at(i).toDouble(), array.at(i + 1).toDouble());
+        return QVariant::fromValue(polygon);
+    }
+    return value.toString();
+}
+
+} // namespace
+
+QJsonObject ParamValues::toJson() const
+{
+    QJsonObject out;
+    for (auto it = values_.constBegin(); it != values_.constEnd(); ++it)
+        out[it.key()] = taggedValue(it.value());
+    return out;
+}
+
+ParamValues ParamValues::fromJson(const QJsonObject& object)
+{
+    ParamValues values;
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it)
+        values.set(it.key(), untaggedValue(it.value().toObject()));
+    return values;
+}
+
+uint64_t ParamValues::hash() const
+{
+    // Taken over the JSON form because QJsonObject keeps its keys sorted: the
+    // digest then cannot depend on the order the values were set in.
+    const QByteArray bytes = QJsonDocument(toJson()).toJson(QJsonDocument::Compact);
+    uint64_t hash = 1469598103934665603ull;
+    for (char byte : bytes)
+        hash = (hash ^ uint8_t(byte)) * 1099511628211ull;
+    return hash;
 }
 
 EffectRegistry& EffectRegistry::instance()
