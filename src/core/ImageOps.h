@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <QPointF>
+#include <QTransform>
 
 #include "core/Blend.h"
 #include "core/Image.h"
@@ -119,7 +120,18 @@ Mask floodFill(const Image& src, int seedX, int seedY, double tolerance,
                bool contiguous, bool antialias);
 Mask maskFromBooleans(const std::vector<uint8_t>& flags, int width, int height);
 Mask featherMask(const Mask& src, double radius);
+// Positive pixels dilate, negative pixels erode. Measured with a Euclidean
+// distance field so the result stays round instead of growing into a diamond.
 Mask growMask(const Mask& src, int pixels);
+// The band of `pixels` width lying just inside the current edge, so the result
+// keeps the same bounds as the input.
+Mask borderMask(const Mask& src, int pixels);
+// Signed distance in pixels from each cell to the mask edge, negative inside.
+std::vector<float> signedDistanceField(const Mask& src, float threshold = 0.5f);
+// Resamples a mask through an arbitrary transform; used when floated pixels are
+// scaled or rotated and the selection has to follow them.
+Mask transformMask(const Mask& src, const QTransform& transform, int outWidth,
+                   int outHeight);
 
 // --------------------------------------------------------------- misc
 

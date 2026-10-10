@@ -2,13 +2,17 @@
 // through their public API with the offscreen Qt platform plugin.
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QKeyEvent>
+#include <QMenu>
+#include <QSpinBox>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include "core/ImageOps.h"
 #include "core/Io.h"
@@ -16,6 +20,7 @@
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
 #include "ui/Docks.h"
+#include "ui/Dialogs.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
 #include "ui/MainWindow.h"
@@ -75,6 +80,46 @@ void drag(Tool* tool, ToolContext& context, QPointF from, QPointF to,
         tool->move(context, move);
     }
     tool->release(context, makeEvent(to, button, modifiers));
+}
+
+// The selection dialogs are modal, so the answer has to be typed in from a
+// timer that fires inside their own nested event loop.
+void answerSelectionDialog(int amount)
+{
+    auto* timer = new QTimer(qApp);
+    auto attempts = std::make_shared<int>(0);
+    timer->setInterval(5);
+    QObject::connect(timer, &QTimer::timeout, timer, [timer, amount, attempts] {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* dialog = qobject_cast<SelectionOpDialog*>(widget);
+            if (!dialog || !dialog->isVisible())
+                continue;
+            if (QSpinBox* spin = dialog->findChild<QSpinBox*>())
+                spin->setValue(amount);
+            dialog->accept();
+            timer->stop();
+            timer->deleteLater();
+            return;
+        }
+        // Never leave a nested event loop spinning if the dialog never shows.
+        if (++*attempts > 200) {
+            timer->stop();
+            timer->deleteLater();
+            QApplication::exit(1);
+        }
+    });
+    timer->start();
+}
+
+bool sameImage(const Image& a, const Image& b)
+{
+    if (a.width() != b.width() || a.height() != b.height())
+        return false;
+    for (size_t i = 0; i < a.pixelCount(); ++i) {
+        if (a.data()[i] != b.data()[i])
+            return false;
+    }
+    return true;
 }
 
 size_t nonTransparentPixels(const Image& image)
@@ -770,6 +815,129 @@ int main(int argc, char** argv)
         CHECK(opened->document()->width() == 48);
         CHECK(opened->document()->layerAt(1)->image.at(8, 8) == Rgba(250, 250, 10, 255));
         CHECK(!opened->document()->isModified());
+    });
+
+    addTest("selection submenu edits the selection", [] {
+        MainWindow window;
+        window.newDocument(80, 60, Rgba(255, 255, 255, 255));
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Document* doc = view->document();
+        History* history = view->history();
+
+        for (const char* name : {"feather", "grow", "shrink", "border",
+                                 "freetransform"}) {
+            check(window.findChild<QAction*>(QString::fromLatin1(name)) != nullptr, name,
+                  __LINE__);
+        }
+        auto action = [&window](const char* name) {
+            return window.findChild<QAction*>(QString::fromLatin1(name));
+        };
+        // They all live together in one submenu under Edit.
+        QMenu* submenu = nullptr;
+        for (QMenu* candidate : window.findChildren<QMenu*>()) {
+            if (candidate->title() == QStringLiteral("Se&lection"))
+                submenu = candidate;
+        }
+        CHECK(submenu != nullptr);
+        CHECK(submenu && submenu->actions().contains(action("feather")));
+        CHECK(submenu && submenu->actions().contains(action("freetransform")));
+        // The edge operations need something to work on.
+        CHECK(!action("grow")->isEnabled());
+        action("selectall")->trigger();
+        CHECK(action("grow")->isEnabled());
+        CHECK(action("feather")->isEnabled());
+        CHECK(action("border")->isEnabled());
+
+        // Work on a rectangle clear of the canvas edges.
+        Mask rect(80, 60);
+        for (int y = 15; y < 45; ++y)
+            for (int x = 20; x < 60; ++x)
+                rect.setAt(x, y, 1.0f);
+        doc->selection().setMask(rect);
+        const size_t area = doc->selection().pixelCount();
+        const int steps = history->count();
+
+        answerSelectionDialog(6);
+        action("grow")->trigger();
+        CHECK(doc->selection().pixelCount() > area);
+        CHECK(history->count() == steps + 1);
+        CHECK(history->undoName() == QStringLiteral("Grow Selection"));
+        history->undo();
+        CHECK(doc->selection().pixelCount() == area);
+
+        answerSelectionDialog(6);
+        action("shrink")->trigger();
+        CHECK(doc->selection().pixelCount() < area);
+        history->undo();
+        CHECK(doc->selection().pixelCount() == area);
+
+        answerSelectionDialog(4);
+        action("border")->trigger();
+        CHECK(doc->selection().pixelCount() < area);
+        CHECK(doc->selection().bounds().w == 40);
+        CHECK(!doc->selection().contains(40, 30)); // hollow in the middle
+        CHECK(doc->selection().contains(20, 30));  // but not along the rim
+        history->undo();
+        CHECK(doc->selection().contains(40, 30));
+
+        answerSelectionDialog(5);
+        action("feather")->trigger();
+        const Mask* mask = doc->selection().clipMask();
+        CHECK(mask != nullptr);
+        CHECK(mask->at(40, 30) == 1.0f);
+        CHECK(mask->at(20, 30) > 0.0f && mask->at(20, 30) < 1.0f);
+        CHECK(mask->at(18, 30) > 0.0f && mask->at(18, 30) < 0.5f);
+        history->undo();
+        CHECK(doc->selection().clipMask()->at(20, 30) == 1.0f);
+        // Each operation is a single step, pushed over the one just undone.
+        CHECK(history->count() == steps + 1);
+        CHECK(history->canRedo());
+        CHECK(history->redoName() == QStringLiteral("Feather Selection"));
+
+        // Free Transform just picks up the tool that floats the pixels.
+        action("freetransform")->trigger();
+        CHECK(view->tool() != nullptr);
+        CHECK(view->tool()->id() == QStringLiteral("move-selected"));
+    });
+
+    addTest("free transform rotates the floated pixels", [] {
+        auto doc = std::make_unique<Document>(80, 80, Rgba(0, 0, 0, 0));
+        // A tall bar, so a quarter turn is obvious in the bounds.
+        ops::fillRegion(doc->activeLayer()->image, Rect(30, 20, 8, 40),
+                        Rgba(255, 40, 40, 255));
+        Mask mask(80, 80);
+        for (int y = 20; y < 60; ++y)
+            for (int x = 30; x < 38; ++x)
+                mask.setAt(x, y, 1.0f);
+        doc->selection().setMask(mask);
+        doc->invalidate();
+        CanvasView view(std::move(doc));
+        const Image original = view.document()->activeLayer()->image;
+
+        Tool* move = ToolRegistry::instance().byId(QStringLiteral("move-selected"));
+        view.setTool(move);
+        ToolContext context = view.makeContext();
+        // Grabbing outside the box rotates about its centre, and Shift snaps the
+        // angle, so this drag is exactly a quarter turn.
+        drag(move, context, QPointF(70, 40), QPointF(34, 76), Qt::LeftButton,
+             Qt::ShiftModifier);
+        move->commit(context);
+
+        const Image& image = view.document()->activeLayer()->image;
+        const Rect bounds = image.opaqueBounds();
+        CHECK(bounds.w > bounds.h);
+        CHECK(bounds.w >= 36 && bounds.h <= 12);
+        CHECK(image.at(34, 40).a > 0);   // still centred where it was
+        CHECK(image.at(34, 22).a == 0);  // the top of the old bar is bare
+        CHECK(image.at(34, 58).a == 0);
+        // The outline travels with the pixels.
+        const Rect selected = view.document()->selection().bounds();
+        CHECK(selected.w > selected.h);
+        CHECK(view.history()->count() == 1);
+
+        view.history()->undo();
+        CHECK(sameImage(view.document()->activeLayer()->image, original));
+        CHECK(view.document()->selection().bounds().h > 30);
     });
 
     addTest("colour panel drives the views", [] {

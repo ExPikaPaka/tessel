@@ -765,40 +765,188 @@ Mask floodFill(const Image& src, int seedX, int seedY, double tolerance,
 
 Mask featherMask(const Mask& src, double radius)
 {
-    if (radius <= 0.0)
+    if (radius <= 0.0 || src.isNull())
         return src;
-    Mask blurred = blurMask(src, radius);
-    // Keep the solid core solid; only the rim should soften.
-    for (int y = 0; y < blurred.height(); ++y) {
-        float* line = blurred.row(y);
-        const float* orig = src.row(y);
-        for (int x = 0; x < blurred.width(); ++x)
-            line[x] = std::clamp(std::max(line[x] * 1.15f, orig[x] * 0.85f), 0.0f, 1.0f);
+    // A linear ramp straddling the edge, so the solid core stays solid and only
+    // the band within `radius` of the edge fades. Measuring the distance to the
+    // edge rather than blurring keeps the falloff even all the way round, and
+    // leaves a mask that runs off the canvas fully opaque at the border.
+    const std::vector<float> field = signedDistanceField(src);
+    const float scale = 1.0f / float(2.0 * radius);
+    Mask out(src.width(), src.height());
+    for (int y = 0; y < out.height(); ++y) {
+        float* dst = out.row(y);
+        const float* distances = field.data() + static_cast<size_t>(y) * out.width();
+        for (int x = 0; x < out.width(); ++x)
+            dst[x] = std::clamp(0.5f - distances[x] * scale, 0.0f, 1.0f);
     }
-    return blurred;
+    return out;
+}
+
+namespace {
+
+// One pass of the Felzenszwalb lower envelope transform: `f` holds the squared
+// seed costs of a single row or column and `d` receives the squared distances.
+void distanceTransform1d(const std::vector<float>& f, std::vector<float>& d,
+                         std::vector<int>& v, std::vector<float>& z)
+{
+    const int n = static_cast<int>(f.size());
+    constexpr float kInf = 1.0e20f;
+    int k = 0;
+    v[0] = 0;
+    z[0] = -kInf;
+    z[1] = kInf;
+    for (int q = 1; q < n; ++q) {
+        float s = 0.0f;
+        while (true) {
+            const float a = f[static_cast<size_t>(q)] + float(q) * q;
+            const float b = f[static_cast<size_t>(v[k])] + float(v[k]) * v[k];
+            s = (a - b) / (2.0f * float(q) - 2.0f * float(v[k]));
+            if (s > z[static_cast<size_t>(k)])
+                break;
+            --k;
+        }
+        ++k;
+        v[static_cast<size_t>(k)] = q;
+        z[static_cast<size_t>(k)] = s;
+        z[static_cast<size_t>(k) + 1] = kInf;
+    }
+    k = 0;
+    for (int q = 0; q < n; ++q) {
+        while (z[static_cast<size_t>(k) + 1] < float(q))
+            ++k;
+        const int dx = q - v[static_cast<size_t>(k)];
+        d[static_cast<size_t>(q)] = float(dx) * dx + f[static_cast<size_t>(v[k])];
+    }
+}
+
+// Squared Euclidean distance from every cell to the nearest seed. `seeds` is a
+// per cell flag and the result is in squared pixels.
+std::vector<float> squaredDistance(const std::vector<uint8_t>& seeds, int w, int h)
+{
+    constexpr float kInf = 1.0e20f;
+    std::vector<float> grid(seeds.size());
+    for (size_t i = 0; i < seeds.size(); ++i)
+        grid[i] = seeds[i] ? 0.0f : kInf;
+
+    const int longest = std::max(w, h);
+    std::vector<float> line(static_cast<size_t>(longest));
+    std::vector<float> out(static_cast<size_t>(longest));
+    std::vector<int> v(static_cast<size_t>(longest));
+    std::vector<float> z(static_cast<size_t>(longest) + 1);
+
+    for (int x = 0; x < w; ++x) {
+        line.resize(static_cast<size_t>(h));
+        out.resize(static_cast<size_t>(h));
+        for (int y = 0; y < h; ++y)
+            line[static_cast<size_t>(y)] = grid[static_cast<size_t>(y) * w + x];
+        distanceTransform1d(line, out, v, z);
+        for (int y = 0; y < h; ++y)
+            grid[static_cast<size_t>(y) * w + x] = out[static_cast<size_t>(y)];
+    }
+    for (int y = 0; y < h; ++y) {
+        line.resize(static_cast<size_t>(w));
+        out.resize(static_cast<size_t>(w));
+        float* row = grid.data() + static_cast<size_t>(y) * w;
+        std::copy(row, row + w, line.begin());
+        distanceTransform1d(line, out, v, z);
+        std::copy(out.begin(), out.begin() + w, row);
+    }
+    return grid;
+}
+
+// Coverage of the area whose signed distance is at or below `offset`, with a
+// one pixel ramp across the new edge so the result stays antialiased.
+inline float coverageAt(float distance, float offset)
+{
+    return std::clamp(offset - distance + 0.5f, 0.0f, 1.0f);
+}
+
+} // namespace
+
+std::vector<float> signedDistanceField(const Mask& src, float threshold)
+{
+    if (src.isNull())
+        return {};
+    const int w = src.width(), h = src.height();
+    std::vector<uint8_t> inside(static_cast<size_t>(w) * h, 0);
+    std::vector<uint8_t> outside(inside.size(), 0);
+    for (int y = 0; y < h; ++y) {
+        const float* line = src.row(y);
+        for (int x = 0; x < w; ++x) {
+            const size_t i = static_cast<size_t>(y) * w + x;
+            if (line[x] > threshold)
+                inside[i] = 1;
+            else
+                outside[i] = 1;
+        }
+    }
+    const std::vector<float> toInside = squaredDistance(inside, w, h);
+    const std::vector<float> toOutside = squaredDistance(outside, w, h);
+    std::vector<float> field(inside.size());
+    for (size_t i = 0; i < field.size(); ++i) {
+        // The edge runs half a pixel from the outermost covered cell centres.
+        field[i] = inside[i] ? -(std::sqrt(toOutside[i]) - 0.5f)
+                             : std::sqrt(toInside[i]) - 0.5f;
+    }
+    return field;
 }
 
 Mask growMask(const Mask& src, int pixels)
 {
-    if (pixels == 0)
+    if (pixels == 0 || src.isNull())
         return src;
-    Mask out = src;
-    const bool grow = pixels > 0;
-    const int steps = std::abs(pixels);
-    for (int s = 0; s < steps; ++s) {
-        Mask next = out;
-        for (int y = 0; y < out.height(); ++y) {
-            float* dst = next.row(y);
-            for (int x = 0; x < out.width(); ++x) {
-                float v = out.at(x, y);
-                const float neighbours[4] = {out.at(x - 1, y), out.at(x + 1, y),
-                                             out.at(x, y - 1), out.at(x, y + 1)};
-                for (float n : neighbours)
-                    v = grow ? std::max(v, n) : std::min(v, n);
-                dst[x] = v;
-            }
+    const std::vector<float> field = signedDistanceField(src);
+    Mask out(src.width(), src.height());
+    for (int y = 0; y < out.height(); ++y) {
+        float* dst = out.row(y);
+        const float* distances = field.data() + static_cast<size_t>(y) * out.width();
+        for (int x = 0; x < out.width(); ++x)
+            dst[x] = coverageAt(distances[x], float(pixels));
+    }
+    return out;
+}
+
+Mask borderMask(const Mask& src, int pixels)
+{
+    if (pixels <= 0 || src.isNull())
+        return src;
+    const std::vector<float> field = signedDistanceField(src);
+    Mask out(src.width(), src.height());
+    for (int y = 0; y < out.height(); ++y) {
+        float* dst = out.row(y);
+        const float* distances = field.data() + static_cast<size_t>(y) * out.width();
+        for (int x = 0; x < out.width(); ++x) {
+            // Everything inside the old edge, minus everything inside the edge
+            // pushed `pixels` inwards, leaves the band between the two.
+            const float outer = coverageAt(distances[x], 0.0f);
+            const float inner = coverageAt(distances[x], float(-pixels));
+            dst[x] = std::clamp(outer - inner, 0.0f, 1.0f);
         }
-        out = next;
+    }
+    return out;
+}
+
+Mask transformMask(const Mask& src, const QTransform& transform, int outWidth,
+                   int outHeight)
+{
+    Mask out(outWidth, outHeight);
+    if (src.isNull() || out.isNull())
+        return out;
+    const QTransform inverse = transform.inverted();
+    for (int y = 0; y < outHeight; ++y) {
+        float* dst = out.row(y);
+        for (int x = 0; x < outWidth; ++x) {
+            const QPointF source = inverse.map(QPointF(x + 0.5, y + 0.5));
+            const float sx = float(source.x() - 0.5);
+            const float sy = float(source.y() - 0.5);
+            const int x0 = int(std::floor(sx)), y0 = int(std::floor(sy));
+            const float fx = sx - float(x0), fy = sy - float(y0);
+            const float top = src.at(x0, y0) + (src.at(x0 + 1, y0) - src.at(x0, y0)) * fx;
+            const float bottom =
+                src.at(x0, y0 + 1) + (src.at(x0 + 1, y0 + 1) - src.at(x0, y0 + 1)) * fx;
+            dst[x] = std::clamp(top + (bottom - top) * fy, 0.0f, 1.0f);
+        }
     }
     return out;
 }

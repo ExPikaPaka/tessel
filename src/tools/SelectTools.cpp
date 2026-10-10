@@ -5,6 +5,8 @@
 #include <cmath>
 
 #include <QKeyEvent>
+#include <QPolygonF>
+#include <QTransform>
 
 #include "core/ImageOps.h"
 
@@ -402,7 +404,9 @@ public:
     QString hint() const override
     {
         return QStringLiteral("Drag the selected pixels. Drag a corner handle to "
-                              "scale, press Enter to finish or Escape to cancel.");
+                              "scale, the handle above the box or anywhere outside it "
+                              "to rotate (Shift snaps to 15 degrees), press Enter to "
+                              "finish or Escape to cancel.");
     }
     QCursor cursor() const override { return QCursor(Qt::SizeAllCursor); }
 
@@ -415,6 +419,8 @@ public:
         grabbedHandle_ = handleAt(event.pos, context.zoom);
         dragStart_ = event.pos;
         startRect_ = target_;
+        startAngle_ = angle_;
+        grabAngle_ = angleTo(event.pos);
         dragging_ = true;
         constrain_ = event.modifiers.testFlag(Qt::ShiftModifier);
     }
@@ -425,10 +431,24 @@ public:
             return;
         constrain_ = event.modifiers.testFlag(Qt::ShiftModifier);
         const QPointF delta = event.pos - dragStart_;
-        if (grabbedHandle_ < 0) {
+        if (grabbedHandle_ == kRotateHandle) {
+            double next = startAngle_ + angleTo(event.pos) - grabAngle_;
+            if (constrain_)
+                next = std::round(next / 15.0) * 15.0;
+            angle_ = std::fmod(next, 360.0);
+        } else if (grabbedHandle_ < 0) {
             target_ = startRect_.translated(delta);
         } else {
-            target_ = resizedRect(startRect_, grabbedHandle_, delta, constrain_);
+            // The box is stored unrotated, so the drag has to come back out of
+            // the rotation before it can resize anything.
+            const QPointF local = rotated(delta, QPointF(0, 0), -angle_);
+            QRectF resized = resizedRect(startRect_, grabbedHandle_, local, constrain_);
+            // Keep the corner opposite the handle pinned where it looks pinned,
+            // which means compensating for the centre the rotation turns about.
+            const QPointF anchor = anchorFor(startRect_, grabbedHandle_);
+            const QPointF was = rotated(anchor, startRect_.center(), angle_);
+            const QPointF now = rotated(anchor, resized.center(), angle_);
+            target_ = resized.translated(was - now);
         }
         render(context);
     }
@@ -460,11 +480,20 @@ public:
             return;
         floating_ = false;
         render(context);
-        // Move the selection outline along with the pixels.
-        const QPointF shift = target_.topLeft() - origin_.topLeft();
+        // Take the selection outline along with the pixels.
         Selection& selection = context.doc->selection();
         if (selection.isActive()) {
-            selection.translate(int(std::lround(shift.x())), int(std::lround(shift.y())));
+            const QRectF box = target_.normalized();
+            const bool moveOnly = std::abs(angle_) < 1.0e-3
+                && std::abs(box.width() - origin_.width()) < 0.5
+                && std::abs(box.height() - origin_.height()) < 0.5;
+            if (moveOnly) {
+                const QPointF shift = box.topLeft() - origin_.topLeft();
+                selection.translate(int(std::lround(shift.x())),
+                                    int(std::lround(shift.y())));
+            } else {
+                selection.transformBy(placementTransform());
+            }
         }
         DocumentState after = context.doc->snapshot();
         context.history->push(std::make_unique<DocumentEdit>(
@@ -495,31 +524,104 @@ public:
     {
         if (!floating_)
             return;
+        const QList<QPointF> handles = placedCorners();
         painter.setBrush(Qt::NoBrush);
         painter.setPen(overlayPen(context.zoom, QColor(255, 255, 255, 220), 1.0,
                                   Qt::DashLine));
-        painter.drawRect(target_);
+        painter.drawPolygon(QPolygonF(handles));
         const double size = 4.0 / std::max(0.05, context.zoom);
+        const QPointF knob = rotationKnob(context.zoom);
+        painter.drawLine((handles[0] + handles[1]) / 2.0, knob);
         painter.setBrush(QColor(255, 255, 255, 230));
         painter.setPen(overlayPen(context.zoom, QColor(30, 30, 30, 220), 1.0));
-        for (const QPointF& corner : corners(target_))
+        for (const QPointF& corner : handles)
             painter.drawRect(QRectF(corner.x() - size, corner.y() - size, size * 2, size * 2));
+        painter.drawEllipse(knob, size * 1.2, size * 1.2);
     }
 
 private:
+    // Handle indices 0..3 are the corners, in the order the rectangle gives
+    // them; kRotateHandle is the knob above the top edge.
+    static constexpr int kRotateHandle = 4;
+
     static QList<QPointF> corners(const QRectF& rect)
     {
         return {rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()};
     }
 
+    static QPointF anchorFor(const QRectF& rect, int handle)
+    {
+        switch (handle) {
+        case 0: return rect.bottomRight();
+        case 1: return rect.bottomLeft();
+        case 2: return rect.topLeft();
+        default: return rect.topRight();
+        }
+    }
+
+    static QPointF rotated(QPointF point, QPointF about, double degrees)
+    {
+        const double radians = degrees * M_PI / 180.0;
+        const double s = std::sin(radians), c = std::cos(radians);
+        const double dx = point.x() - about.x(), dy = point.y() - about.y();
+        return QPointF(about.x() + dx * c - dy * s, about.y() + dx * s + dy * c);
+    }
+
+    double angleTo(QPointF point) const
+    {
+        const QPointF centre = target_.normalized().center();
+        return std::atan2(point.y() - centre.y(), point.x() - centre.x()) * 180.0 / M_PI;
+    }
+
+    QList<QPointF> placedCorners() const
+    {
+        const QRectF box = target_.normalized();
+        QList<QPointF> out;
+        for (const QPointF& corner : corners(box))
+            out.append(rotated(corner, box.center(), angle_));
+        return out;
+    }
+
+    QPointF rotationKnob(double zoom) const
+    {
+        const QRectF box = target_.normalized();
+        const double reach = 18.0 / std::max(0.05, zoom);
+        return rotated(QPointF(box.center().x(), box.top() - reach), box.center(), angle_);
+    }
+
+    // Maps the lifted pixels from where they were picked up to where they are
+    // now, so the selection outline can follow the same path.
+    QTransform placementTransform() const
+    {
+        const QRectF box = target_.normalized();
+        const QPointF centre = box.center();
+        const double sx = origin_.width() > 0.5 ? box.width() / origin_.width() : 1.0;
+        const double sy = origin_.height() > 0.5 ? box.height() / origin_.height() : 1.0;
+        QTransform out;
+        out.translate(centre.x(), centre.y());
+        out.rotate(angle_);
+        out.translate(-centre.x(), -centre.y());
+        out.translate(box.x(), box.y());
+        out.scale(sx, sy);
+        out.translate(-origin_.x(), -origin_.y());
+        return out;
+    }
+
     int handleAt(QPointF point, double zoom) const
     {
         const double reach = 6.0 / std::max(0.05, zoom);
-        const QList<QPointF> list = corners(target_);
+        const QList<QPointF> list = placedCorners();
         for (int i = 0; i < list.size(); ++i) {
             if (std::hypot(point.x() - list[i].x(), point.y() - list[i].y()) <= reach)
                 return i;
         }
+        const QPointF knob = rotationKnob(zoom);
+        if (std::hypot(point.x() - knob.x(), point.y() - knob.y()) <= reach * 1.5)
+            return kRotateHandle;
+        // Grabbing past the corners rotates as well, which is how the gesture
+        // is usually offered.
+        if (!QPolygonF(list).containsPoint(point, Qt::OddEvenFill))
+            return kRotateHandle;
         return -1;
     }
 
@@ -570,6 +672,7 @@ private:
         layerUid_ = layer->uid();
         origin_ = QRectF(bounds.x, bounds.y, bounds.w, bounds.h);
         target_ = origin_;
+        angle_ = 0.0;
 
         // Copy the selected pixels out, applying the selection as alpha, then
         // clear them from the layer.
@@ -605,16 +708,24 @@ private:
         Image placed = (width == lifted_.width() && height == lifted_.height())
             ? lifted_
             : ops::resize(lifted_, width, height, true);
-        const int x = int(std::lround(box.x()));
-        const int y = int(std::lround(box.y()));
+        if (std::abs(angle_) > 1.0e-3) {
+            // The expanded result stays centred on the same point, so the box
+            // centre is all that is needed to position it.
+            placed = ops::rotateFree(placed, angle_, true);
+        }
+        const int x = int(std::lround(box.center().x() - placed.width() / 2.0));
+        const int y = int(std::lround(box.center().y() - placed.height() / 2.0));
         Image staged(layer->image.width(), layer->image.height());
         staged.blit(placed, x, y);
         ops::imageOver(layer->image, staged, nullptr, BlendMode::Normal,
                        Rect(x, y, placed.width(), placed.height()));
         context.doc->invalidateLayer(layer);
         context.repaintAll();
-        context.say(QStringLiteral("Moved to %1, %2  -  %3 x %4")
-                        .arg(x).arg(y).arg(width).arg(height));
+        QString where = QStringLiteral("Moved to %1, %2  -  %3 x %4")
+                            .arg(x).arg(y).arg(width).arg(height);
+        if (std::abs(angle_) > 1.0e-3)
+            where += QStringLiteral("  -  %1 degrees").arg(angle_, 0, 'f', 1);
+        context.say(where);
     }
 
     DocumentState before_;
@@ -626,6 +737,9 @@ private:
     QPointF dragStart_;
     int layerUid_ = 0;
     int grabbedHandle_ = -1;
+    double angle_ = 0.0;
+    double startAngle_ = 0.0;
+    double grabAngle_ = 0.0;
     bool floating_ = false;
     bool dragging_ = false;
     bool constrain_ = false;
