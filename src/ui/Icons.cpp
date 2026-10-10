@@ -2,6 +2,8 @@
 // 24 by 24 coordinate space. Nothing is loaded from disk.
 #include "ui/Icons.h"
 
+#include <cmath>
+
 #include <QHash>
 #include <QPainter>
 #include <QPainterPath>

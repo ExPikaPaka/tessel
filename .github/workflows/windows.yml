@@ -1,0 +1,103 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: 6.8.3
+  # MSVC 2022 is the only x64 desktop build Qt ships for 6.8.x.
+  QT_ARCH: win64_msvc2022_64
+  # Static zlib against the dynamic CRT: it matches the CRT that the official
+  # Qt binaries use, and it leaves no zlib1.dll for windeployqt to miss.
+  VCPKG_TRIPLET: x64-windows-static-md
+
+jobs:
+  build:
+    name: Build and test (MSVC x64)
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Puts cl.exe, link.exe and the x64 toolchain in PATH. This is what lets
+      # us use Ninja below without naming a Visual Studio version anywhere, so
+      # the job keeps working when the runner image bumps its VS release.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: ${{ env.QT_ARCH }}
+          # Core, Gui, Widgets and PrintSupport all live in qtbase, which this
+          # action installs by default, so no extra `modules` are needed.
+          cache: true
+
+      # zlib: Qt's Windows binaries do bundle zlib, but only as a private
+      # module (include/QtZlib) with no ZLIB::ZLIB target, so find_package(ZLIB)
+      # cannot see it and relying on private headers breaks on Qt upgrades.
+      # vcpkg is preinstalled on the runner and its zlib port ships a wrapper
+      # that makes the stock find_package(ZLIB) work, so it is the safer route.
+      - name: Install zlib via vcpkg
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "zlib:$env:VCPKG_TRIPLET"
+
+      # Ninja is preinstalled on the Windows runner images. It is used instead
+      # of the Visual Studio generator so the configure/build/test commands are
+      # single-config and identical to the Linux CI job, and so no generator
+      # name has to be pinned to a VS version.
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="$env:VCPKG_TRIPLET" `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Stage and deploy Qt runtime
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item build/tessel.exe staging/
+          Copy-Item README.md staging/
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" `
+            --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            --dir staging staging/tessel.exe
+
+      - name: Smoke test the deployed binary
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          & ./staging/tessel.exe --version
+
+      - name: Package
+        run: |
+          Compress-Archive -Path staging/* -DestinationPath tessel-windows-x64.zip
+          (Get-FileHash tessel-windows-x64.zip -Algorithm SHA256).Hash `
+            | Out-File -Encoding ascii tessel-windows-x64.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tessel-windows-x64
+          path: |
+            tessel-windows-x64.zip
+            tessel-windows-x64.zip.sha256
+          if-no-files-found: error

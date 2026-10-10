@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include <QString>
 #include <QStringList>
 #include <vector>
