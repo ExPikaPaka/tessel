@@ -29,10 +29,14 @@ QString blendModeName(BlendMode mode)
 
 BlendMode blendModeFromName(const QString& name, BlendMode fallback)
 {
-    const int index = blendModeNames().indexOf(name, 0, Qt::CaseInsensitive);
-    if (index < 0)
-        return fallback;
-    return static_cast<BlendMode>(index);
+    // Compared by hand rather than with the case insensitive overload of
+    // QStringList::indexOf, which only exists in newer Qt releases.
+    const QStringList& names = blendModeNames();
+    for (int i = 0; i < names.size(); ++i) {
+        if (names.at(i).compare(name, Qt::CaseInsensitive) == 0)
+            return static_cast<BlendMode>(i);
+    }
+    return fallback;
 }
 
 void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out,

@@ -82,6 +82,15 @@ target_link_libraries(tessel PRIVATE tessel_ui)
 target_compile_options(tessel PRIVATE -Wall -Wextra -Wno-unused-parameter)
 set_target_properties(tessel PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)
 
+# ----------------------------------------------------------------- docs tool
+# Renders the interface to PNG files for the README. Off by default because it
+# is only needed when the documentation images are refreshed.
+option(TESSEL_BUILD_SCREENSHOT_TOOL "Build the documentation screenshot tool" OFF)
+if(TESSEL_BUILD_SCREENSHOT_TOOL)
+  qt_add_executable(tessel_screenshots tools/screenshot_tool.cpp)
+  target_link_libraries(tessel_screenshots PRIVATE tessel_ui)
+endif()
+
 # ----------------------------------------------------------------- tests
 enable_testing()
 add_executable(tessel_tests tests/tests.cpp)

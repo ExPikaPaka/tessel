@@ -22,7 +22,7 @@ jobs:
             qt6-base-dev libgl1-mesa-dev
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTESSEL_BUILD_SCREENSHOT_TOOL=ON
 
       - name: Build
         run: cmake --build build
@@ -31,7 +31,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Screenshots
-        run: tools/screenshots.sh build/tessel screenshots
+        run: ./build/tessel_screenshots screenshots
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4

@@ -6,6 +6,14 @@ left, Colors below it, History and Layers on the right, a tool options bar under
 the main toolbar, and a status bar that always tells you where the cursor is,
 how big the selection is and what the zoom level is.
 
+![The Tessel window](docs/screenshots/main-dark.png)
+
+| Curves | Levels | Effect dialogs |
+| --- | --- | --- |
+| ![Curves](docs/screenshots/dialog-curves.png) | ![Levels](docs/screenshots/dialog-levels.png) | ![Clouds](docs/screenshots/dialog-effect.png) |
+
+There is a light theme too, in [docs/screenshots/main-light.png](docs/screenshots/main-light.png).
+
 ## About the name and the inspiration
 
 Tessel is an independent program. It is not a port of Paint.NET and shares no code
@@ -126,6 +134,18 @@ palette colours and D resets them.
 Pixel work is parallelised over scanlines with a small `parallelFor`, blurs use a
 three pass box approximation of a gaussian, and resampling is done in
 premultiplied alpha so transparent edges do not bleed.
+
+## Regenerating the screenshots
+
+The images in this README are rendered by a small tool that drives the real
+widgets through the offscreen platform plugin, so it needs no display:
+
+    cmake -S . -B build -G Ninja -DTESSEL_BUILD_SCREENSHOT_TOOL=ON
+    cmake --build build
+    ./build/tessel_screenshots docs/screenshots
+
+Continuous integration runs the same tool on every push and keeps the result as
+a build artifact, which makes an accidental change to the interface visible.
 
 ## Licence
 
