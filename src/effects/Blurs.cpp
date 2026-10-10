@@ -283,39 +283,38 @@ void registerBlurs(EffectRegistry& registry)
                 const Image& src = *context.source;
                 Image out = src;
                 const Rect area = context.region.intersected(src.rect());
-                parallelFor(area.y, area.bottom(), [&](int y0, int y1) {
-                    for (int y = y0; y < y1; ++y) {
-                        Rgba* dst = out.row(y);
-                        for (int x = area.x; x < area.right(); ++x) {
-                            const Rgba centre = src.row(y)[x];
-                            double sum[3] = {0, 0, 0};
-                            double weight = 0;
-                            for (int dy = -radius; dy <= radius; ++dy) {
-                                const int sy = std::clamp(y + dy, 0, src.height() - 1);
-                                const Rgba* line = src.row(sy);
-                                for (int dx = -radius; dx <= radius; ++dx) {
-                                    const int sx = std::clamp(x + dx, 0, src.width() - 1);
-                                    const Rgba c = line[sx];
-                                    const double diff =
-                                        std::abs(int(c.r) - int(centre.r))
-                                        + std::abs(int(c.g) - int(centre.g))
-                                        + std::abs(int(c.b) - int(centre.b));
-                                    const double w = std::exp(-(diff * diff) / sigmaRange);
-                                    sum[0] += c.r * w;
-                                    sum[1] += c.g * w;
-                                    sum[2] += c.b * w;
-                                    weight += w;
-                                }
+                // The widest kernel here is 25x25 per pixel, so this is one of
+                // the effects that has to stay interruptible.
+                fx::forEachRow(context, area.y, area.bottom(), [&](int y) {
+                    Rgba* dst = out.row(y);
+                    for (int x = area.x; x < area.right(); ++x) {
+                        const Rgba centre = src.row(y)[x];
+                        double sum[3] = {0, 0, 0};
+                        double weight = 0;
+                        for (int dy = -radius; dy <= radius; ++dy) {
+                            const int sy = std::clamp(y + dy, 0, src.height() - 1);
+                            const Rgba* line = src.row(sy);
+                            for (int dx = -radius; dx <= radius; ++dx) {
+                                const int sx = std::clamp(x + dx, 0, src.width() - 1);
+                                const Rgba c = line[sx];
+                                const double diff = std::abs(int(c.r) - int(centre.r))
+                                    + std::abs(int(c.g) - int(centre.g))
+                                    + std::abs(int(c.b) - int(centre.b));
+                                const double w = std::exp(-(diff * diff) / sigmaRange);
+                                sum[0] += c.r * w;
+                                sum[1] += c.g * w;
+                                sum[2] += c.b * w;
+                                weight += w;
                             }
-                            if (weight <= 0.0) {
-                                dst[x] = centre;
-                                continue;
-                            }
-                            dst[x] = Rgba(static_cast<uint8_t>(std::lround(sum[0] / weight)),
-                                          static_cast<uint8_t>(std::lround(sum[1] / weight)),
-                                          static_cast<uint8_t>(std::lround(sum[2] / weight)),
-                                          centre.a);
                         }
+                        if (weight <= 0.0) {
+                            dst[x] = centre;
+                            continue;
+                        }
+                        dst[x] = Rgba(static_cast<uint8_t>(std::lround(sum[0] / weight)),
+                                      static_cast<uint8_t>(std::lround(sum[1] / weight)),
+                                      static_cast<uint8_t>(std::lround(sum[2] / weight)),
+                                      centre.a);
                     }
                 });
                 return out;

@@ -11,6 +11,7 @@
 #include "core/History.h"
 #include "core/ImageOps.h"
 #include "effects/Effect.h"
+#include "ui/EffectDialog.h"
 
 class QCheckBox;
 class QComboBox;
@@ -18,34 +19,6 @@ class QDoubleSpinBox;
 class QSpinBox;
 
 namespace tessel {
-
-// Shared preview plumbing for the two hand built adjustment dialogs.
-class EffectPreview {
-public:
-    EffectPreview(Effect* effect, Document* doc, History* history, Rgba primary,
-                  Rgba secondary);
-    ~EffectPreview();
-
-    void setRepaintCallback(std::function<void()> callback) { repaint_ = std::move(callback); }
-    void update(const ParamValues& values);
-    void clear();
-    void commit(const ParamValues& values);
-    void restoreSource();
-    const Image& source() const { return source_; }
-    Rect region() const;
-    const Mask* clip() const { return doc_->selection().clipMask(); }
-
-private:
-    Effect* effect_;
-    Document* doc_;
-    History* history_;
-    Rgba primary_;
-    Rgba secondary_;
-    Image source_;
-    Image preview_;
-    std::function<void()> repaint_;
-    bool active_ = false;
-};
 
 // An editable transfer curve with the channel histogram behind it.
 class CurveEditor : public QWidget {
@@ -84,7 +57,9 @@ private:
     int dragging_ = -1;
 };
 
-// Curves, with a transfer map selector and one curve per channel.
+// Curves, with a transfer map selector and one curve per channel. The preview,
+// progress and commit plumbing it needs is the same as the generated dialog's,
+// so it shares EffectSession rather than carrying a second copy.
 class CurvesDialog : public QDialog {
     Q_OBJECT
 
@@ -97,6 +72,7 @@ public:
         preview_.setRepaintCallback(std::move(callback));
     }
     ParamValues values() const { return values_; }
+    EffectSession& session() { return preview_; }
 
 protected:
     void done(int result) override;
@@ -106,8 +82,9 @@ private:
     void curveEdited();
 
     Effect* effect_;
-    EffectPreview preview_;
+    EffectSession preview_;
     ParamValues values_;
+    bool finishing_ = false;
     CurveEditor* editor_ = nullptr;
     QComboBox* channel_ = nullptr;
     ops::Histogram histogram_;
@@ -128,6 +105,7 @@ public:
         preview_.setRepaintCallback(std::move(callback));
     }
     ParamValues values() const { return values_; }
+    EffectSession& session() { return preview_; }
 
 protected:
     void done(int result) override;
@@ -137,8 +115,9 @@ private:
     void autoLevel();
 
     Effect* effect_;
-    EffectPreview preview_;
+    EffectSession preview_;
     ParamValues values_;
+    bool finishing_ = false;
     ops::Histogram histogram_;
     QWidget* histogramView_ = nullptr;
     QSpinBox* inBlack_ = nullptr;

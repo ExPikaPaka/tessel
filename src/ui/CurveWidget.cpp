@@ -20,87 +20,6 @@
 
 namespace tessel {
 
-// ----------------------------------------------------------------- preview
-
-EffectPreview::EffectPreview(Effect* effect, Document* doc, History* history, Rgba primary,
-                             Rgba secondary)
-    : effect_(effect), doc_(doc), history_(history), primary_(primary),
-      secondary_(secondary)
-{
-    if (const Layer* layer = doc_->activeLayer())
-        source_ = layer->image;
-}
-
-EffectPreview::~EffectPreview() { clear(); }
-
-Rect EffectPreview::region() const
-{
-    const Selection& selection = doc_->selection();
-    if (!selection.isActive())
-        return doc_->rect();
-    const Rect bounds = selection.bounds();
-    return bounds.isEmpty() ? doc_->rect() : bounds;
-}
-
-void EffectPreview::update(const ParamValues& values)
-{
-    const Layer* layer = doc_->activeLayer();
-    if (!layer || source_.isNull())
-        return;
-    EffectContext context;
-    context.source = &source_;
-    context.clip = clip();
-    context.region = region();
-    context.primary = primary_;
-    context.secondary = secondary_;
-    context.document = doc_;
-    const Image result = effect_->apply(context, values);
-    preview_ = source_;
-    ops::mixThroughMask(preview_, result, context.clip, context.region);
-    doc_->setPreview(layer->uid(), &preview_);
-    active_ = true;
-    if (repaint_)
-        repaint_();
-}
-
-void EffectPreview::clear()
-{
-    if (!active_)
-        return;
-    active_ = false;
-    doc_->clearPreview();
-    if (repaint_)
-        repaint_();
-}
-
-void EffectPreview::restoreSource()
-{
-    if (Layer* layer = doc_->activeLayer(); layer && !source_.isNull())
-        layer->image = source_;
-    doc_->invalidate();
-}
-
-void EffectPreview::commit(const ParamValues& values)
-{
-    Layer* layer = doc_->activeLayer();
-    if (!layer || source_.isNull())
-        return;
-    EffectContext context;
-    context.source = &source_;
-    context.clip = clip();
-    context.region = region();
-    context.primary = primary_;
-    context.secondary = secondary_;
-    context.document = doc_;
-    const Image result = effect_->apply(context, values);
-    layer->image = source_;
-    EditScope scope(*doc_, *history_, layer, effect_->name(), QStringLiteral("adjust"),
-                    context.region);
-    ops::mixThroughMask(layer->image, result, context.clip, context.region);
-    scope.commit();
-    doc_->invalidateLayer(layer);
-}
-
 // ----------------------------------------------------------------- curve editor
 
 CurveEditor::CurveEditor(QWidget* parent) : QWidget(parent)
@@ -363,7 +282,7 @@ CurvesDialog::CurvesDialog(Effect* effect, Document* doc, History* history, Rgba
     connect(editor_, &CurveEditor::curveChanged, this, &CurvesDialog::curveEdited);
 
     channelChanged(0);
-    preview_.update(values_);
+    preview_.requestPreview(values_);
 }
 
 void CurvesDialog::channelChanged(int index)
@@ -401,14 +320,20 @@ void CurvesDialog::curveEdited()
     static const char* keys[4] = {"curve_rgb", "curve_r", "curve_g", "curve_b"};
     for (int i = 0; i < 4; ++i)
         values_.set(QString::fromLatin1(keys[i]), QVariant::fromValue(curves_[i]));
-    preview_.update(values_);
+    preview_.requestPreview(values_);
 }
 
 void CurvesDialog::done(int result)
 {
-    preview_.clear();
+    if (finishing_) {
+        QDialog::done(result);
+        return;
+    }
+    finishing_ = true;
+    preview_.cancel();
+    preview_.clearPreview();
     if (result == QDialog::Accepted)
-        preview_.commit(values_);
+        preview_.commit(values_, this);
     else
         preview_.restoreSource();
     QDialog::done(result);
@@ -618,7 +543,7 @@ void LevelsDialog::pull()
     values_.set(QStringLiteral("blue"), blue_->isChecked());
     static_cast<HistogramStrip*>(histogramView_)
         ->setMarkers(inBlack_->value(), inWhite_->value(), gamma_->value());
-    preview_.update(values_);
+    preview_.requestPreview(values_);
 }
 
 void LevelsDialog::autoLevel()
@@ -636,9 +561,15 @@ void LevelsDialog::autoLevel()
 
 void LevelsDialog::done(int result)
 {
-    preview_.clear();
+    if (finishing_) {
+        QDialog::done(result);
+        return;
+    }
+    finishing_ = true;
+    preview_.cancel();
+    preview_.clearPreview();
     if (result == QDialog::Accepted)
-        preview_.commit(values_);
+        preview_.commit(values_, this);
     else
         preview_.restoreSource();
     QDialog::done(result);
