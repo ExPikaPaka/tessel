@@ -664,7 +664,10 @@ int main(int argc, char** argv)
     });
 
     addTest("dragging inside the box moves live text", [] {
-        auto doc = std::make_unique<Document>(300, 120, Rgba(0, 0, 0, 0));
+        // Wide enough, and moved far enough, that the text cannot land on top
+        // of where it started: how wide a word comes out depends on the fonts
+        // the machine has, and on Windows the same word is half again as wide.
+        auto doc = std::make_unique<Document>(700, 120, Rgba(0, 0, 0, 0));
         CanvasView view(std::move(doc));
         Tool* text = ToolRegistry::instance().byId(QStringLiteral("text"));
         view.setTool(text);
@@ -677,17 +680,19 @@ int main(int argc, char** argv)
         if (view.document()->textItems().empty())
             return;
         const TextItem first = view.document()->textItems().front();
-        CHECK(first.box.right() < 160);
+        CHECK(!first.box.isEmpty());
+        CHECK(first.box.right() <= 300);
 
+        const double shift = first.box.w + 8.0;
         text->press(context, makeEvent(QPointF(first.x + 4, first.y + 6)));
         drag(text, context, QPointF(first.x + 4, first.y + 6),
-             QPointF(first.x + 134, first.y + 6));
+             QPointF(first.x + 4 + shift, first.y + 6));
         text->commit(context);
         CHECK(view.document()->textItems().size() == 1);
         if (view.document()->textItems().empty())
             return;
         const TextItem moved = view.document()->textItems().front();
-        CHECK(nearly(moved.x, first.x + 130, 0.001));
+        CHECK(nearly(moved.x, first.x + shift, 0.001));
         CHECK(nearly(moved.y, first.y, 0.001));
         CHECK(moved.lines == QStringList{QStringLiteral("Tessel")});
         CHECK(textItemLive(*view.document(), moved));
