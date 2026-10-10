@@ -38,6 +38,7 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QAbstractButton>
+#include <QDockWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -754,6 +755,7 @@ void MainWindow::createDocks()
         dock->setWidget(content);
         dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable
                           | QDockWidget::DockWidgetClosable);
+        styleDockButtons(dock);
         return dock;
     };
 
@@ -939,8 +941,35 @@ void MainWindow::installToolShortcuts()
     connect(reset, &QShortcut::activated, this, [this] { colors_->resetColors(); });
 }
 
+void MainWindow::styleDockButtons(QDockWidget* dock)
+{
+    // The close and float buttons on a dock title bar carry no icon of their
+    // own once the title bar is styled, which left them invisible, and a
+    // floating panel then had no visible way to be closed or put back. Qt
+    // names both buttons, so they can be found and given one of our glyphs.
+    for (QAbstractButton* button : dock->findChildren<QAbstractButton*>()) {
+        const QString name = button->objectName();
+        if (name == QLatin1String("qt_dockwidget_closebutton")) {
+            button->setIcon(icons::get(QStringLiteral("close"), 14));
+            button->setToolTip(QStringLiteral("Close this panel"));
+        } else if (name == QLatin1String("qt_dockwidget_floatbutton")) {
+            button->setIcon(icons::get(QStringLiteral("copy"), 14));
+            button->setToolTip(QStringLiteral("Float or dock this panel"));
+        } else {
+            continue;
+        }
+        button->setIconSize(QSize(14, 14));
+        button->setFixedSize(18, 18);
+    }
+}
+
 void MainWindow::refreshIcons()
 {
+    for (QDockWidget* dock : {toolsDock_, colorsDock_, historyDock_, layersDock_}) {
+        if (dock)
+            styleDockButtons(dock);
+    }
+
     // Icons are drawn in the current foreground colour, so after a theme change
     // every one of them has to be produced again.
     for (QAction* action : findChildren<QAction*>()) {

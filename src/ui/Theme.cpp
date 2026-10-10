@@ -73,7 +73,12 @@ QToolButton:pressed, QToolButton:checked { background: %5; border-color: %5; col
 QToolButton:disabled { color: %4; }
 QStatusBar { background: %1; color: %4; border-top: 1px solid %6; }
 QStatusBar QLabel { color: %4; padding: 0 6px; }
-QDockWidget { color: %3; titlebar-close-icon: none; titlebar-normal-icon: none; }
+QDockWidget { color: %3; }
+QDockWidget::close-button, QDockWidget::float-button {
+    background: transparent; border: 1px solid transparent; border-radius: 3px;
+    padding: 0; margin: 2px; }
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+    background: %5; border-color: %5; }
 QDockWidget::title { background: %2; padding: 5px 8px; border-bottom: 1px solid %6;
                      text-align: left; font-weight: 600; }
 QDockWidget > QWidget { background: %1; }
@@ -105,11 +110,22 @@ QPushButton:disabled { color: %4; }
 QCheckBox, QRadioButton, QLabel, QGroupBox { color: %3; }
 QGroupBox { border: 1px solid %6; border-radius: 5px; margin-top: 10px; padding-top: 8px; }
 QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: %4; }
-QSlider::groove:horizontal { height: 4px; background: %6; border-radius: 2px; }
-QSlider::sub-page:horizontal { background: %5; border-radius: 2px; }
-QSlider::handle:horizontal { background: %3; width: 12px; height: 12px; margin: -5px 0;
-                             border-radius: 6px; }
-QSlider::handle:horizontal:hover { background: %5; }
+QSlider::groove:horizontal { height: 18px; background: %2; border: 1px solid %6;
+                             border-radius: 3px; }
+QSlider::sub-page:horizontal { background: %5; border: 1px solid %5;
+                               border-top-left-radius: 2px;
+                               border-bottom-left-radius: 2px; }
+QSlider::add-page:horizontal { background: %2; border-top-right-radius: 2px;
+                               border-bottom-right-radius: 2px; }
+QSlider::handle:horizontal { background: %3; border: 1px solid %6; width: 7px;
+                             margin: -1px 0; border-radius: 2px; }
+QSlider::handle:horizontal:hover { background: %5; border-color: %3; }
+QSlider::groove:vertical { width: 18px; background: %2; border: 1px solid %6;
+                           border-radius: 3px; }
+QSlider::sub-page:vertical { background: %2; }
+QSlider::add-page:vertical { background: %5; }
+QSlider::handle:vertical { background: %3; border: 1px solid %6; height: 7px;
+                           margin: 0 -1px; border-radius: 2px; }
 QScrollBar:vertical { background: %1; width: 11px; margin: 0; }
 QScrollBar:horizontal { background: %1; height: 11px; margin: 0; }
 QScrollBar::handle { background: %6; border-radius: 5px; min-height: 24px; min-width: 24px; }

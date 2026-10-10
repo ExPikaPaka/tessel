@@ -76,6 +76,7 @@ private:
     void updateZoomControls();
     void refreshPanels();
     void refreshIcons();
+    void styleDockButtons(QDockWidget* dock);
 
     // ---------------------------------------------------------- commands
     void chooseTool(const QString& toolId, bool fromShortcut = false);
