@@ -18,6 +18,9 @@ constexpr int kFormatVersion = 1;
 std::unique_ptr<Document> openDocument(const QString& path, QString* error);
 std::unique_ptr<Layer> openAsLayer(const Document& doc, const QString& path,
                                    QString* error);
+// The flattened contents of a file at its own size, with nothing cropped away.
+// Placing it is the caller's business.
+Image openFlattened(const QString& path, QString* error);
 bool saveDocument(const Document& doc, const QString& path, QString* error,
                   int quality = 92);
 

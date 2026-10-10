@@ -95,6 +95,7 @@ private:
     void duplicateLayer();
     void mergeLayerDown();
     void importLayerFromFile();
+    void placePicture(Image picture, const QString& name, bool onNewLayer);
     void moveLayer(int delta);
     void showLayerProperties();
     void flattenImage();

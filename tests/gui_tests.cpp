@@ -203,7 +203,8 @@ int main(int argc, char** argv)
         // Every registered tool appears exactly once in the palette, apart from
         // the ones reached from a menu instead. Rotate / Zoom is one of those:
         // it is a layer command on Ctrl+Shift+Z, not a palette entry.
-        const QStringList menuOnly = {QStringLiteral("transform")};
+        const QStringList menuOnly = {QStringLiteral("transform"),
+                                      QStringLiteral("place")};
         for (Tool* tool : ToolRegistry::instance().all()) {
             const int expected = menuOnly.contains(tool->id()) ? 0 : 1;
             check(order.count(tool->id()) == expected,
@@ -720,6 +721,65 @@ int main(int argc, char** argv)
         ToolContext context = view.makeContext();
         transform->cancel(context);
         CHECK(view.document()->activeLayer()->image.at(8, 8) == before.at(8, 8));
+        CHECK(view.history()->count() == 0);
+    });
+
+    addTest("placing an oversized picture keeps what hangs off the canvas", [] {
+        // Importing used to trim the picture to the canvas the moment it was
+        // loaded, so dragging it afterwards only moved the surviving crop and
+        // the rest could never be brought back into view.
+        auto doc = std::make_unique<Document>(100, 80, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* place = ToolRegistry::instance().byId(QStringLiteral("place"));
+        CHECK(place != nullptr);
+        if (!place)
+            return;
+        view.setTool(place);
+
+        // Twice the canvas, with a mark only in its bottom right quarter.
+        Image picture(200, 160, Rgba(0, 0, 0, 0));
+        ops::fillRegion(picture, Rect(150, 120, 40, 30), Rgba(255, 0, 0, 255));
+
+        ToolContext context = view.makeContext();
+        CHECK(startPlacement(context, picture, QStringLiteral("test"), true));
+        CHECK(place->isBusy());
+        CHECK(view.document()->layerCount() == 2);
+
+        // Centred, that mark sits past the bottom right corner, so nothing of
+        // it shows yet.
+        CHECK(view.document()->composite().at(95, 75).a == 0);
+
+        // Drag the picture up and left to bring the mark into view.
+        ToolEvent down = makeEvent(QPointF(50, 40));
+        place->press(context, down);
+        ToolEvent drag = makeEvent(QPointF(-10, -10));
+        drag.button = Qt::NoButton;
+        drag.buttons = Qt::LeftButton;
+        place->move(context, drag);
+        place->release(context, makeEvent(QPointF(-10, -10)));
+        place->commit(context);
+
+        // The part that was off canvas has landed, which is the whole point.
+        const Image& result = view.document()->activeLayer()->image;
+        CHECK(result.at(50, 40) == Rgba(255, 0, 0, 255));
+        // And nothing spilled outside the canvas.
+        CHECK(result.width() == 100 && result.height() == 80);
+        CHECK(view.history()->count() == 1);
+        view.history()->undo();
+        CHECK(view.document()->layerCount() == 1);
+    });
+
+    addTest("placement can be abandoned", [] {
+        auto doc = std::make_unique<Document>(60, 60, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* place = ToolRegistry::instance().byId(QStringLiteral("place"));
+        view.setTool(place);
+        Image picture(40, 40, Rgba(0, 255, 0, 255));
+        ToolContext context = view.makeContext();
+        CHECK(startPlacement(context, picture, QStringLiteral("test"), true));
+        place->cancel(context);
+        CHECK(view.document()->layerCount() == 1);
+        CHECK(nonTransparentPixels(view.document()->activeLayer()->image) == 0);
         CHECK(view.history()->count() == 0);
     });
 

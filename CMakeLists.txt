@@ -95,6 +95,7 @@ qt_add_library(tessel_ui STATIC
   src/tools/PaintTools.cpp
   src/tools/SelectTools.cpp
   src/tools/ShapeTools.cpp
+  src/tools/PlaceTool.cpp
   src/tools/TransformTool.cpp
   src/tools/MiscTools.cpp
 )

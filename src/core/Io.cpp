@@ -736,6 +736,14 @@ std::unique_ptr<Document> openDocument(const QString& path, QString* error)
     return doc;
 }
 
+Image openFlattened(const QString& path, QString* error)
+{
+    std::unique_ptr<Document> source = openDocument(path, error);
+    if (!source)
+        return Image();
+    return source->composite();
+}
+
 std::unique_ptr<Layer> openAsLayer(const Document& doc, const QString& path,
                                    QString* error)
 {

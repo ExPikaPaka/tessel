@@ -144,6 +144,14 @@ void registerSelectTools(ToolRegistry& registry);
 void registerShapeTools(ToolRegistry& registry);
 void registerMiscTools(ToolRegistry& registry);
 void registerTransformTools(ToolRegistry& registry);
+void registerPlaceTool(ToolRegistry& registry);
+
+// Hands a picture to the placement tool, which lets the user position and
+// scale it before anything is written. Returns false if there is nothing to
+// place. The picture keeps its own size: whatever hangs off the canvas is
+// trimmed when the placement is committed, not when it is loaded.
+bool startPlacement(ToolContext& context, Image picture, const QString& layerName,
+                    bool onNewLayer);
 
 // The row of tool specific controls under the main toolbar.
 class ToolOptionsBar : public QWidget {

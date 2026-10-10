@@ -1505,19 +1505,10 @@ void MainWindow::doPaste(bool intoNewLayer, bool intoNewImage)
     History* history = view->history();
 
     if (pasted.width() > doc->width() || pasted.height() > doc->height()) {
-        const QMessageBox::StandardButton answer = QMessageBox::question(
-            this, QStringLiteral("Grow the canvas?"),
-            QStringLiteral("The pasted image is %1 x %2, which is larger than the "
-                           "canvas.\n\nGrow the canvas to fit it?")
-                .arg(pasted.width()).arg(pasted.height()),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-        if (answer == QMessageBox::Yes) {
-            structuralEdit(QStringLiteral("Grow Canvas"), QStringLiteral("canvas"), [&] {
-                doc->resizeCanvas(std::max(doc->width(), pasted.width()),
-                                  std::max(doc->height(), pasted.height()),
-                                  Anchor::TopLeft, false);
-            });
-        }
+        // Too big to drop straight in, so hand it to the placement tool rather
+        // than trimming it on the way and leaving nothing to drag back.
+        placePicture(std::move(pasted), QStringLiteral("Pasted"), intoNewLayer);
+        return;
     }
 
     // The pasted pixels land at the top left of the selection, or at the origin.
@@ -2071,22 +2062,77 @@ void MainWindow::mergeLayerDown()
 
 void MainWindow::importLayerFromFile()
 {
+    CanvasView* view = currentView();
     Document* doc = currentDocument();
-    if (!doc)
+    if (!view || !doc)
         return;
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Import as Layer"), lastDirectory_, io::openFilter());
     if (path.isEmpty())
         return;
     QString error;
-    std::unique_ptr<Layer> layer = io::openAsLayer(*doc, path, &error);
-    if (!layer) {
+    // Loaded at its own size. Nothing is trimmed until the user says where it
+    // goes, so an oversized picture can still be dragged around afterwards.
+    Image picture = io::openFlattened(path, &error);
+    if (picture.isNull()) {
         QMessageBox::warning(this, QStringLiteral("Cannot import image"), error);
         return;
     }
-    Layer* raw = layer.release();
-    structuralEdit(QStringLiteral("Import Layer"), QStringLiteral("layer-add"),
-                   [doc, raw] { doc->addLayer(std::unique_ptr<Layer>(raw)); });
+    lastDirectory_ = QFileInfo(path).absolutePath();
+    placePicture(std::move(picture), QFileInfo(path).completeBaseName(), true);
+}
+
+// Shared by Import and Paste. A picture that fits simply lands; one that does
+// not lets the user choose between growing the canvas and positioning it by
+// hand, in which case only the part over the canvas is kept.
+void MainWindow::placePicture(Image picture, const QString& name, bool onNewLayer)
+{
+    CanvasView* view = currentView();
+    Document* doc = currentDocument();
+    if (!view || !doc || picture.isNull())
+        return;
+
+    const bool fits = picture.width() <= doc->width()
+        && picture.height() <= doc->height();
+    if (!fits) {
+        QMessageBox question(this);
+        question.setWindowTitle(QStringLiteral("Picture is larger than the canvas"));
+        question.setText(QStringLiteral(
+            "%1 is %2 x %3, and the canvas is %4 x %5.")
+                             .arg(name)
+                             .arg(picture.width()).arg(picture.height())
+                             .arg(doc->width()).arg(doc->height()));
+        question.setInformativeText(QStringLiteral(
+            "Grow the canvas to fit it, or place it by hand and keep only the "
+            "part that lands on the canvas."));
+        QPushButton* grow = question.addButton(QStringLiteral("Grow Canvas"),
+                                               QMessageBox::AcceptRole);
+        QPushButton* place = question.addButton(QStringLiteral("Place by Hand"),
+                                                QMessageBox::ActionRole);
+        question.addButton(QMessageBox::Cancel);
+        question.setDefaultButton(grow);
+        question.exec();
+        if (question.clickedButton() == grow) {
+            const int width = std::max(doc->width(), picture.width());
+            const int height = std::max(doc->height(), picture.height());
+            structuralEdit(QStringLiteral("Grow Canvas"), QStringLiteral("canvas"),
+                           [doc, width, height] {
+                               doc->resizeCanvas(width, height, Anchor::TopLeft, false);
+                           });
+            view->zoomToFit();
+        } else if (question.clickedButton() != place) {
+            return;
+        }
+    }
+
+    chooseTool(QStringLiteral("place"));
+    ToolContext context = view->makeContext();
+    if (!startPlacement(context, std::move(picture), name, onNewLayer)) {
+        hintLabel_->setText(QStringLiteral("Nothing to place"));
+        return;
+    }
+    view->setFocus();
+    updateEverything();
 }
 
 void MainWindow::moveLayer(int delta)

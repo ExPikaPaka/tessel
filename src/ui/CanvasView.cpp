@@ -398,9 +398,12 @@ void CanvasView::drawCanvas(QPainter& painter)
     if (showGrid_ && zoom_ >= 4.0)
         drawPixelGrid(painter);
 
-    // Tool overlay and selection are drawn in document space.
+    // Tool overlay and selection are drawn in document space. The clip is the
+    // viewport rather than the canvas, because a tool may legitimately draw
+    // outside the image: placing a picture larger than the canvas puts its
+    // corner handles beyond the edge, and they have to be reachable.
     painter.save();
-    painter.setClipRect(target.adjusted(-1, -1, 1, 1));
+    painter.setClipRect(viewport()->rect());
     painter.translate(origin);
     painter.scale(zoom_, zoom_);
     painter.setRenderHint(QPainter::Antialiasing, true);
