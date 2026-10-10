@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QTransform>
 
@@ -25,6 +26,8 @@
 #include "core/Units.h"
 #include "core/Zip.h"
 #include "effects/Effect.h"
+#include "effects/EffectPlugin.h"
+#include "effects/EffectPluginHost.h"
 
 using namespace tessel;
 
@@ -74,6 +77,54 @@ Image gradient(int w, int h)
         }
     }
     return image;
+}
+
+// A plugin that never left the process, which is how the loader's version gate
+// and its reporting are tested without building a library for every case.
+class FakePlugin : public EffectPlugin {
+public:
+    FakePlugin(int interfaceVersion, QString effectId, QString category)
+        : version_(interfaceVersion), id_(std::move(effectId)),
+          category_(std::move(category))
+    {
+    }
+
+    int interfaceVersion() const override { return version_; }
+    QString name() const override { return QStringLiteral("Fake Plugin"); }
+    QString version() const override { return QStringLiteral("2.3"); }
+    QString author() const override { return QStringLiteral("Nobody"); }
+
+    void registerEffects(EffectRegistry& registry) override
+    {
+        fx::add(registry, id_.toLatin1().constData(), "Fake Effect",
+                category_.toLatin1().constData(),
+                {ParamSpec::intParam(QStringLiteral("amount"), QStringLiteral("Amount"),
+                                     0, 10, 3)},
+                [](const EffectContext& context, const ParamValues& values) {
+                    const int amount = values.intValue(QStringLiteral("amount"), 3);
+                    return fx::mapPixels(context, [amount](Rgba c, int, int) {
+                        return Rgba(uint8_t(amount), c.g, c.b, c.a);
+                    });
+                });
+    }
+
+private:
+    int version_;
+    QString id_;
+    QString category_;
+};
+
+// What a library is called on this platform, so the loader sees a file it is
+// meant to try to open.
+const char* libraryName()
+{
+#ifdef Q_OS_WIN
+    return "broken.dll";
+#elif defined(Q_OS_MACOS)
+    return "broken.dylib";
+#else
+    return "broken.so";
+#endif
 }
 
 // The effects that carry the cooperative progress channel.
@@ -1026,6 +1077,157 @@ int main(int argc, char** argv)
         CHECK(values.choiceValue(QStringLiteral("ch")) == 1);
         CHECK(values.intValue(QStringLiteral("absent"), 42) == 42);
     });
+
+    // ------------------------------------------------------------ plugins
+    addTest("plugin directories", [] {
+        const QStringList dirs = plugins::directories();
+        CHECK(!dirs.isEmpty());
+        for (const QString& dir : dirs)
+            check(dir.endsWith(QStringLiteral("/plugins")), "ends with /plugins", __LINE__);
+        // One of them always sits beside the executable, so a build tree can be
+        // run from without installing anything.
+        CHECK(dirs.contains(QCoreApplication::applicationDirPath()
+                            + QStringLiteral("/plugins")));
+        // The same directory is never scanned twice.
+        CHECK(QSet<QString>(dirs.begin(), dirs.end()).size() == dirs.size());
+    });
+
+    addTest("the plugin version gate", [] {
+        EffectRegistry registry;
+        plugins::LoadReport report;
+
+        // Built against a version this host does not host: refused, named, and
+        // nothing of its own reaches the registry.
+        FakePlugin stale(kEffectPluginVersion + 1, QStringLiteral("stale_fake"),
+                         QStringLiteral("Examples"));
+        CHECK(!plugins::acceptPlugin(&stale, QStringLiteral("/tmp/stale.so"), registry,
+                                     report));
+        CHECK(report.loaded.empty());
+        CHECK(report.failed.size() == 1);
+        CHECK(report.failed[0].reason.contains(
+            QString::number(kEffectPluginVersion + 1)));
+        CHECK(report.failed[0].reason.contains(QString::number(kEffectPluginVersion)));
+        CHECK(registry.all().empty());
+
+        // A matching one registers, and the report says what it brought.
+        FakePlugin good(kEffectPluginVersion, QStringLiteral("good_fake"),
+                        QStringLiteral("Examples"));
+        CHECK(plugins::acceptPlugin(&good, QStringLiteral("/tmp/good.so"), registry,
+                                    report));
+        CHECK(report.loaded.size() == 1);
+        CHECK(report.loaded[0].name == QStringLiteral("Fake Plugin"));
+        CHECK(report.loaded[0].version == QStringLiteral("2.3"));
+        CHECK(report.loaded[0].author == QStringLiteral("Nobody"));
+        CHECK(report.loaded[0].effects == QStringList{QStringLiteral("Fake Effect")});
+        CHECK(registry.byId(QStringLiteral("good_fake")) != nullptr);
+        CHECK(registry.categories() == QStringList{QStringLiteral("Examples")});
+
+        // A null plugin is a failure, not a crash.
+        CHECK(!plugins::acceptPlugin(nullptr, QStringLiteral("/tmp/null.so"), registry,
+                                     report));
+        CHECK(report.failed.size() == 2);
+    });
+
+    addTest("loading a directory of broken plugins", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        EffectRegistry registry;
+        plugins::LoadReport report;
+
+        // Nothing there at all, and a directory that does not exist: both are
+        // silent, because that is the normal case.
+        plugins::loadDirectory(dir.path(), registry, report);
+        plugins::loadDirectory(dir.filePath(QStringLiteral("absent")), registry, report);
+        CHECK(report.loaded.empty());
+        CHECK(report.failed.empty());
+
+        // Anything that is not a library is somebody's notes, not a plugin.
+        QFile notes(dir.filePath(QStringLiteral("README.txt")));
+        CHECK(notes.open(QIODevice::WriteOnly));
+        notes.write("not a plugin\n");
+        notes.close();
+        plugins::loadDirectory(dir.path(), registry, report);
+        CHECK(report.failed.empty());
+
+        // A library that is not one is reported with the loader's own reason.
+        QFile broken(dir.filePath(QString::fromLatin1(libraryName())));
+        CHECK(broken.open(QIODevice::WriteOnly));
+        broken.write("this is not an object file\n");
+        broken.close();
+        plugins::loadDirectory(dir.path(), registry, report);
+        CHECK(report.loaded.empty());
+        CHECK(report.failed.size() == 1);
+        CHECK(!report.failed[0].reason.isEmpty());
+        CHECK(report.failed[0].path.endsWith(QString::fromLatin1(libraryName())));
+    });
+
+    addTest("the plugin report reads back", [] {
+        plugins::LoadReport empty;
+        // A machine with no plugins has nothing to say in the status bar.
+        CHECK(empty.summary().isEmpty());
+        CHECK(empty.html().contains(QStringLiteral("No plugins were found")));
+
+        plugins::LoadReport report;
+        report.directories = QStringList{QStringLiteral("/home/someone/plugins")};
+        report.loaded.push_back({QStringLiteral("/home/someone/plugins/a.so"),
+                                 QStringLiteral("Scanlines & Co"), QStringLiteral("1.0"),
+                                 QStringLiteral("Nobody"),
+                                 QStringList{QStringLiteral("Scanlines")}});
+        CHECK(report.summary() == QStringLiteral("1 effect plugin loaded."));
+
+        report.failed.push_back({QStringLiteral("/home/someone/plugins/b.so"),
+                                 QStringLiteral("cannot load")});
+        // A failure takes over the line, because it is the part worth reading.
+        CHECK(report.summary().contains(QStringLiteral("failed to load")));
+        CHECK(report.summary().contains(QStringLiteral("About the")));
+
+        const QString html = report.html();
+        CHECK(html.contains(QStringLiteral("/home/someone/plugins")));
+        CHECK(html.contains(QStringLiteral("Scanlines &amp; Co"))); // escaped
+        CHECK(html.contains(QStringLiteral("Nobody")));
+        CHECK(html.contains(QStringLiteral("b.so")));
+        CHECK(html.contains(QStringLiteral("cannot load")));
+        CHECK(html.contains(QString::number(kEffectPluginVersion)));
+    });
+
+#ifdef TESSEL_EXAMPLE_PLUGIN_FILE
+    addTest("the example plugin loads from its library", [] {
+        EffectRegistry registry;
+        plugins::LoadReport report;
+        plugins::loadFile(QString::fromLatin1(TESSEL_EXAMPLE_PLUGIN_FILE), registry,
+                          report);
+        CHECK(report.failed.empty());
+        CHECK(report.loaded.size() == 1);
+        CHECK(report.loaded[0].name == QStringLiteral("Scanlines Example"));
+        CHECK(report.loaded[0].effects == QStringList{QStringLiteral("Scanlines")});
+
+        Effect* effect = registry.byId(QStringLiteral("example_scanlines"));
+        CHECK(effect != nullptr);
+        if (!effect)
+            return;
+        CHECK(effect->category() == QStringLiteral("Examples"));
+        CHECK(effect->params().size() == 3);
+        CHECK(effect->hasDialog());
+
+        // The effect itself runs like any other, so the generated dialog and
+        // the live preview have everything they need from it.
+        const Image source = solid(16, 16, Rgba(200, 200, 200, 255));
+        EffectContext context;
+        context.source = &source;
+        context.region = source.rect();
+        ParamValues values = ParamValues::defaults(effect->params());
+        CHECK(values.intValue(QStringLiteral("spacing")) == 4);
+        const Image out = effect->apply(context, values);
+        CHECK(out.width() == 16 && out.height() == 16);
+        CHECK(out.at(0, 0).r < 200); // every fourth row is tinted
+        CHECK(out.at(0, 1) == source.at(0, 1));
+        CHECK(out.at(0, 4).r < 200);
+        // Strength at zero is a no op, which is where the preview starts from
+        // when the slider is dragged down.
+        values.set(QStringLiteral("strength"), 0.0);
+        CHECK(samePixels(effect->apply(context, values), source));
+    });
+#endif
 
     // ------------------------------------------------------------ palettes
     addTest("palette gpl round trip", [] {

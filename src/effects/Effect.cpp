@@ -1,7 +1,6 @@
 #include "effects/Effect.h"
 
 #include <cmath>
-#include <mutex>
 
 namespace tessel {
 
@@ -209,23 +208,6 @@ std::vector<Effect*> EffectRegistry::inCategory(const QString& category) const
             out.push_back(effect);
     }
     return out;
-}
-
-void registerBuiltinEffects()
-{
-    static std::once_flag flag;
-    std::call_once(flag, [] {
-        EffectRegistry& registry = EffectRegistry::instance();
-        registerAdjustments(registry);
-        registerBlurs(registry);
-        registerColorEffects(registry);
-        registerDistortions(registry);
-        registerNoise(registry);
-        registerObjectEffects(registry);
-        registerPhoto(registry);
-        registerRenderers(registry);
-        registerStylize(registry);
-    });
 }
 
 namespace fx {
