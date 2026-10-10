@@ -127,6 +127,12 @@ void ColorWheel::pick(QPointF pos)
     if (hue_ < 0)
         hue_ += 360.0f;
     saturation_ = float(std::clamp(distance / radius, 0.0, 1.0));
+    // The disc is drawn at full brightness, so picking from it while the
+    // current value is zero would hand back black and look like nothing had
+    // happened. Starting from a black primary colour, which is the default,
+    // that made the wheel appear dead. Pick what is actually shown instead.
+    if (value_ <= 0.004f)
+        value_ = 1.0f;
     float r = 0, g = 0, b = 0;
     ops::hsvToRgb(hue_, saturation_, value_, r, g, b);
     color_ = Rgba(toByte(r), toByte(g), toByte(b), color_.a);

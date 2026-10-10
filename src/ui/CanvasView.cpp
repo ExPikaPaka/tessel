@@ -73,18 +73,57 @@ QPointF CanvasView::canvasOrigin() const
 {
     const QSizeF scaled = scaledCanvasSize();
     const QSize port = viewport()->size();
-    const double extraLeft = showRulers_ ? kRulerSize : 0;
-    double x = extraLeft;
-    double y = showRulers_ ? kRulerSize : 0;
-    if (scaled.width() + extraLeft < port.width())
-        x = (port.width() - scaled.width()) / 2.0;
+    const double rulers = showRulers_ ? kRulerSize : 0;
+
+    // On each axis the image is either larger than the viewport, in which case
+    // the scroll bar positions it, or it fits, in which case it is centred and
+    // nudged by the free pan offset.
+    double x = 0.0;
+    if (scaled.width() + rulers < port.width())
+        x = (port.width() - scaled.width()) / 2.0 + panOffset_.x();
     else
-        x = extraLeft - horizontalScrollBar()->value();
-    if (scaled.height() + y < port.height())
-        y = (port.height() - scaled.height()) / 2.0;
+        x = rulers - horizontalScrollBar()->value();
+
+    double y = 0.0;
+    if (scaled.height() + rulers < port.height())
+        y = (port.height() - scaled.height()) / 2.0 + panOffset_.y();
     else
-        y = (showRulers_ ? kRulerSize : 0) - verticalScrollBar()->value();
+        y = rulers - verticalScrollBar()->value();
+
     return QPointF(std::floor(x), std::floor(y));
+}
+
+void CanvasView::clampPanOffset()
+{
+    // Keep a strip of the image reachable so it can never be flung out of view.
+    const QSizeF scaled = scaledCanvasSize();
+    const QSize port = viewport()->size();
+    const double slackX = std::max(0.0, (port.width() + scaled.width()) / 2.0 - 48.0);
+    const double slackY = std::max(0.0, (port.height() + scaled.height()) / 2.0 - 48.0);
+    panOffset_.setX(std::clamp(panOffset_.x(), -slackX, slackX));
+    panOffset_.setY(std::clamp(panOffset_.y(), -slackY, slackY));
+}
+
+void CanvasView::panBy(QPointF delta)
+{
+    const QSizeF scaled = scaledCanvasSize();
+    const QSize port = viewport()->size();
+    const double rulers = showRulers_ ? kRulerSize : 0;
+
+    if (scaled.width() + rulers < port.width())
+        panOffset_.setX(panOffset_.x() - delta.x());
+    else
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value()
+                                        + int(std::lround(delta.x())));
+
+    if (scaled.height() + rulers < port.height())
+        panOffset_.setY(panOffset_.y() - delta.y());
+    else
+        verticalScrollBar()->setValue(verticalScrollBar()->value()
+                                      + int(std::lround(delta.y())));
+
+    clampPanOffset();
+    viewport()->update();
 }
 
 QPointF CanvasView::docFromView(QPointF viewPos) const
@@ -136,12 +175,10 @@ void CanvasView::setZoom(double zoom, QPointF anchorDoc)
     fitMode_ = false;
     zoom_ = zoom;
     updateScrollBars();
-    // Keep the anchor point under the same screen position.
+    // Keep the anchor point under the same screen position. Routed through
+    // panBy so this also works when the image is smaller than the viewport.
     const QPointF newView = viewFromDoc(anchorDoc);
-    horizontalScrollBar()->setValue(horizontalScrollBar()->value()
-                                    + int(std::lround(newView.x() - anchorView.x())));
-    verticalScrollBar()->setValue(verticalScrollBar()->value()
-                                  + int(std::lround(newView.y() - anchorView.y())));
+    panBy(newView - anchorView);
     viewport()->update();
     emit zoomChanged(zoom_);
 }
@@ -180,6 +217,7 @@ void CanvasView::zoomToFit()
                                 availableH / std::max(1, doc_->height()));
     zoom_ = std::clamp(fit, kMinZoom, kMaxZoom);
     fitMode_ = true;
+    panOffset_ = QPointF();
     updateScrollBars();
     viewport()->update();
     emit zoomChanged(zoom_);
@@ -252,12 +290,7 @@ ToolContext CanvasView::makeContext()
         emit colorPicked(color, isPrimary);
     };
     context.zoomTo = [this](double zoom, QPointF anchor) { setZoom(zoom, anchor); };
-    context.scrollBy = [this](QPointF delta) {
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value()
-                                        + int(std::lround(delta.x())));
-        verticalScrollBar()->setValue(verticalScrollBar()->value()
-                                      + int(std::lround(delta.y())));
-    };
+    context.scrollBy = [this](QPointF delta) { panBy(delta); };
     context.requestTool = [this](const QString& id) { emit toolRequested(id); };
     return context;
 }
@@ -504,8 +537,7 @@ void CanvasView::mouseMoveEvent(QMouseEvent* event)
     }
     if (panning_) {
         const QPoint delta = panAnchor_ - event->position().toPoint();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() + delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() + delta.y());
+        panBy(QPointF(delta));
         panAnchor_ = event->position().toPoint();
         return;
     }

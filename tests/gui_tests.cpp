@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QTemporaryDir>
 
+#include "core/ImageOps.h"
 #include "core/Io.h"
 #include "tools/Tool.h"
 #include "ui/CanvasView.h"
@@ -399,6 +400,138 @@ int main(int argc, char** argv)
         CHECK(image.at(15, 15).r == 55);
         CHECK(image.at(2, 2).r == 200);
         CHECK(image.at(39, 39).r == 200);
+    });
+
+    // ------------------------------------------------------------ regressions
+    addTest("colour wheel picks a visible colour from black", [] {
+        // The disc is drawn at full brightness, so a pick has to return what is
+        // shown even when the current colour is black, which is the default
+        // primary. Otherwise the wheel looks dead until a colour is chosen
+        // elsewhere first.
+        ColorPanel panel;
+        panel.resize(240, 520);
+        panel.show();
+        QApplication::processEvents();
+        CHECK(panel.primary() == Rgba(0, 0, 0, 255));
+
+        ColorWheel* wheel = panel.findChild<ColorWheel*>();
+        CHECK(wheel != nullptr);
+        if (!wheel)
+            return;
+        int primarySignals = 0;
+        QObject::connect(&panel, &ColorPanel::primaryChanged,
+                         [&](Rgba) { ++primarySignals; });
+
+        const QPointF at(wheel->width() * 0.72, wheel->height() * 0.34);
+        QMouseEvent press(QEvent::MouseButtonPress, at, wheel->mapToGlobal(at),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(wheel, &press);
+        QApplication::processEvents();
+
+        CHECK(primarySignals > 0);
+        CHECK(!(panel.primary() == Rgba(0, 0, 0, 255)));
+        CHECK(ops::luminance(panel.primary()) > 0.1f);
+        // The secondary path, which always worked, must keep working.
+        panel.setSecondary(Rgba(0, 0, 0, 255));
+        CHECK(panel.secondary() == Rgba(0, 0, 0, 255));
+    });
+
+    addTest("panning works when the image fits the viewport", [] {
+        auto doc = std::make_unique<Document>(100, 80);
+        CanvasView view(std::move(doc));
+        view.resize(600, 420);
+        view.show();
+        QApplication::processEvents();
+        view.setZoom(1.0);
+
+        auto probe = [&view](QPointF at) {
+            QMouseEvent move(QEvent::MouseMove, at, view.viewport()->mapToGlobal(at),
+                             Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(view.viewport(), &move);
+            return view.lastCursorPixel();
+        };
+
+        const QPointF spot(300, 210);
+        const QPoint before = probe(spot);
+
+        // Middle button drag, which used to do nothing at all while the whole
+        // image was visible because the scroll bars had no range.
+        QMouseEvent press(QEvent::MouseButtonPress, spot,
+                          view.viewport()->mapToGlobal(spot), Qt::MiddleButton,
+                          Qt::MiddleButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &press);
+        const QPointF moved = spot + QPointF(40, 20);
+        QMouseEvent drag(QEvent::MouseMove, moved, view.viewport()->mapToGlobal(moved),
+                         Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &drag);
+        QMouseEvent release(QEvent::MouseButtonRelease, moved,
+                            view.viewport()->mapToGlobal(moved), Qt::MiddleButton,
+                            Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &release);
+        QApplication::processEvents();
+
+        const QPoint after = probe(spot);
+        CHECK(after != before);
+        // Dragging right by 40 at 100% moves the image under the cursor by 40.
+        CHECK(std::abs((before.x() - after.x()) - 40) <= 2);
+        CHECK(std::abs((before.y() - after.y()) - 20) <= 2);
+    });
+
+    addTest("zoom keeps the anchor under the cursor when the image fits", [] {
+        auto doc = std::make_unique<Document>(120, 90);
+        CanvasView view(std::move(doc));
+        view.resize(640, 480);
+        view.show();
+        QApplication::processEvents();
+        view.setZoom(1.0);
+
+        auto probe = [&view](QPointF at) {
+            QMouseEvent move(QEvent::MouseMove, at, view.viewport()->mapToGlobal(at),
+                             Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(view.viewport(), &move);
+            return view.lastCursorPixel();
+        };
+
+        const QPointF spot(360, 200);
+        const QPoint before = probe(spot);
+        view.setZoom(4.0, QPointF(before.x(), before.y()));
+        QApplication::processEvents();
+        const QPoint after = probe(spot);
+        // The pixel under the cursor should barely move, rather than the image
+        // simply staying centred as it did before.
+        CHECK(std::abs(after.x() - before.x()) <= 2);
+        CHECK(std::abs(after.y() - before.y()) <= 2);
+    });
+
+    addTest("panning still works when the image is larger than the viewport", [] {
+        auto doc = std::make_unique<Document>(2000, 1500);
+        CanvasView view(std::move(doc));
+        view.resize(500, 400);
+        view.show();
+        QApplication::processEvents();
+        view.setZoom(1.0);
+
+        auto probe = [&view](QPointF at) {
+            QMouseEvent move(QEvent::MouseMove, at, view.viewport()->mapToGlobal(at),
+                             Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(view.viewport(), &move);
+            return view.lastCursorPixel();
+        };
+
+        const QPointF spot(250, 200);
+        const QPoint before = probe(spot);
+        QMouseEvent press(QEvent::MouseButtonPress, spot,
+                          view.viewport()->mapToGlobal(spot), Qt::MiddleButton,
+                          Qt::MiddleButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &press);
+        const QPointF moved = spot + QPointF(-30, -25);
+        QMouseEvent drag(QEvent::MouseMove, moved, view.viewport()->mapToGlobal(moved),
+                         Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &drag);
+        QApplication::processEvents();
+        const QPoint after = probe(spot);
+        CHECK(std::abs((before.x() - after.x()) + 30) <= 2);
+        CHECK(std::abs((before.y() - after.y()) + 25) <= 2);
     });
 
     // ------------------------------------------------------------ main window

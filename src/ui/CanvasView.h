@@ -49,6 +49,10 @@ public:
 
     // Builds the context that menu commands use to touch the document.
     ToolContext makeContext();
+    // Moves the view by a delta in widget pixels. Uses the scroll bars where
+    // the image is larger than the viewport, and a free offset where it fits,
+    // so panning and zoom anchoring behave the same at every zoom level.
+    void panBy(QPointF delta);
     void commitPendingTool();
     void cancelPendingTool();
     void refresh();              // the whole document changed
@@ -84,6 +88,7 @@ private:
     QPointF canvasOrigin() const;
     QSizeF scaledCanvasSize() const;
     void updateScrollBars();
+    void clampPanOffset();
     ToolEvent buildEvent(QMouseEvent* event) const;
     void drawCanvas(QPainter& painter);
     void drawSelection(QPainter& painter);
@@ -102,6 +107,7 @@ private:
     bool panning_ = false;
     bool spaceHeld_ = false;
     QPoint panAnchor_;
+    QPointF panOffset_;
     QPoint lastPixel_;
     QTimer antsTimer_;
     int antsPhase_ = 0;
