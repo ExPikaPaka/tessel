@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QPalette>
+#include <QProxyStyle>
 #include <QStyleFactory>
 
 namespace tessel::theme {
@@ -9,6 +10,26 @@ namespace tessel::theme {
 namespace {
 
 Mode activeMode = Mode::Dark;
+
+// Clicking the groove of a slider normally nudges it by one page and stops
+// there, so reaching a value takes several clicks and the handle cannot be
+// dragged from where it landed. This makes the left button jump the handle
+// straight to the click and keep following the pointer, which is what a value
+// slider is for. The middle button keeps the paging behaviour.
+class SliderStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int styleHint(StyleHint hint, const QStyleOption* option, const QWidget* widget,
+                  QStyleHintReturn* returnData) const override
+    {
+        if (hint == SH_Slider_AbsoluteSetButtons)
+            return Qt::LeftButton;
+        if (hint == SH_Slider_PageSetButtons)
+            return Qt::MiddleButton;
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
 
 struct Colors {
     QColor window;
@@ -147,7 +168,7 @@ void apply(QApplication& app, Mode mode)
 {
     activeMode = mode;
     const Colors& c = colors();
-    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    app.setStyle(new SliderStyle(QStyleFactory::create(QStringLiteral("Fusion"))));
 
     QPalette palette;
     palette.setColor(QPalette::Window, c.window);

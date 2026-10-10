@@ -862,9 +862,10 @@ int main(int argc, char** argv)
         CHECK(brush != nullptr);
         view.setTool(brush);
         view.setPrimaryColor(Rgba(255, 255, 255, 255));
-        // A wide, very soft brush, which is the case that beaded worst.
+        // A wide brush at middling hardness: soft enough that beading showed,
+        // hard enough that one pass still covers completely.
         brush->optionChanged(QStringLiteral("width"), 40);
-        brush->optionChanged(QStringLiteral("hardness"), 5);
+        brush->optionChanged(QStringLiteral("hardness"), 50);
 
         ToolContext context = view.makeContext();
         drag(brush, context, QPointF(20, 50), QPointF(200, 50));
@@ -884,6 +885,39 @@ int main(int argc, char** argv)
         // Put the options back so later tests see the defaults.
         brush->optionChanged(QStringLiteral("width"), 12);
         brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("the softest brush is a faint haze that builds up", [] {
+        // At the lowest hardness one pass should barely mark the canvas, and
+        // going over the same ground again should deepen it.
+        auto doc = std::make_unique<Document>(200, 100, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(0, 0, 0, 255));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 1);
+
+        ToolContext context = view.makeContext();
+        drag(brush, context, QPointF(20, 50), QPointF(180, 50));
+        const int once = view.document()->activeLayer()->image.at(100, 50).a;
+        CHECK(once > 10);   // it does mark the canvas
+        CHECK(once < 90);   // but only faintly
+
+        drag(brush, context, QPointF(20, 50), QPointF(180, 50));
+        const int twice = view.document()->activeLayer()->image.at(100, 50).a;
+        CHECK(twice > once + 10);  // a second pass deepens it
+
+        // A hard brush still covers completely in one pass.
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+        auto solidDoc = std::make_unique<Document>(200, 100, Rgba(0, 0, 0, 0));
+        CanvasView solidView(std::move(solidDoc));
+        solidView.setTool(brush);
+        solidView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        ToolContext solidContext = solidView.makeContext();
+        drag(brush, solidContext, QPointF(20, 50), QPointF(180, 50));
+        CHECK(solidView.document()->activeLayer()->image.at(100, 50).a == 255);
+        brush->optionChanged(QStringLiteral("width"), 12);
     });
 
     addTest("escape clears the selection", [] {

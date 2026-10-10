@@ -167,6 +167,15 @@ protected:
         // coverage drops away immediately from the centre line and trails off.
         const double shape = 1.0 + 2.0 * (1.0 - hard) * (1.0 - hard);
         const bool straight = shape <= 1.02;
+        // How much pigment one pass lays down. A hard brush covers completely,
+        // but a very soft one is a haze that has to be built up, which is what
+        // a real soft brush does and what makes the lowest settings usable.
+        // It also takes the sting out of crossings: with no saturated core, the
+        // kink where two passes of the stroke are equidistant shows up across
+        // the whole falloff, and scaling the whole thing down scales that down
+        // with it. Anything at or above roughly a third hardness still covers
+        // fully, so the default brush is unchanged.
+        const double density = 0.15 + 0.85 * std::min(1.0, hard / 0.35);
 
         const Rect box = stampBounds(from, to).intersected(coverage_.rect());
         const double abx = to.x() - from.x();
@@ -203,7 +212,7 @@ protected:
                     coverage = std::min(1.0, coverage);
                     if (!straight)
                         coverage = std::pow(coverage, shape);
-                    const float value = float(coverage) * amount;
+                    const float value = float(coverage * density) * amount;
                     const float here = float(arcStart + along * length);
                     const float previous = line[x];
                     if (previous <= 0.0f) {
