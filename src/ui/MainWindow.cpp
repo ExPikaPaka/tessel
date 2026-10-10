@@ -447,7 +447,7 @@ void MainWindow::createActions()
     // ---------------------------------------------------------------- help
     make(QStringLiteral("shortcuts"), QStringLiteral("&Keyboard Shortcuts"),
          QStringLiteral("settings"), QKeySequence(QStringLiteral("F1")),
-         [this] { showShortcutsDialog(this); });
+         [this] { showShortcutsDialog(this, collectShortcuts()); });
     make(QStringLiteral("about"), QStringLiteral("&About Tessel"), QStringLiteral("about"),
          QKeySequence(), [this] { showAboutDialog(this); });
 }
@@ -1739,6 +1739,77 @@ void MainWindow::showSettings()
         resizeDocks({toolsDock_, historyDock_}, {86, 240}, Qt::Horizontal);
     }
     updateEverything();
+}
+
+QList<ShortcutEntry> MainWindow::collectShortcuts() const
+{
+    QList<ShortcutEntry> entries;
+    auto clean = [](QString text) {
+        text.remove(QLatin1Char('&'));
+        if (text.endsWith(QStringLiteral("...")))
+            text.chop(3);
+        return text.trimmed();
+    };
+
+    // Tool letters come from the registry, including the groups that cycle.
+    QHash<QString, QStringList> byKey;
+    QStringList keyOrder;
+    for (Tool* tool : ToolRegistry::instance().all()) {
+        if (tool->shortcut().isEmpty())
+            continue;
+        if (!byKey.contains(tool->shortcut()))
+            keyOrder.append(tool->shortcut());
+        byKey[tool->shortcut()].append(tool->name());
+    }
+    for (const QString& key : keyOrder) {
+        const QStringList names = byKey.value(key);
+        entries.append({QStringLiteral("Tools"),
+                        names.size() > 1
+                            ? QStringLiteral("%1 (press again to cycle, Shift to go back)")
+                                  .arg(names.join(QStringLiteral(", ")))
+                            : names.first(),
+                        key});
+    }
+    entries.append({QStringLiteral("Tools"), QStringLiteral("Open the tool list"),
+                    QStringLiteral("Alt+T")});
+    entries.append({QStringLiteral("Tools"), QStringLiteral("Swap the palette colours"),
+                    QStringLiteral("X")});
+    entries.append({QStringLiteral("Tools"), QStringLiteral("Reset the palette colours"),
+                    QStringLiteral("D")});
+
+    // Everything else is read back out of the menus that were actually built.
+    std::function<void(const QString&, QMenu*)> walk = [&](const QString& group,
+                                                           QMenu* menu) {
+        for (QAction* action : menu->actions()) {
+            if (action->isSeparator())
+                continue;
+            if (QMenu* submenu = action->menu()) {
+                walk(group, submenu);
+                continue;
+            }
+            if (action->shortcut().isEmpty())
+                continue;
+            entries.append({group, clean(action->text()),
+                            action->shortcut().toString(QKeySequence::NativeText)});
+        }
+    };
+    for (QAction* menuAction : menuBar()->actions()) {
+        if (QMenu* menu = menuAction->menu())
+            walk(clean(menuAction->text()), menu);
+    }
+
+    entries.append({QStringLiteral("Canvas"), QStringLiteral("Zoom around the pointer"),
+                    QStringLiteral("Ctrl+Wheel")});
+    entries.append({QStringLiteral("Canvas"), QStringLiteral("Pan"),
+                    QStringLiteral("Middle drag, or hold Space")});
+    entries.append({QStringLiteral("Canvas"),
+                    QStringLiteral("Paint with the secondary colour"),
+                    QStringLiteral("Right drag")});
+    entries.append({QStringLiteral("Canvas"),
+                    QStringLiteral("Finish, then deselect"), QStringLiteral("Enter")});
+    entries.append({QStringLiteral("Canvas"),
+                    QStringLiteral("Abandon, then deselect"), QStringLiteral("Esc")});
+    return entries;
 }
 
 void MainWindow::printImage()

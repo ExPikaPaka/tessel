@@ -12,6 +12,7 @@
 #include "effects/Effect.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
+#include "ui/Dialogs.h"
 #include "ui/Docks.h"
 
 class QAction;
@@ -102,6 +103,7 @@ private:
     void setLayerVisible(int index, bool visible);
     void goToLayer(int index);
     void showSettings();
+    QList<ShortcutEntry> collectShortcuts() const;
     void structuralEdit(const QString& name, const QString& icon,
                         const std::function<void()>& action);
 

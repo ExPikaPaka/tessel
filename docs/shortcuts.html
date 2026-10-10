@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyboard reference - Tessel</title>
+<meta name="description" content="Every keyboard shortcut in Tessel: tools, file and edit, selections, view, image, layers, adjustments and effects, and what the mouse does on the canvas.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span>Tessel</a>
+    <nav class="site-nav" aria-label="Documentation">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="guide.html">Guide</a></li>
+        <li><a href="shortcuts.html" aria-current="page">Shortcuts</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel">Source</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <h1>Keyboard reference</h1>
+  <p class="lede">Every shortcut the program binds, grouped the way the menus are. A shorter
+    version of the same list is inside Tessel under <kbd>F1</kbd>, or Help, Keyboard
+    Shortcuts.</p>
+
+  <nav class="toc" aria-labelledby="toc-heading">
+    <h2 id="toc-heading">On this page</h2>
+    <ul>
+      <li><a href="#tools">Tools and colours</a></li>
+      <li><a href="#file">File and window</a></li>
+      <li><a href="#edit">Edit and selection</a></li>
+      <li><a href="#view">View</a></li>
+      <li><a href="#image">Image</a></li>
+      <li><a href="#layers">Layers</a></li>
+      <li><a href="#adjustments">Adjustments and effects</a></li>
+      <li><a href="#canvas">On the canvas</a></li>
+    </ul>
+  </nav>
+
+  <section id="tools">
+    <h2>Tools and colours</h2>
+    <p>A tool key works whenever the main window has the focus and you are not typing into a
+      field. Where several tools share a key, pressing it again moves to the next one, and
+      <kbd>Shift</kbd> with that key moves back.</p>
+    <div class="table-scroll">
+      <table>
+        <caption>Choosing a tool</caption>
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">Tool</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>S</kbd></th><td>Rectangle Select, then Lasso Select, Ellipse Select and Magic Wand</td></tr>
+          <tr><th scope="row" class="keys"><kbd>M</kbd></th><td>Move Selected Pixels, then Move Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>B</kbd></th><td>Paintbrush</td></tr>
+          <tr><th scope="row" class="keys"><kbd>P</kbd></th><td>Pencil</td></tr>
+          <tr><th scope="row" class="keys"><kbd>E</kbd></th><td>Eraser</td></tr>
+          <tr><th scope="row" class="keys"><kbd>F</kbd></th><td>Paint Bucket</td></tr>
+          <tr><th scope="row" class="keys"><kbd>G</kbd></th><td>Gradient</td></tr>
+          <tr><th scope="row" class="keys"><kbd>L</kbd></th><td>Clone Stamp</td></tr>
+          <tr><th scope="row" class="keys"><kbd>R</kbd></th><td>Recolor</td></tr>
+          <tr><th scope="row" class="keys"><kbd>K</kbd></th><td>Color Picker</td></tr>
+          <tr><th scope="row" class="keys"><kbd>T</kbd></th><td>Text</td></tr>
+          <tr><th scope="row" class="keys"><kbd>O</kbd></th><td>Line / Curve, then Shapes</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Z</kbd></th><td>Zoom</td></tr>
+          <tr><th scope="row" class="keys"><kbd>H</kbd></th><td>Pan</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Shift</kbd> + the key</th><td>Cycle backwards through the tools on that key</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Alt</kbd>+<kbd>T</kbd></th><td>Open the tool list in the options bar</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <caption>Colours</caption>
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>X</kbd></th><td>Swap the primary and secondary colours</td></tr>
+          <tr><th scope="row" class="keys"><kbd>D</kbd></th><td>Reset them to black and white</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="file">
+    <h2>File and window</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>File menu, and moving between open images</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>N</kbd></th><td>New image</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>O</kbd></th><td>Open</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>S</kbd></th><td>Save</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></th><td>Save As</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></th><td>Save All</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>P</kbd></th><td>Print</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>W</kbd> or <kbd>Ctrl</kbd>+<kbd>F4</kbd></th><td>Close the image</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Q</kbd></th><td>Exit</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Tab</kbd></th><td>Next image</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></th><td>Previous image</td></tr>
+          <tr><th scope="row" class="keys"><kbd>F1</kbd></th><td>Keyboard Shortcuts</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="edit">
+    <h2>Edit and selection</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Edit menu</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Z</kbd></th><td>Undo</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Y</kbd></th><td>Redo</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>X</kbd> or <kbd>Shift</kbd>+<kbd>Delete</kbd></th><td>Cut</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>C</kbd> or <kbd>Ctrl</kbd>+<kbd>Insert</kbd></th><td>Copy</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></th><td>Copy Merged, which takes every visible layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>V</kbd> or <kbd>Shift</kbd>+<kbd>Insert</kbd></th><td>Paste</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></th><td>Paste Into New Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd></th><td>Paste Into New Image</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <caption>Selections</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>A</kbd></th><td>Select All</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>D</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></th><td>Deselect All</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>I</kbd></th><td>Invert Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></th><td>Copy Selection, the shape on its own</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></th><td>Paste Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Delete</kbd></th><td>Erase Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Backspace</kbd></th><td>Fill Selection with the primary colour</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="view">
+    <h2>View</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>View menu</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>+</kbd></th><td>Zoom In</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>-</kbd></th><td>Zoom Out</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>B</kbd></th><td>Fit to Window</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>0</kbd></th><td>Actual Size</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></th><td>Zoom to Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>F11</kbd></th><td>Full Screen</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd> and the wheel</th><td>Zoom around the pointer</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Pixel Grid, Rulers and Selection Outline are switches in the View menu
+      with no key of their own.</p>
+  </section>
+
+  <section id="image">
+    <h2>Image</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Image menu. These act on every layer at once.</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></th><td>Crop to Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>R</kbd></th><td>Resize Image</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></th><td>Canvas Size</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>H</kbd></th><td>Rotate 90 degrees clockwise</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>G</kbd></th><td>Rotate 90 degrees counter-clockwise</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></th><td>Flatten</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Flip Horizontal, Flip Vertical and Rotate 180 degrees are in the menu
+      without a key.</p>
+  </section>
+
+  <section id="layers">
+    <h2>Layers</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Layers menu</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></th><td>Add New Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Delete</kbd></th><td>Delete Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></th><td>Duplicate Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>M</kbd></th><td>Merge Layer Down</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></th><td>Rotate / Zoom Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>,</kbd></th><td>Toggle Layer Visibility</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Page Up</kbd></th><td>Go to Top Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Alt</kbd>+<kbd>Page Up</kbd></th><td>Go to Layer Above</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Alt</kbd>+<kbd>Page Down</kbd></th><td>Go to Layer Below</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Page Down</kbd></th><td>Go to Bottom Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>F4</kbd></th><td>Layer Properties</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Import from File, Flip Layer Horizontal, Flip Layer Vertical, Move Layer
+      Up and Move Layer Down have no keys; the last two have buttons under the layer
+      list.</p>
+  </section>
+
+  <section id="adjustments">
+    <h2>Adjustments and effects</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Adjustments menu</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Adjustment</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></th><td>Auto Level</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></th><td>Black and White</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></th><td>Brightness / Contrast</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></th><td>Curves</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></th><td>Hue / Saturation</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></th><td>Invert Colors</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd></th><td>Invert Alpha</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>L</kbd></th><td>Levels</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></th><td>Posterize</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></th><td>Sepia</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Color Balance, Color Temperature and Threshold are in the menu without a
+      key.</p>
+    <div class="table-scroll">
+      <table>
+        <caption>Effects menu</caption>
+        <thead>
+          <tr><th scope="col">Shortcut</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>F</kbd></th><td>Repeat Last Effect, with the settings it was last used with</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="canvas">
+    <h2>On the canvas</h2>
+    <div class="table-scroll">
+      <table>
+        <caption>Mouse and modifier keys while a tool is in use</caption>
+        <thead>
+          <tr><th scope="col">Input</th><th scope="col">What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="keys">Right button</th><td>Draws, fills or picks with the secondary colour</td></tr>
+          <tr><th scope="row" class="keys">Hold <kbd>Space</kbd>, or drag with the middle button</th><td>Pans the canvas without leaving the current tool</td></tr>
+          <tr><th scope="row" class="keys">Wheel</th><td>Scrolls; with <kbd>Ctrl</kbd> it zooms around the pointer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Shift</kbd> while dragging</th><td>Keeps a selection square or circular, a shape in proportion, a line or gradient at a fixed angle</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd> while dragging a selection</th><td>Adds to the selection, whatever the combine mode is set to</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Alt</kbd> while dragging a selection</th><td>Subtracts from it</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+click with the Clone Stamp</th><td>Sets the source point</td></tr>
+          <tr><th scope="row" class="keys">Arrow keys</th><td>Nudge the floating pixels under Move Selected Pixels</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Enter</kbd></th><td>Commits what the current tool is holding: a moved selection, a line, a curve, a shape</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></th><td>Commits the text being typed</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Esc</kbd></th><td>Cancels it instead</td></tr>
+          <tr><th scope="row" class="keys">Double click a layer row</th><td>Opens Layer Properties</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p><a href="guide.html">Back to the guide</a></p>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Tessel 1.0.0, a layered raster image editor for Linux. Qt is used under the LGPL.</p>
+    <ul>
+      <li><a href="index.html">Overview</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="shortcuts.html">Shortcuts</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel">Repository</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Latest release</a></li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -3,6 +3,7 @@
 #include <functional>
 
 #include <QDialog>
+#include <QList>
 
 #include "core/Document.h"
 #include "core/History.h"
@@ -169,6 +170,15 @@ private:
 };
 
 void showAboutDialog(QWidget* parent);
-void showShortcutsDialog(QWidget* parent);
+
+// One row of the keyboard reference. The window builds these from the actions
+// it actually installed, so the help can never drift from the bindings again.
+struct ShortcutEntry {
+    QString group;
+    QString name;
+    QString keys;
+};
+
+void showShortcutsDialog(QWidget* parent, const QList<ShortcutEntry>& entries);
 
 } // namespace tessel

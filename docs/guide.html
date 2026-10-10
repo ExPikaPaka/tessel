@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide - Tessel</title>
+<meta name="description" content="A tour of the Tessel interface, how each tool works, how selections and layers behave, and how the adjustment and effect dialogs preview live on the canvas.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span>Tessel</a>
+    <nav class="site-nav" aria-label="Documentation">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="guide.html" aria-current="page">Guide</a></li>
+        <li><a href="shortcuts.html">Shortcuts</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel">Source</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <h1>Using Tessel</h1>
+  <p class="lede">Everything below describes the program as it ships in 1.0.0. If you would
+    rather learn by poking at it, open an image, press <kbd>F1</kbd> for the shortcut list and
+    watch the status bar: whichever tool is active, its left hand end tells you what the mouse
+    buttons do.</p>
+
+  <nav class="toc" aria-labelledby="toc-heading">
+    <h2 id="toc-heading">On this page</h2>
+    <ul>
+      <li><a href="#tour">The interface</a></li>
+      <li><a href="#tools">How the tools work</a></li>
+      <li><a href="#selections">Selections</a></li>
+      <li><a href="#layers">Layers</a></li>
+      <li><a href="#effects">Adjustments and effects</a></li>
+      <li><a href="#files">Files and formats</a></li>
+      <li><a href="#settings">Settings</a></li>
+    </ul>
+  </nav>
+
+  <section id="tour">
+    <h2>The interface</h2>
+
+    <figure>
+      <img src="screenshots/main-light.png" width="1280" height="820"
+           alt="The Tessel window in its light theme, showing the menu bar, main toolbar, tool options bar for the Paintbrush, the Tools palette and Colors panel down the left side, the History and Layers panels down the right side, an image with an elliptical selection on the canvas, and the status bar.">
+      <figcaption>The same window in the light theme. The layout is fixed in habit, not in
+        place: every panel is a dock that can be moved, floated or closed.</figcaption>
+    </figure>
+
+    <h3>The menu bar</h3>
+    <p>Seven menus, left to right:</p>
+    <dl class="defs">
+      <dt>File</dt>
+      <dd>New, Open, Open Recent, Save, Save As, Save All, Print, Close and Exit.</dd>
+      <dt>Edit</dt>
+      <dd>Undo and Redo; Cut, Copy, Copy Merged, Paste, Paste Into New Layer and Paste Into
+        New Image; Select All, Deselect All, Invert Selection, Copy Selection and Paste
+        Selection; Erase Selection and Fill Selection.</dd>
+      <dt>View</dt>
+      <dd>Zoom In, Zoom Out, Fit to Window, Actual Size and Zoom to Selection; the Pixel Grid,
+        Rulers and Selection Outline switches; and Full Screen.</dd>
+      <dt>Image</dt>
+      <dd>Crop to Selection, Resize Image, Canvas Size, the four flips and rotations, and
+        Flatten. These act on every layer at once.</dd>
+      <dt>Layers</dt>
+      <dd>Add, Delete, Duplicate, Merge Layer Down and Import from File; Flip Layer Horizontal
+        and Vertical and Rotate / Zoom Layer; Move Layer Up and Down and Toggle Layer
+        Visibility; the four Go to Layer commands; and Layer Properties.</dd>
+      <dt>Adjustments</dt>
+      <dd>The thirteen adjustments, built from the effect registry, so the menu and the
+        program can never drift apart.</dd>
+      <dt>Effects</dt>
+      <dd>Repeat Last Effect at the top, then one submenu per category: Artistic, Blurs,
+        Color, Distort, Noise, Object, Photo, Render and Stylize.</dd>
+    </dl>
+    <p>An entry whose name ends in three dots opens a dialog; the rest apply straight away.
+      At the right hand end of the menu bar sit six icon buttons rather than menus of their
+      own: four switches for the Tools, History, Layers and Colors windows, then Settings,
+      then Help, whose menu holds Keyboard Shortcuts (<kbd>F1</kbd>) and About Tessel.</p>
+
+    <h3>The main toolbar</h3>
+    <p>New, Open and Save; Undo and Redo; Cut, Copy and Paste; Crop to Selection and Deselect
+      All; Resize Image and Canvas Size. The thumbnails of every open image live at its right
+      hand end: click one to switch to it, and each has its own close button.
+      <kbd>Ctrl</kbd>+<kbd>Tab</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> step
+      through the same list.</p>
+
+    <h3>The tool options bar</h3>
+    <p>The row under the main toolbar belongs to the active tool. It starts with a button that
+      drops down the full tool list (<kbd>Alt</kbd>+<kbd>T</kbd>) and the tool's name, and
+      then holds that tool's own controls: width, opacity, antialiasing, blending, tolerance,
+      shape, font and so on. Changing one takes effect on the next stroke, and the settings
+      stay put while you work.</p>
+
+    <h3>The Tools palette</h3>
+    <p>Nineteen tools in a two column grid of icons, read left to right and then down:
+      Rectangle Select and Move Selected Pixels; Lasso Select and Move Selection; Ellipse
+      Select and Zoom; Magic Wand and Pan; Paint Bucket and Gradient; Paintbrush and Eraser;
+      Pencil and Color Picker; Clone Stamp and Recolor; Text and Line / Curve; and Shapes.
+      Hovering one shows its name and its key; the keys are listed in full on the
+      <a href="shortcuts.html">shortcuts page</a>.</p>
+
+    <h3>Colors</h3>
+    <p>The two swatches at the top left are the primary and secondary colours. Click one to
+      make it the active colour, and use the two small arrow buttons beside them to swap the
+      pair (<kbd>X</kbd>) or reset it to black and white (<kbd>D</kbd>). The colour wheel sets
+      the hue and saturation of the active colour, the two ramps under it set value and alpha,
+      and the palette grid at the bottom holds the fixed palette: left click takes a colour as
+      the primary, right click as the secondary. <strong>More</strong> opens the numeric side:
+      red, green and blue, hue, saturation and value, alpha, and a hex field.</p>
+
+    <h3>History</h3>
+    <p>Every step of the session, from the image as it was opened or created down to the most
+      recent edit. Click any entry to move the document to that point, forwards or backwards;
+      the two buttons at the top are Undo and Redo, and beside them is a running count of
+      steps and of how much memory they hold.</p>
+
+    <h3>Layers</h3>
+    <p>The layer list runs top layer first, which is the order they are composited in. Each row
+      shows an eye for visibility, a thumbnail, the layer name and, underneath it, the opacity
+      and the blend mode. Double click a row to open Layer Properties. The buttons along the
+      bottom are Add New Layer, Delete Layer, Duplicate Layer, Merge Layer Down, Move Layer Up,
+      Move Layer Down and Layer Properties.</p>
+
+    <h3>The status bar</h3>
+    <p>The left hand end is the hint for the active tool, or the last thing that happened, such
+      as <em>Created a new 900 x 620 image</em>. The right hand end keeps four readouts
+      together: the cursor position in image pixels, the selection bounds as
+      <em>Selection 378 x 286 at 270, 136</em>, the image size, and the zoom, which is both a
+      slider and an editable combo box: Window to fit the image, then fixed steps from 1
+      percent to 3200 percent, or any figure you care to type.</p>
+  </section>
+
+  <section id="tools">
+    <h2>How the tools work</h2>
+
+    <h3>Ideas shared by all of them</h3>
+    <ul>
+      <li>The <strong>right mouse button</strong> draws with the secondary colour wherever
+        drawing with a colour makes sense.</li>
+      <li>Holding the <strong>space bar</strong> pans the canvas with any tool active, and
+        the middle mouse button does the same.</li>
+      <li><strong>Every drawing tool is clipped to the active selection</strong>, so a
+        selection doubles as a stencil.</li>
+      <li><kbd>Ctrl</kbd> and the <strong>wheel</strong> zoom around the pointer; the wheel on
+        its own scrolls.</li>
+      <li>Most tools carry an <strong>Opacity</strong> percentage, an
+        <strong>Antialiasing</strong> switch and a <strong>Blending</strong> box holding the
+        same fourteen blend modes the layers use, so a stroke can be multiplied or screened
+        onto the layer without a second layer.</li>
+      <li>Pressing a tool's letter again cycles through the tools that share it, and
+        <kbd>Shift</kbd> with that letter cycles backwards.</li>
+    </ul>
+
+    <h3>Painting</h3>
+    <dl class="defs">
+      <dt>Paintbrush (<kbd>B</kbd>)</dt>
+      <dd>Drag to paint, right drag to paint with the secondary colour. Width, opacity,
+        antialiasing, blending and hardness.</dd>
+      <dt>Pencil (<kbd>P</kbd>)</dt>
+      <dd>Single hard pixels, with no antialiasing. Only a blending box, since nothing else
+        would apply.</dd>
+      <dt>Eraser (<kbd>E</kbd>)</dt>
+      <dd>Erases to transparency; a right drag erases softly. Width, opacity and hardness.</dd>
+      <dt>Clone Stamp (<kbd>L</kbd>)</dt>
+      <dd><kbd>Ctrl</kbd>+click sets the source, then drag to paint copies of it.
+        <strong>Aligned</strong> keeps the source at a fixed offset from the brush instead of
+        starting over at every stroke, and <strong>Sample merged</strong> reads the composited
+        image rather than the active layer.</dd>
+      <dt>Recolor (<kbd>R</kbd>)</dt>
+      <dd>Paints the primary colour only over pixels that match the secondary colour, within
+        the tolerance you set.</dd>
+      <dt>Paint Bucket (<kbd>F</kbd>)</dt>
+      <dd>Fills an area of similar colour; a right click fills with the secondary colour. Fill
+        is <strong>Contiguous</strong> or <strong>Global</strong>, and there is a tolerance,
+        an opacity, antialiasing, sample merged and a blending box.</dd>
+      <dt>Gradient (<kbd>G</kbd>)</dt>
+      <dd>Drag to lay one down, hold <kbd>Shift</kbd> to constrain the angle. Five shapes
+        (Linear, Linear reflected, Radial, Conical and Diamond), a mode of
+        <strong>Colour</strong> or <strong>Transparency</strong>, an opacity, an optional
+        dither and a blending box. A right drag runs the gradient the other way round, from
+        the secondary colour to the primary.</dd>
+    </dl>
+
+    <h3>Shapes, lines and text</h3>
+    <dl class="defs">
+      <dt>Line / Curve (<kbd>O</kbd>)</dt>
+      <dd>Drag for a line, then drag the middle handles to bend it into a curve.
+        <kbd>Enter</kbd> finishes, <kbd>Esc</kbd> cancels. The start and end caps are each
+        Flat, Arrow or Round.</dd>
+      <dt>Shapes (<kbd>O</kbd> again)</dt>
+      <dd>Thirty of them, from Rectangle, Rounded rectangle, Ellipse and the polygons through
+        five stars to Arrow, Chevron, Cross, Plus, Heart, Crescent, Cloud, Speech bubble, Ring,
+        Pie wedge, Lightning and Teardrop. Drag to draw, <kbd>Shift</kbd> keeps the
+        proportions. The style is Outline, Filled, or Outline and fill: the outline is drawn
+        in the primary colour and the fill in the secondary.</dd>
+      <dt>Text (<kbd>T</kbd>)</dt>
+      <dd>Click and type. <kbd>Enter</kbd> adds a line, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> or
+        switching tools finishes, <kbd>Esc</kbd> cancels. Font family, size in points, bold,
+        italic, underline and alignment, plus the usual opacity, antialiasing and blending.
+        The text stays editable until it is committed, at which point it becomes pixels like
+        everything else.</dd>
+    </dl>
+
+    <h3>Looking around and sampling</h3>
+    <dl class="defs">
+      <dt>Color Picker (<kbd>K</kbd>)</dt>
+      <dd>Click to pick the primary colour, right click for the secondary. It can sample the
+        active <strong>Layer</strong> or the whole <strong>Image</strong>, over an area of
+        1 x 1, 3 x 3, 5 x 5 or 9 x 9 pixels, and it can switch straight back to the previous
+        tool, to the Pencil or to the Paintbrush once it has picked.</dd>
+      <dt>Zoom (<kbd>Z</kbd>)</dt>
+      <dd>Click to zoom in, right click to zoom out, or drag a rectangle to zoom into it.</dd>
+      <dt>Pan (<kbd>H</kbd>)</dt>
+      <dd>Drag to scroll the canvas. The space bar does the same without leaving the tool you
+        are using.</dd>
+    </dl>
+  </section>
+
+  <section id="selections">
+    <h2>Selections</h2>
+    <p>There are four selection tools, all on <kbd>S</kbd>: Rectangle Select, Lasso Select,
+      Ellipse Select and Magic Wand. They share a row of five combine modes at the left of the
+      options bar, which decide what a new shape does to the selection that is already
+      there:</p>
+    <div class="table-scroll">
+      <table>
+        <caption>The five combine modes</caption>
+        <thead>
+          <tr><th scope="col">Mode</th><th scope="col">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Replace</th><td>The new shape becomes the selection.</td></tr>
+          <tr><th scope="row">Union</th><td>Adds the new shape to it.</td></tr>
+          <tr><th scope="row">Subtract</th><td>Cuts the new shape out of it.</td></tr>
+          <tr><th scope="row">Intersect</th><td>Keeps only what the two have in common.</td></tr>
+          <tr><th scope="row">Exclusive or</th><td>Keeps what belongs to one of them but not to both.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>While you drag, <kbd>Ctrl</kbd> adds and <kbd>Alt</kbd> subtracts, whichever mode the
+      bar is set to, and <kbd>Shift</kbd> keeps a rectangle square or an ellipse circular. The
+      lasso draws a freehand outline that closes itself when you let go. The magic wand selects
+      a region of similar colour: drag up or down after clicking to adjust the tolerance
+      without going back to the options bar, and choose Contiguous or Global flood, and whether
+      it samples the layer or the merged image.</p>
+    <p>The selection is antialiased unless you turn that off, and it is stored as a mask, so it
+      keeps soft edges rather than rounding everything to whole pixels. What it then does:</p>
+    <ul>
+      <li>It clips every drawing tool, every adjustment and every effect.</li>
+      <li><kbd>Delete</kbd> erases inside it, <kbd>Backspace</kbd> fills it with the primary
+        colour.</li>
+      <li>Image &gt; Crop to Selection trims the whole image to its bounds.</li>
+      <li>Edit &gt; Copy Selection and Paste Selection move the shape itself between images,
+        without the pixels.</li>
+      <li>View &gt; Selection Outline hides the marching outline when it is in the way, while
+        leaving the selection in force.</li>
+      <li>It is saved inside a <code>.tessel</code> file along with the layers.</li>
+    </ul>
+    <h3>Moving what is selected</h3>
+    <p><strong>Move Selected Pixels</strong> (<kbd>M</kbd>) lifts the selected pixels onto a
+      floating buffer: drag it anywhere, nudge it with the arrow keys, or drag a corner handle
+      to scale it. <kbd>Enter</kbd> drops it, <kbd>Esc</kbd> puts it back.
+      <strong>Move Selection</strong> (<kbd>M</kbd> again) slides the outline on its own and
+      leaves the pixels where they are, which is the quickest way to reuse a shape somewhere
+      else.</p>
+  </section>
+
+  <section id="layers">
+    <h2>Layers</h2>
+    <p>An image can hold any number of layers. Each one has a name, a visibility switch, an
+      opacity from 0 to 100 percent and a blend mode, all four of which live in Layer
+      Properties (<kbd>F4</kbd>) and preview on the canvas while the dialog is open.</p>
+    <p>The fourteen blend modes are Normal, Multiply, Additive, Color Burn, Color Dodge,
+      Reflect, Glow, Overlay, Difference, Negation, Lighten, Darken, Screen and Xor. The same
+      list appears in the Blending box of the drawing tools and in the effect dialogs, so a
+      single stroke or a single effect can be composited the same way a whole layer would
+      be.</p>
+    <p>From the Layers menu or the buttons under the layer list you can add, delete, duplicate,
+      merge down, move up or down, toggle visibility, flip horizontally or vertically, and
+      import any readable image file as a new layer. <strong>Rotate / Zoom Layer</strong>
+      (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>) turns and scales the active layer about
+      its centre, with an offset and an optional tiling of the result, and previews as you
+      change the numbers. Image &gt; Flatten
+      (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>) collapses everything into one layer.</p>
+    <p>Resizing and rotating are done in premultiplied alpha, so a transparent edge does not
+      bleed a halo into the pixels next to it.</p>
+  </section>
+
+  <section id="effects">
+    <h2>Adjustments and effects</h2>
+    <p>Both come from the same registry, and the difference is only where they sit. The
+      <strong>Adjustments</strong> menu holds the thirteen that change colour without changing
+      shape: Auto Level, Black and White, Brightness / Contrast, Color Balance, Color
+      Temperature, Curves, Hue / Saturation, Invert Alpha, Invert Colors, Levels, Posterize,
+      Sepia and Threshold. The <strong>Effects</strong> menu holds the other forty, in nine
+      submenus:</p>
+    <div class="table-scroll">
+      <table>
+        <caption>The effect categories, in menu order</caption>
+        <thead>
+          <tr><th scope="col">Category</th><th scope="col">Effects</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Artistic</th><td>Oil Painting, Pencil Sketch, Ink Sketch, Mosaic Tiles</td></tr>
+          <tr><th scope="row">Blurs</th><td>Gaussian Blur, Unfocus, Motion Blur, Radial Blur, Zoom Blur, Fragment, Surface Blur</td></tr>
+          <tr><th scope="row">Color</th><td>Quantize, Duotone</td></tr>
+          <tr><th scope="row">Distort</th><td>Bulge, Twist, Polar Inversion, Tile Reflection, Dents, Frosted Glass, Pixelate, Crystalize</td></tr>
+          <tr><th scope="row">Noise</th><td>Add Noise, Median, Reduce Noise</td></tr>
+          <tr><th scope="row">Object</th><td>Drop Shadow, Outline Object, Outer Glow</td></tr>
+          <tr><th scope="row">Photo</th><td>Sharpen, Glow, Vignette, Soft Portrait, Red Eye Removal</td></tr>
+          <tr><th scope="row">Render</th><td>Clouds, Julia Fractal, Mandelbrot Fractal, Checkerboard</td></tr>
+          <tr><th scope="row">Stylize</th><td>Edge Detect, Emboss, Relief, Outline</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>How the dialogs preview</h3>
+    <p>An effect declares its parameters and nothing else: an integer, a double, a switch, a
+      choice, a colour, an angle, an offset or a curve. The dialog is generated from that list,
+      which is why every effect in the program looks and behaves the same way and why no effect
+      carries any widget code of its own.</p>
+    <figure>
+      <img src="screenshots/dialog-effect.png" width="360" height="274"
+           alt="The generated dialog for the Clouds effect: slider and value pairs for Scale, Roughness, Detail and Seed, a blend mode box, a checkbox for using the palette colours, and Reset, OK and Cancel buttons.">
+      <figcaption>Clouds, as the registry describes it. Numbers appear as a slider and a value
+        field that stay in step with each other.</figcaption>
+    </figure>
+    <p>Every change previews straight onto the canvas, at the real zoom and over the real
+      layer, not in a thumbnail. The preview is pushed through the active selection, so only
+      the part that would change is shown changing, and it is debounced by a few tens of
+      milliseconds so that dragging a slider stays smooth. <strong>Reset</strong> puts the
+      parameters back to their defaults, <strong>Cancel</strong> drops the preview and leaves
+      the layer untouched, and <strong>OK</strong> commits a single undoable step.
+      <kbd>Ctrl</kbd>+<kbd>F</kbd> then repeats that effect on the next layer or the next
+      image with the same settings, without opening the dialog again.</p>
+
+    <h3>Curves and Levels</h3>
+    <p>These two have hand written dialogs, because a generated one could not do them justice.
+      Both draw the histogram of the current layer behind the controls.</p>
+    <ul class="shots">
+      <li>
+        <figure>
+          <img src="screenshots/dialog-curves.png" width="370" height="381"
+               alt="The Curves dialog: a Transfer map box set to Luminosity, a Reset channel button, and a straight diagonal curve with square control points at each end drawn over the channel histogram.">
+          <figcaption>Curves: click to add a control point, drag to move it, right click to
+            remove it. The transfer map is Luminosity or the separate colour channels, and
+            Reset channel clears just the one you are on.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/dialog-levels.png" width="385" height="383"
+               alt="The Levels dialog: a histogram with input markers above fields for input black, input white, gamma, output black and output white, plus Red, Green and Blue channel checkboxes and an Auto button.">
+          <figcaption>Levels: input black and white, gamma, output black and white, with the
+            red, green and blue channels switchable one at a time and an Auto button that
+            finds the ends for you.</figcaption>
+        </figure>
+      </li>
+    </ul>
+  </section>
+
+  <section id="files">
+    <h2>Files and formats</h2>
+    <dl class="defs">
+      <dt><code>.tessel</code></dt>
+      <dd>The native format: a zip holding one PNG per layer, a JSON manifest with the names,
+        opacities and blend modes, the selection, a flattened image and a thumbnail. It is
+        written to a temporary file and moved into place, so an interrupted save cannot destroy
+        the previous one.</dd>
+      <dt><code>.ora</code></dt>
+      <dd>OpenRaster, which keeps layers, opacity and blend modes and is read by Krita, GIMP
+        and MyPaint. This is the format to use when the image has to leave Tessel with its
+        layers intact.</dd>
+      <dt>Flat images</dt>
+      <dd>PNG, JPEG, BMP, TIFF, WebP, TGA, GIF and ICO, plus whatever else the Qt image plugins
+        on the system can handle. Saving to one of these flattens the image. For the lossy
+        formats a dialog asks for the quality first and keeps a live estimate of the resulting
+        file size next to the slider.</dd>
+    </dl>
+    <div class="note">
+      <p><strong>Paint.NET files.</strong> <code>.pdn</code> cannot be read: the format is an
+        undocumented serialisation of .NET objects. Tessel says so when one is opened, and
+        suggests exporting <code>.ora</code> or <code>.png</code> from Paint.NET instead.</p>
+    </div>
+  </section>
+
+  <section id="settings">
+    <h2>Settings</h2>
+    <p>The cog at the right hand end of the menu bar opens Settings, which is short on
+      purpose:</p>
+    <ul>
+      <li><strong>Appearance</strong>: the theme, Dark or Light. It applies immediately,
+        icons and all, because they are redrawn in the new foreground colour rather than
+        reloaded.</li>
+      <li><strong>New images</strong>: the default width and height offered by File &gt;
+        New.</li>
+      <li><strong>History</strong>: the maximum number of steps and the memory budget in
+        megabytes. The undo stack is capped by whichever it reaches first.</li>
+      <li><strong>Window</strong>: reset the panel layout, if the docks have been dragged
+        somewhere you would rather they were not.</li>
+    </ul>
+    <p>Window geometry, dock layout, recent files and the view switches are remembered between
+      sessions.</p>
+  </section>
+
+  <p><a href="shortcuts.html">Next: the complete keyboard reference</a></p>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Tessel 1.0.0, a layered raster image editor for Linux. Qt is used under the LGPL.</p>
+    <ul>
+      <li><a href="index.html">Overview</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="shortcuts.html">Shortcuts</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel">Repository</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Latest release</a></li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>

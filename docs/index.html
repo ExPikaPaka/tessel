@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessel - a layered raster image editor for Linux</title>
+<meta name="description" content="Tessel is a layered raster image editor for Linux, written from scratch in C++20 with Qt 6: 19 tools, 14 blend modes, 13 adjustments, 40 effects and a native layered file format.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span>Tessel</a>
+    <nav class="site-nav" aria-label="Documentation">
+      <ul>
+        <li><a href="index.html" aria-current="page">Overview</a></li>
+        <li><a href="guide.html">Guide</a></li>
+        <li><a href="shortcuts.html">Shortcuts</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel">Source</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <div class="hero">
+    <h1>A layered image editor for Linux</h1>
+    <p class="version">Version 1.0.0</p>
+    <p class="lede">Tessel is a raster image editor written from scratch in C++20 with Qt 6.
+      It follows the way of working that Paint.NET made popular: a tool palette on the left,
+      Colors below it, History and Layers on the right, a tool options bar under the main
+      toolbar, and a status bar that always tells you where the cursor is, how big the
+      selection is and what the zoom level is.</p>
+    <p class="actions">
+      <a class="button" href="https://github.com/ExPikaPaka/tessel/releases/latest">Download the latest release</a>
+      <a class="button secondary" href="guide.html">Read the guide</a>
+      <a class="button secondary" href="https://github.com/ExPikaPaka/tessel">View the source</a>
+    </p>
+  </div>
+
+  <figure>
+    <img src="screenshots/main-dark.png" width="1280" height="820"
+         alt="The Tessel window in its dark theme: menu bar and main toolbar at the top, tool options bar beneath them, Tools palette and Colors panel on the left, History and Layers panels on the right, and an image open on the checkered canvas.">
+    <figcaption>The main window. There is a
+      <a href="screenshots/main-light.png">light theme</a> as well, and the theme is chosen
+      in Settings.</figcaption>
+  </figure>
+
+  <section id="what">
+    <h2>What Tessel is</h2>
+    <p>Tessel is an independent program. It is not a port of Paint.NET and shares no code with
+      it: Paint.NET is closed source, Windows only and built on .NET, so no port of it can
+      exist. What Tessel borrows is the workflow and the layout, both of which are implemented
+      here from the ground up, including every icon, which is drawn procedurally with QPainter
+      rather than loaded from a file.</p>
+    <p>The pixel engine has no GUI dependency, so it is tested headless; the interface is
+      tested through the offscreen Qt platform plugin. Pixel work is spread over scanlines in
+      parallel, blurs use a three pass box approximation of a gaussian, and resampling is done
+      in premultiplied alpha so transparent edges do not bleed.</p>
+  </section>
+
+  <section id="features">
+    <h2>What it can do</h2>
+    <ul class="cards">
+      <li>
+        <h3>19 tools</h3>
+        <p>Rectangle Select, Lasso Select, Ellipse Select and Magic Wand; Move Selected Pixels
+          and Move Selection; Paintbrush, Pencil, Eraser, Paint Bucket, Gradient, Clone Stamp,
+          Recolor, Color Picker, Text, Line / Curve, Shapes, Zoom and Pan. Each one brings its
+          own controls into the tool options bar.</p>
+      </li>
+      <li>
+        <h3>Selections that combine</h3>
+        <p>The four selection tools share five combine modes: replace, union, subtract,
+          intersect and exclusive or, with <kbd>Ctrl</kbd> and <kbd>Alt</kbd> as live
+          modifiers while you drag. Every drawing tool is clipped to the active selection.</p>
+      </li>
+      <li>
+        <h3>Layers and 14 blend modes</h3>
+        <p>Any number of layers, each with its own name, visibility, opacity and blend mode:
+          Normal, Multiply, Additive, Color Burn, Color Dodge, Reflect, Glow, Overlay,
+          Difference, Negation, Lighten, Darken, Screen and Xor. Layers can be added, deleted,
+          duplicated, reordered, merged down, flattened, flipped, rotated, zoomed and imported
+          from any readable image file.</p>
+      </li>
+      <li>
+        <h3>13 adjustments</h3>
+        <p>Auto Level, Black and White, Brightness / Contrast, Color Balance, Color
+          Temperature, Curves, Hue / Saturation, Invert Alpha, Invert Colors, Levels,
+          Posterize, Sepia and Threshold. Curves and Levels have dedicated dialogs with the
+          channel histogram behind the controls.</p>
+      </li>
+      <li>
+        <h3>40 effects</h3>
+        <p>Nine categories: Artistic, Blurs, Color, Distort, Noise, Object, Photo, Render and
+          Stylize. Every dialog is generated from the effect's own parameter list and previews
+          live on the canvas, and <kbd>Ctrl</kbd>+<kbd>F</kbd> repeats the last one with the
+          same settings.</p>
+      </li>
+      <li>
+        <h3>History you can jump around in</h3>
+        <p>Every edit is undoable, and the History panel lists them all so you can go back to
+          any point in the session. A brush stroke stores only the rectangle it touched, so a
+          long session stays cheap; the stack is capped by both step count and memory, and both
+          caps are in Settings.</p>
+      </li>
+      <li>
+        <h3>Layered and flat file formats</h3>
+        <p><code>.tessel</code> is the native format, a zip holding one PNG per layer, a JSON
+          manifest, the selection and a flattened preview. <code>.ora</code> (OpenRaster) keeps
+          layers, opacity and blend modes and is read by Krita, GIMP and MyPaint. PNG, JPEG,
+          BMP, TIFF, WebP, TGA, GIF and ICO are there too, along with anything else the Qt
+          image plugins on the system can handle.</p>
+      </li>
+      <li>
+        <h3>Dark and light themes</h3>
+        <p>Both themes are built in and switch without a restart. Because the icons are drawn
+          at runtime in the current foreground colour, they follow the theme instead of
+          needing a second set of files.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section id="dialogs">
+    <h2>Dialogs</h2>
+    <ul class="shots">
+      <li>
+        <figure>
+          <img src="screenshots/dialog-curves.png" width="370" height="381"
+               alt="The Curves dialog: a Transfer map box set to Luminosity, a Reset channel button, and a straight diagonal curve with square control points at each end drawn over the channel histogram.">
+          <figcaption>Curves. Click to add a control point, drag to move it, right click to remove it.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/dialog-levels.png" width="385" height="383"
+               alt="The Levels dialog: a histogram with input markers above fields for input black, input white, gamma, output black and output white, plus Red, Green and Blue channel checkboxes and an Auto button.">
+          <figcaption>Levels, with input and output ranges, gamma and per channel switches.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/dialog-effect.png" width="360" height="274"
+               alt="The generated dialog for the Clouds effect: slider and value pairs for Scale, Roughness, Detail and Seed, a blend mode box, a checkbox for using the palette colours, and Reset, OK and Cancel buttons.">
+          <figcaption>A generated effect dialog, previewing live.</figcaption>
+        </figure>
+      </li>
+    </ul>
+  </section>
+
+  <section id="install">
+    <h2>Installing</h2>
+
+    <h3>From the release tarball</h3>
+    <p>Download the tarball from
+      <a href="https://github.com/ExPikaPaka/tessel/releases">github.com/ExPikaPaka/tessel/releases</a>,
+      unpack it and run <code>tessel</code>. Qt 6 has to be present on the system, since the
+      binary links against it dynamically:</p>
+    <ul>
+      <li>Arch and derivatives: <code>pacman -S qt6-base</code></li>
+      <li>Debian and Ubuntu: <code>apt install libqt6widgets6 libqt6printsupport6</code></li>
+      <li>Fedora: <code>dnf install qt6-qtbase</code></li>
+    </ul>
+    <p>To put it in the application menu:</p>
+<pre><code>sudo install -Dm755 tessel /usr/local/bin/tessel
+sudo install -Dm644 org.tessel.Tessel.desktop \
+    /usr/share/applications/org.tessel.Tessel.desktop
+sudo install -Dm644 org.tessel.Tessel.svg \
+    /usr/share/icons/hicolor/scalable/apps/org.tessel.Tessel.svg</code></pre>
+
+    <h3>From source</h3>
+    <p>You need a C++20 compiler, CMake 3.21 or newer, Qt 6.4 or newer (Widgets) and zlib. On
+      Arch and derivatives the packages are <code>qt6-base</code>, <code>cmake</code>,
+      <code>ninja</code> and <code>gcc</code>; on Debian and Ubuntu they are
+      <code>qt6-base-dev</code>, <code>cmake</code>, <code>ninja-build</code>,
+      <code>g++</code> and <code>zlib1g-dev</code>.</p>
+<pre><code>git clone https://github.com/ExPikaPaka/tessel.git
+cd tessel
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/tessel</code></pre>
+    <p>To install system wide, together with its desktop entry and icon:</p>
+<pre><code>sudo cmake --install build</code></pre>
+    <p>The test suites are run with CTest. <code>core</code> covers the pixel engine,
+      documents, undo history and file formats without a display, and <code>gui</code> drives
+      the real widgets, tools and effects through the offscreen Qt platform plugin:</p>
+<pre><code>ctest --test-dir build --output-on-failure</code></pre>
+
+    <div class="note">
+      <p><strong>Paint.NET files.</strong> <code>.pdn</code> files cannot be read, because the
+        format is an undocumented serialisation of .NET objects. Tessel says so plainly when
+        one is opened and suggests exporting <code>.ora</code> or <code>.png</code> from
+        Paint.NET instead.</p>
+    </div>
+  </section>
+
+  <section id="next">
+    <h2>Where to go next</h2>
+    <ul>
+      <li><a href="guide.html">The usage guide</a>: a tour of the interface, how each tool
+        works, how selections and layers behave, and how the effect dialogs preview.</li>
+      <li><a href="shortcuts.html">The keyboard reference</a>: every shortcut, in tables.
+        The same list is in the program under <kbd>F1</kbd>.</li>
+      <li><a href="https://github.com/ExPikaPaka/tessel">The repository</a>, for the source,
+        the issue tracker and the full build instructions.</li>
+    </ul>
+  </section>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Tessel 1.0.0, a layered raster image editor for Linux. Qt is used under the LGPL.</p>
+    <ul>
+      <li><a href="index.html">Overview</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="shortcuts.html">Shortcuts</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel">Repository</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Latest release</a></li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>

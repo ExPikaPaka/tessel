@@ -11,6 +11,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -719,78 +720,34 @@ void showAboutDialog(QWidget* parent)
     dialog.exec();
 }
 
-void showShortcutsDialog(QWidget* parent)
+void showShortcutsDialog(QWidget* parent, const QList<ShortcutEntry>& entries)
 {
     QDialog dialog(parent);
     dialog.setWindowTitle(QStringLiteral("Keyboard Shortcuts"));
     dialog.setWindowIcon(icons::get(QStringLiteral("settings"), 22));
     auto* root = new QVBoxLayout(&dialog);
     auto* text = new QTextBrowser(&dialog);
-    text->setHtml(QStringLiteral(R"(
-<h3>Tools</h3>
-<table cellpadding='3'>
-<tr><td><b>S</b></td><td>Cycle the selection tools: rectangle, lasso, ellipse, magic wand</td></tr>
-<tr><td><b>M</b></td><td>Move Selected Pixels / Move Selection</td></tr>
-<tr><td><b>B</b></td><td>Paintbrush</td></tr>
-<tr><td><b>P</b></td><td>Pencil</td></tr>
-<tr><td><b>E</b></td><td>Eraser</td></tr>
-<tr><td><b>F</b></td><td>Paint Bucket</td></tr>
-<tr><td><b>G</b></td><td>Gradient</td></tr>
-<tr><td><b>K</b></td><td>Color Picker</td></tr>
-<tr><td><b>L</b></td><td>Clone Stamp</td></tr>
-<tr><td><b>R</b></td><td>Recolor</td></tr>
-<tr><td><b>T</b></td><td>Text</td></tr>
-<tr><td><b>O</b></td><td>Line / Curve and Shapes</td></tr>
-<tr><td><b>Z</b></td><td>Zoom</td></tr>
-<tr><td><b>H</b></td><td>Pan (or hold the space bar with any tool)</td></tr>
-</table>
-<h3>File and edit</h3>
-<table cellpadding='3'>
-<tr><td><b>Ctrl+N</b></td><td>New image</td></tr>
-<tr><td><b>Ctrl+O</b></td><td>Open</td></tr>
-<tr><td><b>Ctrl+S</b></td><td>Save</td></tr>
-<tr><td><b>Ctrl+Shift+S</b></td><td>Save as</td></tr>
-<tr><td><b>Ctrl+W</b></td><td>Close image</td></tr>
-<tr><td><b>Ctrl+Z</b> / <b>Ctrl+Y</b></td><td>Undo / Redo</td></tr>
-<tr><td><b>Ctrl+X</b> / <b>Ctrl+C</b> / <b>Ctrl+V</b></td><td>Cut / Copy / Paste</td></tr>
-<tr><td><b>Ctrl+Shift+V</b></td><td>Paste into new layer</td></tr>
-<tr><td><b>Ctrl+A</b> / <b>Ctrl+Shift+A</b></td><td>Select all / Deselect all</td></tr>
-<tr><td><b>Ctrl+I</b></td><td>Invert selection</td></tr>
-<tr><td><b>Delete</b> / <b>Backspace</b></td><td>Erase / fill the selection</td></tr>
-</table>
-<h3>View</h3>
-<table cellpadding='3'>
-<tr><td><b>Ctrl++</b> / <b>Ctrl+-</b></td><td>Zoom in / out</td></tr>
-<tr><td><b>Ctrl+B</b></td><td>Fit the image in the window</td></tr>
-<tr><td><b>Ctrl+Shift+B</b></td><td>Actual size</td></tr>
-<tr><td><b>Ctrl+G</b></td><td>Pixel grid</td></tr>
-<tr><td><b>Ctrl+R</b></td><td>Rulers</td></tr>
-<tr><td><b>Ctrl+wheel</b></td><td>Zoom around the pointer</td></tr>
-</table>
-<h3>Image and layers</h3>
-<table cellpadding='3'>
-<tr><td><b>Ctrl+Shift+X</b></td><td>Crop to selection</td></tr>
-<tr><td><b>Ctrl+R</b></td><td>Resize image</td></tr>
-<tr><td><b>Ctrl+Shift+R</b></td><td>Canvas size</td></tr>
-<tr><td><b>Ctrl+Shift+F</b></td><td>Flatten</td></tr>
-<tr><td><b>Ctrl+Shift+N</b></td><td>Add new layer</td></tr>
-<tr><td><b>Ctrl+Shift+D</b></td><td>Duplicate layer</td></tr>
-<tr><td><b>Ctrl+M</b></td><td>Merge layer down</td></tr>
-<tr><td><b>F4</b></td><td>Layer properties</td></tr>
-</table>
-<h3>Adjustments</h3>
-<table cellpadding='3'>
-<tr><td><b>Ctrl+Shift+C</b></td><td>Brightness / contrast</td></tr>
-<tr><td><b>Ctrl+Shift+U</b></td><td>Hue / saturation</td></tr>
-<tr><td><b>Ctrl+Shift+I</b></td><td>Invert colours</td></tr>
-<tr><td><b>Ctrl+Shift+L</b></td><td>Auto level</td></tr>
-<tr><td><b>Ctrl+Shift+G</b></td><td>Black and white</td></tr>
-<tr><td><b>Ctrl+L</b></td><td>Levels</td></tr>
-<tr><td><b>Ctrl+Shift+M</b></td><td>Curves</td></tr>
-<tr><td><b>Ctrl+F</b></td><td>Repeat the last effect</td></tr>
-</table>
-)"));
-    text->setMinimumSize(520, 460);
+
+    // Group in first appearance order so the sections follow the menu bar.
+    QStringList order;
+    QHash<QString, QList<ShortcutEntry>> grouped;
+    for (const ShortcutEntry& entry : entries) {
+        if (!grouped.contains(entry.group))
+            order.append(entry.group);
+        grouped[entry.group].append(entry);
+    }
+
+    QString html;
+    for (const QString& group : order) {
+        html += QStringLiteral("<h3>%1</h3><table cellpadding='3'>").arg(group.toHtmlEscaped());
+        for (const ShortcutEntry& entry : grouped.value(group)) {
+            html += QStringLiteral("<tr><td><b>%1</b></td><td>%2</td></tr>")
+                        .arg(entry.keys.toHtmlEscaped(), entry.name.toHtmlEscaped());
+        }
+        html += QStringLiteral("</table>");
+    }
+    text->setHtml(html);
+    text->setMinimumSize(560, 520);
     root->addWidget(text);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::accept);

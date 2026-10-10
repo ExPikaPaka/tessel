@@ -59,7 +59,7 @@ its corner handles; Move Selection slides the outline on its own.
 
 Paintbrush, Pencil, Eraser, Paint Bucket, Gradient (linear, reflected, radial,
 conical and diamond, in colour or transparency mode, with optional dithering),
-Clone Stamp, Recolor, Color Picker, Text, Line and Curve, Shapes (twelve of
+Clone Stamp, Recolor, Color Picker, Text, Line and Curve, Shapes (thirty of
 them), Zoom and Pan.
 
 The right mouse button draws with the secondary colour, the space bar pans with
@@ -68,19 +68,22 @@ any tool, and every drawing tool is clipped to the active selection.
 ### Adjustments
 
 Auto Level, Black and White, Brightness / Contrast, Color Balance, Color
-Temperature, Curves, Hue / Saturation, Invert Colors, Levels, Posterize, Sepia
-and Threshold. Curves and Levels have dedicated dialogs with the channel
+Temperature, Curves, Hue / Saturation, Invert Alpha, Invert Colors, Levels,
+Posterize, Sepia and Threshold. Curves and Levels have dedicated dialogs with the channel
 histogram behind the controls.
 
 ### Effects
 
 * Artistic: Oil Painting, Pencil Sketch, Ink Sketch, Mosaic Tiles
 * Blurs: Gaussian, Unfocus, Motion, Radial, Zoom, Fragment, Surface Blur
+* Color: Quantize, Duotone
 * Distort: Bulge, Twist, Polar Inversion, Tile Reflection, Dents, Frosted Glass,
   Pixelate, Crystalize
 * Noise: Add Noise, Median, Reduce Noise
+* Object: Drop Shadow, Outline Object, Outer Glow
 * Photo: Sharpen, Glow, Vignette, Soft Portrait, Red Eye Removal
 * Render: Clouds, Julia Fractal, Mandelbrot Fractal, Checkerboard
+* Stylize: Edge Detect, Emboss, Relief, Outline
 
 Every effect dialog is generated from the effect's parameter list and previews
 live on the canvas; Ctrl+F repeats the last one with the same settings.
