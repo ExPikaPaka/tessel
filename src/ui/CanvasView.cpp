@@ -7,6 +7,8 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QStyleHints>
+#include <QTabletEvent>
 #include <QWheelEvent>
 
 #include "ui/Icons.h"
@@ -542,7 +544,7 @@ void CanvasView::drawRulers(QPainter& painter)
 
 // ----------------------------------------------------------------- input
 
-ToolEvent CanvasView::buildEvent(QMouseEvent* event) const
+ToolEvent CanvasView::buildEvent(const QSinglePointEvent* event) const
 {
     ToolEvent out;
     out.viewPos = event->position();
@@ -554,44 +556,42 @@ ToolEvent CanvasView::buildEvent(QMouseEvent* event) const
     return out;
 }
 
-void CanvasView::mousePressEvent(QMouseEvent* event)
+void CanvasView::deliverPress(const ToolEvent& event)
 {
-    setFocus(Qt::MouseFocusReason);
-    if (event->button() == Qt::MiddleButton || spaceHeld_) {
+    if (event.button == Qt::MiddleButton || spaceHeld_) {
         panning_ = true;
-        panAnchor_ = event->position().toPoint();
+        panAnchor_ = event.viewPos.toPoint();
         applyCursor();
         return;
     }
     if (!tool_)
         return;
     ToolContext context = makeContext();
-    tool_->press(context, buildEvent(event));
+    tool_->press(context, event);
 }
 
-void CanvasView::mouseMoveEvent(QMouseEvent* event)
+void CanvasView::deliverMove(const ToolEvent& event)
 {
-    const QPointF docPos = docFromView(event->position());
-    const QPoint pixel(int(std::floor(docPos.x())), int(std::floor(docPos.y())));
-    if (pixel != lastPixel_) {
-        lastPixel_ = pixel;
-        emit cursorMoved(pixel, doc_->rect().contains(pixel.x(), pixel.y()));
+    if (event.pixel != lastPixel_) {
+        lastPixel_ = event.pixel;
+        emit cursorMoved(event.pixel,
+                         doc_->rect().contains(event.pixel.x(), event.pixel.y()));
         if (showRulers_)
             viewport()->update(QRect(0, 0, viewport()->width(), kRulerSize));
     }
     if (panning_) {
-        const QPoint delta = panAnchor_ - event->position().toPoint();
-        panBy(QPointF(delta));
-        panAnchor_ = event->position().toPoint();
+        const QPoint at = event.viewPos.toPoint();
+        panBy(QPointF(panAnchor_ - at));
+        panAnchor_ = at;
         return;
     }
     if (!tool_)
         return;
     ToolContext context = makeContext();
-    tool_->move(context, buildEvent(event));
+    tool_->move(context, event);
 }
 
-void CanvasView::mouseReleaseEvent(QMouseEvent* event)
+void CanvasView::deliverRelease(const ToolEvent& event)
 {
     if (panning_) {
         panning_ = false;
@@ -601,7 +601,81 @@ void CanvasView::mouseReleaseEvent(QMouseEvent* event)
     if (!tool_)
         return;
     ToolContext context = makeContext();
-    tool_->release(context, buildEvent(event));
+    tool_->release(context, event);
+}
+
+void CanvasView::mousePressEvent(QMouseEvent* event)
+{
+    setFocus(Qt::MouseFocusReason);
+    deliverPress(buildEvent(event));
+}
+
+void CanvasView::mouseMoveEvent(QMouseEvent* event)
+{
+    deliverMove(buildEvent(event));
+}
+
+void CanvasView::mouseReleaseEvent(QMouseEvent* event)
+{
+    deliverRelease(buildEvent(event));
+}
+
+void CanvasView::tabletEvent(QTabletEvent* event)
+{
+    // A tablet event nobody accepts comes back as a synthesised mouse event,
+    // which would draw the stroke a second time with no pressure, so every one
+    // of these is accepted whether a tool wanted it or not.
+    event->accept();
+    ToolEvent out = buildEvent(event);
+    out.fromTablet = true;
+    out.pressure = std::clamp(double(event->pressure()), 0.0, 1.0);
+    out.tiltX = event->xTilt();
+    out.tiltY = event->yTilt();
+    switch (event->type()) {
+    case QEvent::TabletPress:
+        setFocus(Qt::MouseFocusReason);
+        // Accepting the event is also what stops Qt turning a double tap into
+        // a double click, so that is recognised here instead, by the same rule
+        // Qt applies: two taps in the same place inside the system interval.
+        // The tools that finish their work on a double click are reachable
+        // with a pen that way.
+        if (tapTimer_.isValid()
+            && tapTimer_.elapsed()
+                   < QGuiApplication::styleHints()->mouseDoubleClickInterval()
+            && (event->position() - lastTap_).manhattanLength() <= 4.0) {
+            tapTimer_.invalidate();
+            if (tool_) {
+                ToolContext context = makeContext();
+                tool_->doubleClick(context, out);
+            }
+        } else {
+            tapTimer_.restart();
+            lastTap_ = event->position();
+            deliverPress(out);
+        }
+        break;
+    case QEvent::TabletMove:
+        deliverMove(out);
+        break;
+    case QEvent::TabletRelease:
+        deliverRelease(out);
+        break;
+    default:
+        break;
+    }
+}
+
+bool CanvasView::viewportEvent(QEvent* event)
+{
+    switch (event->type()) {
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+        tabletEvent(static_cast<QTabletEvent*>(event));
+        return true;
+    default:
+        return QAbstractScrollArea::viewportEvent(event);
+    }
 }
 
 void CanvasView::mouseDoubleClickEvent(QMouseEvent* event)

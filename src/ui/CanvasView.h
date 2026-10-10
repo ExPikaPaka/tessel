@@ -12,6 +12,9 @@
 #include "core/Units.h"
 #include "tools/Tool.h"
 
+class QSinglePointEvent;
+class QTabletEvent;
+
 namespace tessel {
 
 // The scrolling, zooming image view. One instance per open document.
@@ -80,6 +83,11 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void tabletEvent(QTabletEvent* event) override;
+    // Tablet events arrive addressed to the viewport, and the default
+    // implementation hands those straight to the viewport widget, so they have
+    // to be picked out here to reach tabletEvent() at all.
+    bool viewportEvent(QEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
@@ -94,7 +102,12 @@ private:
     QSizeF scaledCanvasSize() const;
     void updateScrollBars();
     void clampPanOffset();
-    ToolEvent buildEvent(QMouseEvent* event) const;
+    // Mouse and tablet events share everything but the pressure, so they are
+    // built and then delivered through the same three steps.
+    ToolEvent buildEvent(const QSinglePointEvent* event) const;
+    void deliverPress(const ToolEvent& event);
+    void deliverMove(const ToolEvent& event);
+    void deliverRelease(const ToolEvent& event);
     void drawCanvas(QPainter& painter);
     void drawSelection(QPainter& painter);
     void drawPixelGrid(QPainter& painter);
@@ -115,6 +128,10 @@ private:
     QPoint panAnchor_;
     QPointF panOffset_;
     QPoint lastPixel_;
+    // A pen's double tap, which Qt no longer turns into a double click once
+    // the tablet events are accepted.
+    QElapsedTimer tapTimer_;
+    QPointF lastTap_;
     QTimer antsTimer_;
     int antsPhase_ = 0;
     Rgba primary_{0, 0, 0, 255};
