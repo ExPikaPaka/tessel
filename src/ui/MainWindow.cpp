@@ -448,6 +448,13 @@ void MainWindow::createActions()
     make(QStringLiteral("addlayer"), QStringLiteral("&Add New Layer"),
          QStringLiteral("layer-add"), QKeySequence(QStringLiteral("Ctrl+Shift+N")),
          [this] { addLayer(); });
+    make(QStringLiteral("addgroup"), QStringLiteral("Add &Group"),
+         QStringLiteral("layer"), QKeySequence(QStringLiteral("Ctrl+Shift+G")), [this] {
+             if (Document* doc = currentDocument()) {
+                 structuralEdit(QStringLiteral("Add Group"), QStringLiteral("layer"),
+                                [doc] { doc->addGroup(); });
+             }
+         });
     make(QStringLiteral("deletelayer"), QStringLiteral("&Delete Layer"),
          QStringLiteral("layer-delete"), QKeySequence(QStringLiteral("Ctrl+Shift+Delete")),
          [this] { deleteLayer(); });
@@ -488,14 +495,101 @@ void MainWindow::createActions()
     make(QStringLiteral("rotatezoom"), QStringLiteral("&Rotate / Zoom Layer"),
          QStringLiteral("rotate-cw"), QKeySequence(QStringLiteral("Ctrl+Shift+Z")),
          [this] { chooseTool(QStringLiteral("transform")); });
+    // Layer masks. Adding, inverting and applying all change pixels, so they go
+    // through the document snapshot; which of the two thumbnails painting lands
+    // in is interface state, like the active layer, and is not recorded.
+    make(QStringLiteral("addmask"), QStringLiteral("Add Layer &Mask"),
+         QStringLiteral("layer-props"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || layer->hasMask())
+                 return;
+             const int uid = layer->uid();
+             structuralEdit(QStringLiteral("Add Layer Mask"),
+                            QStringLiteral("layer-props"), [doc, uid] {
+                                if (Layer* target = doc->layerByUid(uid)) {
+                                    doc->addMask(target);
+                                    target->setMaskSelected(true);
+                                }
+                            });
+         });
+    make(QStringLiteral("editmask"), QStringLiteral("&Paint in Mask"),
+         QStringLiteral("brush"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || !layer->hasMask())
+                 return;
+             layer->setMaskSelected(!layer->maskSelected());
+             refreshPanels();
+             updateEverything();
+         });
+    make(QStringLiteral("togglemask"), QStringLiteral("&Enable Layer Mask"),
+         QStringLiteral("visible"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || !layer->hasMask())
+                 return;
+             const int uid = layer->uid();
+             const bool next = !layer->maskEnabled();
+             structuralEdit(next ? QStringLiteral("Enable Layer Mask")
+                                 : QStringLiteral("Disable Layer Mask"),
+                            QStringLiteral("visible"), [doc, uid, next] {
+                                if (Layer* target = doc->layerByUid(uid)) {
+                                    target->setMaskEnabled(next);
+                                    doc->invalidate();
+                                }
+                            });
+         });
+    make(QStringLiteral("invertmask"), QStringLiteral("&Invert Layer Mask"),
+         QStringLiteral("invert"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || !layer->hasMask())
+                 return;
+             const int uid = layer->uid();
+             structuralEdit(QStringLiteral("Invert Layer Mask"),
+                            QStringLiteral("invert"), [doc, uid] {
+                                if (Layer* target = doc->layerByUid(uid)) {
+                                    target->invertMask();
+                                    doc->invalidate();
+                                }
+                            });
+         });
+    make(QStringLiteral("applymask"), QStringLiteral("App&ly Layer Mask"),
+         QStringLiteral("flatten"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || !layer->hasMask())
+                 return;
+             const int uid = layer->uid();
+             structuralEdit(QStringLiteral("Apply Layer Mask"),
+                            QStringLiteral("flatten"), [doc, uid] {
+                                if (Layer* target = doc->layerByUid(uid))
+                                    doc->applyMask(target);
+                            });
+         });
+    make(QStringLiteral("deletemask"), QStringLiteral("Delete Layer Mas&k"),
+         QStringLiteral("layer-delete"), QKeySequence(), [this] {
+             Document* doc = currentDocument();
+             Layer* layer = doc ? doc->activeNode() : nullptr;
+             if (!layer || !layer->hasMask())
+                 return;
+             const int uid = layer->uid();
+             structuralEdit(QStringLiteral("Delete Layer Mask"),
+                            QStringLiteral("layer-delete"), [doc, uid] {
+                                if (Layer* target = doc->layerByUid(uid))
+                                    doc->removeMask(target);
+                            });
+         });
     make(QStringLiteral("layerup"), QStringLiteral("Move Layer &Up"), QStringLiteral("up"),
          QKeySequence(), [this] { moveLayer(1); });
     make(QStringLiteral("layerdown"), QStringLiteral("Move Layer &Down"),
          QStringLiteral("down"), QKeySequence(), [this] { moveLayer(-1); });
     make(QStringLiteral("togglevisible"), QStringLiteral("Toggle Layer &Visibility"),
          QStringLiteral("visible"), QKeySequence(QStringLiteral("Ctrl+,")), [this] {
-             if (Document* doc = currentDocument())
-                 setLayerVisible(doc->activeIndex(), !doc->activeLayer()->visible);
+             Document* doc = currentDocument();
+             if (Layer* layer = doc ? doc->activeNode() : nullptr)
+                 setLayerVisible(doc->activeIndex(), !layer->visible);
          });
     make(QStringLiteral("gotop"), QStringLiteral("Go to &Top Layer"), QString(),
          QKeySequence(QStringLiteral("Ctrl+Alt+PgUp")),
@@ -620,10 +714,20 @@ void MainWindow::createMenus()
 
     QMenu* layersMenu = menuBar()->addMenu(QStringLiteral("&Layers"));
     add(layersMenu, QStringLiteral("addlayer"));
+    add(layersMenu, QStringLiteral("addgroup"));
     add(layersMenu, QStringLiteral("deletelayer"));
     add(layersMenu, QStringLiteral("duplicatelayer"));
     add(layersMenu, QStringLiteral("mergedown"));
     add(layersMenu, QStringLiteral("importlayer"));
+    layersMenu->addSeparator();
+    QMenu* maskMenu = layersMenu->addMenu(QStringLiteral("Layer &Mask"));
+    add(maskMenu, QStringLiteral("addmask"));
+    add(maskMenu, QStringLiteral("editmask"));
+    maskMenu->addSeparator();
+    add(maskMenu, QStringLiteral("togglemask"));
+    add(maskMenu, QStringLiteral("invertmask"));
+    add(maskMenu, QStringLiteral("applymask"));
+    add(maskMenu, QStringLiteral("deletemask"));
     layersMenu->addSeparator();
     add(layersMenu, QStringLiteral("layerfliph"));
     add(layersMenu, QStringLiteral("layerflipv"));
@@ -878,6 +982,25 @@ void MainWindow::createDocks()
     });
 
     connect(layers_, &LayersPanel::addLayerRequested, this, &MainWindow::addLayer);
+    connect(layers_, &LayersPanel::addGroupRequested, this, [this] {
+        if (QAction* action = actions_.value(QStringLiteral("addgroup")))
+            action->trigger();
+    });
+    connect(layers_, &LayersPanel::layerReparented, this,
+            [this](int uid, int parentUid, int childIndex) {
+                Document* doc = currentDocument();
+                if (!doc)
+                    return;
+                Layer* layer = doc->layerByUid(uid);
+                Layer* parent = parentUid == 0 ? doc->rootGroup()
+                                               : doc->layerByUid(parentUid);
+                if (!layer || !parent || !doc->canReparent(layer, parent))
+                    return;
+                structuralEdit(QStringLiteral("Move Layer"), QStringLiteral("up"),
+                               [doc, layer, parent, childIndex] {
+                                   doc->reparentLayer(layer, parent, childIndex);
+                               });
+            });
     connect(layers_, &LayersPanel::deleteLayerRequested, this, &MainWindow::deleteLayer);
     connect(layers_, &LayersPanel::duplicateLayerRequested, this,
             &MainWindow::duplicateLayer);
@@ -1395,8 +1518,27 @@ void MainWindow::updateActionStates()
     }
     enable(QStringLiteral("freetransform"), hasDoc);
     enable(QStringLiteral("zoomselection"), hasSelection);
+    const Layer* active = hasDoc ? doc->activeNode() : nullptr;
+    const bool hasMask = active && active->hasMask();
+    enable(QStringLiteral("addgroup"), hasDoc);
+    enable(QStringLiteral("addmask"), active && !hasMask);
+    for (const QString& key : {QStringLiteral("editmask"), QStringLiteral("togglemask"),
+                               QStringLiteral("invertmask"), QStringLiteral("applymask"),
+                               QStringLiteral("deletemask")}) {
+        enable(key, hasMask);
+    }
+    if (QAction* toggle = actions_.value(QStringLiteral("togglemask"))) {
+        toggle->setText(hasMask && active->maskEnabled()
+                            ? QStringLiteral("&Disable Layer Mask")
+                            : QStringLiteral("&Enable Layer Mask"));
+    }
+    if (QAction* paint = actions_.value(QStringLiteral("editmask"))) {
+        paint->setText(hasMask && active->maskSelected()
+                           ? QStringLiteral("&Paint in Layer")
+                           : QStringLiteral("&Paint in Mask"));
+    }
     enable(QStringLiteral("deletelayer"), manyLayers);
-    enable(QStringLiteral("mergedown"), manyLayers && doc->activeIndex() > 0);
+    enable(QStringLiteral("mergedown"), manyLayers && active && active->indexInParent() > 0);
     enable(QStringLiteral("flatten"), manyLayers);
     enable(QStringLiteral("layerup"), manyLayers && doc->activeIndex() < doc->layerCount() - 1);
     enable(QStringLiteral("layerdown"), manyLayers && doc->activeIndex() > 0);
@@ -2150,8 +2292,8 @@ void MainWindow::goToLayer(int index)
     doc->setActiveIndex(target);
     refreshPanels();
     updateStatusBar();
-    hintLabel_->setText(QStringLiteral("Active layer: %1")
-                            .arg(doc->activeLayer()->name));
+    if (const Layer* layer = doc->activeNode())
+        hintLabel_->setText(QStringLiteral("Active layer: %1").arg(layer->name));
 }
 
 // ----------------------------------------------------------------- layers
@@ -2181,17 +2323,16 @@ void MainWindow::duplicateLayer()
     if (!doc)
         return;
     structuralEdit(QStringLiteral("Duplicate Layer"), QStringLiteral("layer-duplicate"),
-                   [doc] {
-                       const Layer* source = doc->activeLayer();
-                       doc->addLayer(source->clone(
-                           doc->uniqueLayerName(source->name + QStringLiteral(" copy"))));
-                   });
+                   [doc] { doc->duplicateLayer(doc->activeIndex()); });
 }
 
 void MainWindow::mergeLayerDown()
 {
     Document* doc = currentDocument();
-    if (!doc || doc->activeIndex() <= 0)
+    const Layer* active = doc ? doc->activeNode() : nullptr;
+    // Merging down goes into the layer below inside the same group, so a layer
+    // at the bottom of its group has nothing to merge with.
+    if (!doc || !active || active->indexInParent() <= 0)
         return;
     const int index = doc->activeIndex();
     structuralEdit(QStringLiteral("Merge Layer Down"), QStringLiteral("layer-merge"),

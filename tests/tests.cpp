@@ -540,6 +540,182 @@ int main(int argc, char** argv)
         CHECK(doc.layerCount() == 1);
     });
 
+    addTest("layer masks", [] {
+        Document doc(8, 8, Rgba(0, 0, 255, 255));
+        Layer* top = doc.addEmptyLayer();
+        top->image.fill(Rgba(255, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(0, 0) == Rgba(255, 0, 0, 255));
+
+        Layer* mask = doc.addMask(top);
+        CHECK(mask != nullptr);
+        CHECK(top->hasMask());
+        CHECK(top->maskEnabled());
+        CHECK(mask->uid() != top->uid());
+        // A fresh mask is white, so the layer shows as before.
+        doc.invalidate();
+        CHECK(doc.composite().at(0, 0) == Rgba(255, 0, 0, 255));
+
+        // Black hides, white reveals.
+        ops::fillRegion(mask->image, Rect(0, 0, 4, 8), Rgba(0, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+        CHECK(doc.composite().at(5, 1) == Rgba(255, 0, 0, 255));
+        // A grey mask value lets part of the layer through.
+        ops::fillRegion(mask->image, Rect(0, 0, 2, 8), Rgba(128, 128, 128, 255));
+        doc.invalidate();
+        CHECK_NEAR(doc.composite().at(0, 0).r, 128, 3);
+
+        // Toggling the mask off ignores it entirely.
+        top->setMaskEnabled(false);
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+        top->setMaskEnabled(true);
+        doc.invalidate();
+
+        // Inverting swaps what is hidden and what is revealed.
+        ops::fillRegion(mask->image, Rect(0, 0, 4, 8), Rgba(0, 0, 0, 255));
+        top->invertMask();
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+        CHECK(doc.composite().at(5, 1) == Rgba(0, 0, 255, 255));
+
+        // Painting lands in the mask while the mask is the selected target.
+        CHECK(doc.activeLayer() == top);
+        top->setMaskSelected(true);
+        CHECK(doc.activeLayer() == mask);
+        CHECK(doc.activeNode() == top);
+        CHECK(doc.layerByUid(mask->uid()) == mask);
+
+        // Applying the mask bakes it into the pixels and drops it.
+        CHECK(doc.applyMask(top));
+        CHECK(!top->hasMask());
+        CHECK(top->image.at(1, 1).a == 255);
+        CHECK(top->image.at(5, 1).a == 0);
+        CHECK(doc.activeLayer() == top);
+
+        // And a mask can simply be deleted, which reveals the layer again.
+        doc.addMask(top, false);
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+        doc.removeMask(top);
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+    });
+
+    addTest("layer groups", [] {
+        Document doc(8, 8, Rgba(0, 0, 255, 255));
+        Layer* group = doc.addGroup(QStringLiteral("Set"));
+        CHECK(group->isGroup());
+        CHECK(doc.layerCount() == 2);
+        CHECK(doc.activeNode() == group);
+        // A group is not a paint target, so there is nothing to paint into.
+        CHECK(doc.activeLayer() == group);
+        CHECK(group->width() == 0);
+
+        // A layer added while a group is active lands inside it.
+        Layer* inside = doc.addEmptyLayer();
+        CHECK(inside->parent() == group);
+        CHECK(group->childCount() == 1);
+        inside->image.fill(Rgba(255, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(0, 0) == Rgba(255, 0, 0, 255));
+
+        // The flat index runs bottom to top with children ahead of the group.
+        CHECK(doc.layerAt(0)->name == QStringLiteral("Background"));
+        CHECK(doc.layerAt(1) == inside);
+        CHECK(doc.layerAt(2) == group);
+        CHECK(doc.indexOfUid(group->uid()) == 2);
+
+        // The group's own opacity, visibility and mode apply to the children.
+        group->opacity = 128;
+        doc.invalidate();
+        CHECK_NEAR(doc.composite().at(0, 0).r, 127, 2);
+        CHECK_NEAR(doc.composite().at(0, 0).b, 127, 2);
+        group->opacity = 255;
+        group->visible = false;
+        doc.invalidate();
+        CHECK(doc.composite().at(0, 0) == Rgba(0, 0, 255, 255));
+        group->visible = true;
+        group->mode = BlendMode::Multiply;
+        doc.invalidate();
+        CHECK(doc.composite().at(0, 0) == Rgba(0, 0, 0, 255));
+        group->mode = BlendMode::Normal;
+        doc.invalidate();
+
+        // A group can carry a mask of its own.
+        Layer* groupMask = doc.addMask(group);
+        ops::fillRegion(groupMask->image, Rect(0, 0, 4, 8), Rgba(0, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+        CHECK(doc.composite().at(5, 1) == Rgba(255, 0, 0, 255));
+        doc.removeMask(group);
+        doc.invalidate();
+
+        // Dragging a layer out of a group and back in again.
+        CHECK(doc.reparentLayer(inside, doc.rootGroup(), 0));
+        CHECK(inside->parent() == doc.rootGroup());
+        CHECK(group->childCount() == 0);
+        CHECK(doc.layerAt(0) == inside);
+        CHECK(doc.reparentLayer(inside, group, 0));
+        CHECK(inside->parent() == group);
+        // Nothing can be dragged into itself, or into a plain layer.
+        CHECK(!doc.reparentLayer(group, group, 0));
+        CHECK(!doc.canReparent(group, inside));
+
+        // Duplicating a group copies its contents with fresh identities.
+        Layer* copy = doc.duplicateLayer(doc.indexOfUid(group->uid()));
+        CHECK(copy != nullptr && copy->isGroup());
+        CHECK(copy->childCount() == 1);
+        CHECK(copy->childAt(0)->uid() != inside->uid());
+        CHECK(doc.layerByUid(copy->childAt(0)->uid()) == copy->childAt(0));
+        CHECK(copy->name != group->name);
+        // Deleting a group takes its children with it.
+        CHECK(doc.removeLayer(doc.indexOfUid(copy->uid())));
+        CHECK(doc.indexOfUid(copy->uid()) < 0);
+        CHECK(doc.layerCount() == 3);
+
+        // Move up and down step over a group rather than into it.
+        const int backgroundUid = doc.layerAt(0)->uid();
+        doc.moveLayer(0, 1);
+        CHECK(doc.indexOfUid(backgroundUid) == 2);
+        CHECK(doc.layerByUid(backgroundUid)->parent() == doc.rootGroup());
+        doc.moveLayer(2, 1);
+        CHECK(doc.indexOfUid(backgroundUid) == 0);
+
+        // Merging a group down flattens it into the layer below.
+        CHECK(doc.mergeLayerDown(doc.indexOfUid(group->uid())));
+        CHECK(doc.layerCount() == 1);
+        CHECK(!doc.layerAt(0)->isGroup());
+        CHECK(doc.layerAt(0)->image.at(0, 0) == Rgba(255, 0, 0, 255));
+    });
+
+    addTest("canvas operations follow masks and groups", [] {
+        Document doc(10, 20, Rgba(0, 0, 255, 255));
+        Layer* group = doc.addGroup(QStringLiteral("Set"));
+        Layer* inside = doc.addChild(
+            group, std::make_unique<Layer>(10, 20, QStringLiteral("Inside"),
+                                           Rgba(255, 0, 0, 255)));
+        Layer* mask = doc.addMask(inside);
+        ops::fillRegion(mask->image, Rect(0, 0, 10, 10), Rgba(0, 0, 0, 255));
+        doc.invalidate();
+        CHECK(doc.composite().at(5, 5) == Rgba(0, 0, 255, 255));
+
+        doc.rotate90(1);
+        CHECK(doc.width() == 20 && doc.height() == 10);
+        CHECK(inside->maskImage()->width() == 20);
+        CHECK(doc.composite().width() == 20);
+        doc.resizeCanvas(40, 30, Anchor::TopLeft, false);
+        CHECK(inside->maskImage()->width() == 40);
+        // Fresh canvas reveals, so the mask never hides what was not there.
+        CHECK(inside->maskImage()->at(39, 29) == Rgba(255, 255, 255, 255));
+        doc.cropTo(Rect(0, 0, 8, 8));
+        CHECK(inside->maskImage()->width() == 8);
+        doc.flip(true);
+        CHECK(inside->maskImage()->width() == 8);
+        CHECK(doc.composite().width() == 8);
+    });
+
     addTest("document canvas operations", [] {
         Document doc(10, 20);
         doc.rotate90(1);
@@ -670,6 +846,121 @@ int main(int argc, char** argv)
         CHECK(reader.read(QStringLiteral("stored.txt")) == QByteArray("hello"));
         CHECK(reader.read(QStringLiteral("deflated.txt")) == payload);
         CHECK(reader.read(QStringLiteral("missing.txt")).isEmpty());
+    });
+
+    addTest("masks and groups survive undo", [] {
+        Document doc(8, 8, Rgba(0, 0, 255, 255));
+        History history(&doc);
+        recordDocumentEdit(doc, history, QStringLiteral("Add Group"),
+                           QStringLiteral("layer"), [&] {
+                               Layer* group = doc.addGroup(QStringLiteral("Set"));
+                               doc.addChild(group, std::make_unique<Layer>(
+                                                       8, 8, QStringLiteral("Inside"),
+                                                       Rgba(255, 0, 0, 255)));
+                           });
+        CHECK(doc.layerCount() == 3);
+        const int groupUid = doc.layerAt(2)->uid();
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+
+        recordDocumentEdit(doc, history, QStringLiteral("Add Mask"),
+                           QStringLiteral("layer"), [&] {
+                               Layer* inside = doc.layerAt(1);
+                               Layer* mask = doc.addMask(inside);
+                               ops::fillRegion(mask->image, Rect(0, 0, 4, 8),
+                                               Rgba(0, 0, 0, 255));
+                               inside->setMaskSelected(true);
+                           });
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+
+        CHECK(history.undo());
+        CHECK(!doc.layerAt(1)->hasMask());
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+        CHECK(history.undo());
+        CHECK(doc.layerCount() == 1);
+
+        CHECK(history.redo());
+        CHECK(doc.layerCount() == 3);
+        CHECK(doc.layerAt(2)->isGroup());
+        CHECK(doc.layerAt(2)->uid() == groupUid);
+        CHECK(doc.layerAt(1)->parent() == doc.layerAt(2));
+        CHECK(doc.layerAt(1)->name == QStringLiteral("Inside"));
+        CHECK(history.redo());
+        CHECK(doc.layerAt(1)->hasMask());
+        CHECK(doc.layerAt(1)->maskSelected());
+        CHECK(doc.activeLayer() == doc.layerAt(1)->maskLayer());
+        CHECK(doc.layerAt(1)->maskImage()->at(1, 1).r == 0);
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+
+        // A mask is an ordinary raster, so painting in it records pixel undo.
+        Layer* mask = doc.activeLayer();
+        {
+            EditScope scope(doc, history, mask, QStringLiteral("Paintbrush"),
+                            QStringLiteral("brush"));
+            ops::fillRegion(mask->image, Rect(0, 0, 4, 8), Rgba(255, 255, 255, 255));
+        }
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(255, 0, 0, 255));
+        CHECK(history.undo());
+        doc.invalidate();
+        CHECK(doc.composite().at(1, 1) == Rgba(0, 0, 255, 255));
+    });
+
+    addTest("masks and groups round trip files", [] {
+        QTemporaryDir dir;
+        Document doc(16, 12, Rgba(0, 0, 255, 255));
+        Layer* group = doc.addGroup(QStringLiteral("Set"));
+        group->opacity = 200;
+        group->mode = BlendMode::Multiply;
+        Layer* inside = doc.addChild(
+            group, std::make_unique<Layer>(16, 12, QStringLiteral("Inside"),
+                                           Rgba(255, 0, 0, 255)));
+        Layer* mask = doc.addMask(inside);
+        ops::fillRegion(mask->image, Rect(0, 0, 8, 12), Rgba(0, 0, 0, 255));
+        inside->setMaskSelected(true);
+        // Set after the child, which opens the group it lands in.
+        group->expanded = false;
+        doc.invalidate();
+        const Image expected = doc.composite();
+        QString error;
+
+        const QString path = dir.filePath(QStringLiteral("tree.tessel"));
+        CHECK(io::saveDocument(doc, path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (loaded) {
+            CHECK(loaded->layerCount() == 3);
+            const Layer* loadedGroup = loaded->layerAt(2);
+            CHECK(loadedGroup->isGroup());
+            CHECK(loadedGroup->name == QStringLiteral("Set"));
+            CHECK(loadedGroup->opacity == 200);
+            CHECK(loadedGroup->mode == BlendMode::Multiply);
+            CHECK(!loadedGroup->expanded);
+            CHECK(loadedGroup->childCount() == 1);
+            const Layer* loadedInside = loaded->layerAt(1);
+            CHECK(loadedInside->parent() == loadedGroup);
+            CHECK(loadedInside->hasMask());
+            CHECK(loadedInside->maskSelected());
+            CHECK(loadedInside->maskImage()->at(1, 1).r == 0);
+            CHECK(loadedInside->maskImage()->at(12, 1).r == 255);
+            CHECK(samePixels(loaded->composite(), expected));
+        }
+
+        // OpenRaster keeps a group as a nested stack, and bakes the mask into
+        // the pixels it writes because the format has no mask of its own.
+        const QString oraPath = dir.filePath(QStringLiteral("tree.ora"));
+        CHECK(io::saveDocument(doc, oraPath, &error));
+        auto ora = io::openDocument(oraPath, &error);
+        CHECK(ora != nullptr);
+        if (ora) {
+            CHECK(ora->layerCount() == 3);
+            CHECK(ora->layerAt(2)->isGroup());
+            CHECK(ora->layerAt(2)->name == QStringLiteral("Set"));
+            CHECK(ora->layerAt(2)->opacity == 200);
+            CHECK(ora->layerAt(2)->mode == BlendMode::Multiply);
+            CHECK(ora->layerAt(1)->parent() == ora->layerAt(2));
+            CHECK(!ora->layerAt(1)->hasMask());
+            CHECK(samePixels(ora->composite(), expected));
+        }
     });
 
     addTest("layered file round trip", [] {
@@ -1074,6 +1365,58 @@ int main(int argc, char** argv)
         CHECK(!layers.at(0).toObject().contains(QStringLiteral("textItems")));
         CHECK(layers.at(1).toObject().value(QStringLiteral("textItems")).toArray().size()
               == 1);
+    });
+
+    addTest("a file carries groups, masks and editable text together", [&layTextItem] {
+        // The tree, the masks and the text items all live in document.json and
+        // were written by different hands, so the one case none of their own
+        // tests covers is all three in the same file.
+        QTemporaryDir dir;
+        Document doc(60, 40);
+        Layer* group = doc.addGroup(QStringLiteral("Folder"));
+        CHECK(group != nullptr);
+        Layer* inside = doc.addChild(group, std::make_unique<Layer>(
+            Image(60, 40), QStringLiteral("Inside")));
+        CHECK(inside != nullptr);
+        ops::fillRegion(inside->image, Rect(0, 0, 60, 40), Rgba(200, 200, 200, 255));
+        Image mask(60, 40);
+        ops::fillRegion(mask, Rect(0, 0, 60, 40), Rgba(255, 255, 255, 255));
+        ops::fillRegion(mask, Rect(0, 0, 30, 40), Rgba(0, 0, 0, 255));
+        CHECK(doc.setMask(inside, mask) != nullptr);
+        doc.setActiveIndex(doc.indexOfUid(inside->uid()));
+        const TextItem item = layTextItem(doc, Rect(5, 5, 20, 10));
+        doc.textItems().push_back(item);
+        const Image pixels = inside->image;
+
+        const QString path = dir.filePath(QStringLiteral("all.tessel"));
+        QString error;
+        CHECK(io::saveDocument(doc, path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (!loaded)
+            return;
+        const Layer* backGroup = nullptr;
+        for (int i = 0; i < loaded->rootGroup()->childCount(); ++i) {
+            if (loaded->rootGroup()->childAt(i)->isGroup())
+                backGroup = loaded->rootGroup()->childAt(i);
+        }
+        CHECK(backGroup != nullptr && backGroup->isGroup());
+        if (!backGroup || !backGroup->isGroup())
+            return;
+        const Layer* backInside = backGroup->childAt(0);
+        CHECK(backInside != nullptr);
+        if (!backInside)
+            return;
+        CHECK(backInside->name == QLatin1String("Inside"));
+        CHECK(backInside->hasMask());
+        CHECK(samePixels(backInside->image, pixels));
+        // And the text that was typed on the layer inside the group came back
+        // attached to that same layer, not to the one at the top.
+        CHECK(loaded->textItems().size() == 1);
+        if (loaded->textItems().empty())
+            return;
+        CHECK(loaded->textItems().front().layerUid == backInside->uid());
+        CHECK(loaded->textItems().front().lines == item.lines);
     });
 
     addTest("a manifest with no text items still opens", [&layTextItem] {

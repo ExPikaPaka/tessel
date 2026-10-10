@@ -494,7 +494,8 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, History* history,
 {
     setWindowTitle(QStringLiteral("Layer Properties"));
     setWindowIcon(icons::get(QStringLiteral("layer-props"), 22));
-    Layer* layer = doc_->activeLayer();
+    // The properties belong to the layer or group itself, never to its mask.
+    Layer* layer = doc_->activeNode();
     originalName_ = layer ? layer->name : QString();
     originalVisible_ = layer ? layer->visible : true;
     originalMode_ = layer ? layer->mode : BlendMode::Normal;
