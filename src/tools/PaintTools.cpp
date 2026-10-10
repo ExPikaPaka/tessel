@@ -264,7 +264,7 @@ public:
             context.history->push(std::make_unique<PixelEdit>(
                 name(), iconName(), layerUid_, area, std::move(before),
                 std::move(after)));
-            context.doc->invalidateLayer(layer_);
+            context.doc->invalidateLayer(layer_, area);
             if (context.documentChanged)
                 context.documentChanged();
         }
@@ -577,7 +577,7 @@ protected:
         layer_->image.copyRectFrom(backup_, box);
         applyStroke(context, box);
         dirty_ = dirty_.united(box);
-        context.doc->invalidateLayer(layer_);
+        context.doc->invalidateLayer(layer_, box);
         context.repaint(box);
     }
 
@@ -1143,7 +1143,7 @@ public:
         EditScope scope(*context.doc, *context.history, layer, name(), iconName(), area);
         ops::colorOver(layer->image, mask, color, blend_, area);
         scope.commit();
-        context.doc->invalidateLayer(layer);
+        context.doc->invalidateLayer(layer, area);
         context.repaint(area);
         if (context.documentChanged)
             context.documentChanged();
@@ -1243,7 +1243,7 @@ public:
         context.history->push(std::make_unique<PixelEdit>(name(), iconName(), layerUid_,
                                                           area, std::move(before),
                                                           std::move(after)));
-        context.doc->invalidateLayer(layer_);
+        context.doc->invalidateLayer(layer_, area);
         if (context.documentChanged)
             context.documentChanged();
         layer_ = nullptr;
@@ -1393,7 +1393,7 @@ private:
             ops::imageOver(layer_->image, gradient, &mask, blend_, area,
                            float(opacity_));
         }
-        context.doc->invalidateLayer(layer_);
+        context.doc->invalidateLayer(layer_, area);
         context.repaint(area);
     }
 

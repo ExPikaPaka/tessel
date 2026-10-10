@@ -440,6 +440,62 @@ int main(int argc, char** argv)
         }
     });
 
+    addTest("a stroke keeps the composite whole", [] {
+        // The composite is kept up to date one rectangle at a time while a
+        // tool paints, so what the canvas draws has to be what a rebuild of
+        // the whole document would give, after every single dab.
+        auto doc = std::make_unique<Document>(300, 200, Rgba(30, 60, 90, 255));
+        Layer* group =
+            doc->addChild(doc->rootGroup(), Layer::makeGroup(QStringLiteral("Set")));
+        group->opacity = 180;
+        group->mode = BlendMode::Multiply;
+        Layer* inside = doc->addChild(
+            group, std::make_unique<Layer>(300, 200, QStringLiteral("Inside"),
+                                           Rgba(200, 40, 40, 160)));
+        paintGradient(doc->addMask(inside)->image);
+        Layer* target = doc->addChild(
+            doc->rootGroup(),
+            std::make_unique<Layer>(300, 200, QStringLiteral("Paint")));
+        target->opacity = 200;
+        doc->setActiveIndex(doc->indexOfUid(target->uid()));
+
+        CanvasView view(std::move(doc));
+        Document* document = view.document();
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        CHECK(brush != nullptr);
+        if (!brush)
+            return;
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(255, 220, 0, 255));
+        ToolContext context = view.makeContext();
+
+        // Every rebuilt composite is compared against a rebuild of all of it.
+        auto matchesRebuild = [document] {
+            const Image incremental = document->composite();
+            document->invalidate();
+            return samePixels(incremental, document->composite());
+        };
+
+        brush->press(context, makeEvent(QPointF(20, 20)));
+        CHECK(matchesRebuild());
+        for (int i = 1; i <= 20; ++i) {
+            ToolEvent move = makeEvent(QPointF(20 + i * 13, 20 + i * 8));
+            move.button = Qt::NoButton;
+            brush->move(context, move);
+            CHECK(matchesRebuild());
+        }
+        brush->release(context, makeEvent(QPointF(280, 180)));
+        CHECK(matchesRebuild());
+        CHECK(nonTransparentPixels(target->image) > 0);
+
+        // Undo writes its rectangle back, which has to reach the tiles too.
+        CHECK(view.history()->undo());
+        CHECK(matchesRebuild());
+        CHECK(nonTransparentPixels(target->image) == 0);
+        CHECK(view.history()->redo());
+        CHECK(matchesRebuild());
+    });
+
     addTest("eraser removes pixels", [] {
         auto doc = std::make_unique<Document>(60, 60, Rgba(0, 0, 255, 255));
         CanvasView view(std::move(doc));

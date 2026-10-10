@@ -17,7 +17,7 @@ void PixelEdit::write(Document& doc, const Image& patch)
     if (!layer)
         return;
     layer->image.blit(patch, rect_.x, rect_.y);
-    doc.invalidateLayer(layer);
+    doc.invalidateLayer(layer, rect_);
 }
 
 void PixelEdit::undo(Document& doc) { write(doc, before_); }
@@ -270,7 +270,7 @@ bool EditScope::commit()
                                                   area, before_,
                                                   std::move(after)));
     }
-    doc_.invalidateLayer(layer_);
+    doc_.invalidateLayer(layer_, area);
     return true;
 }
 
