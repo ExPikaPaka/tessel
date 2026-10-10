@@ -4,8 +4,16 @@
 // offscreen platform plugin so it needs no display:
 //
 //     tessel_screenshots docs/screenshots
+//
+// It also renders a contact sheet of every icon, which is how the icon set is
+// reviewed:
+//
+//     tessel_screenshots --icons /tmp/icons.png
 #include <QApplication>
 #include <QDir>
+#include <QFont>
+#include <QImage>
+#include <QPainter>
 #include <QTimer>
 
 #include "core/Document.h"
@@ -181,6 +189,74 @@ void save(QWidget* widget, const QString& path)
     qInfo("wrote %s", qPrintable(path));
 }
 
+
+// One contact sheet of every glyph: each tile shows the icon at the sizes the
+// interface actually asks for, over both themes, plus a four times nearest
+// neighbour blow up of the 16 px rendering so the pixel grid can be judged.
+void writeContactSheet(const QString& path)
+{
+    const QStringList names = icons::names();
+
+    const int tileWidth = 176;
+    const int bandHeight = 72;
+    const int labelHeight = 18;
+    const int tileHeight = bandHeight * 2 + labelHeight;
+    const int columns = 8;
+    const int rows = (names.size() + columns - 1) / columns;
+
+    QImage sheet(tileWidth * columns, tileHeight * rows, QImage::Format_ARGB32);
+    sheet.fill(QColor(0x15, 0x16, 0x1a));
+    QPainter p(&sheet);
+    QFont label = p.font();
+    label.setPointSizeF(7.5);
+    p.setFont(label);
+
+    // The two bands use the real theme backgrounds and foregrounds, so a glyph
+    // that disappears on one of them disappears here too.
+    struct Band {
+        QColor background;
+        QColor foreground;
+    };
+    const Band bands[2] = {{QColor(0x2b, 0x2d, 0x31), QColor(0xe6, 0xe8, 0xeb)},
+                           {QColor(0xef, 0xf1, 0xf3), QColor(0x1c, 0x1e, 0x21)}};
+    const int sizes[3] = {16, 20, 32};
+
+    for (int index = 0; index < names.size(); ++index) {
+        const QString& name = names.at(index);
+        const int originX = (index % columns) * tileWidth;
+        const int originY = (index / columns) * tileHeight;
+
+        for (int band = 0; band < 2; ++band) {
+            const int top = originY + band * bandHeight;
+            p.fillRect(QRect(originX, top, tileWidth, bandHeight),
+                       bands[band].background);
+            const int middle = top + bandHeight / 2;
+            int x = originX + 10;
+            for (int size : sizes) {
+                p.drawPixmap(x, middle - size / 2,
+                             icons::pixmap(name, size, bands[band].foreground));
+                x += size + 8;
+            }
+            const QPixmap small = icons::pixmap(name, 16, bands[band].foreground);
+            p.drawPixmap(originX + 102, middle - 32,
+                         small.scaled(64, 64, Qt::IgnoreAspectRatio,
+                                      Qt::FastTransformation));
+        }
+
+        p.fillRect(QRect(originX, originY + bandHeight * 2, tileWidth, labelHeight),
+                   QColor(0x15, 0x16, 0x1a));
+        p.setPen(QColor(0xcf, 0xd3, 0xd8));
+        p.drawText(QRect(originX, originY + bandHeight * 2, tileWidth, labelHeight),
+                   Qt::AlignCenter, name);
+
+        p.setPen(QColor(0x15, 0x16, 0x1a));
+        p.drawRect(QRect(originX, originY, tileWidth - 1, tileHeight - 1));
+    }
+    p.end();
+    sheet.save(path);
+    qInfo("wrote %s (%d glyphs)", qPrintable(path), int(names.size()));
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -191,6 +267,13 @@ int main(int argc, char** argv)
     QApplication::setApplicationName(QStringLiteral("TesselShots"));
     registerBuiltinEffects();
     registerBuiltinTools();
+
+    if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QLatin1String("--icons")) {
+        theme::apply(app, theme::Mode::Dark);
+        writeContactSheet(argc > 2 ? QString::fromLocal8Bit(argv[2])
+                                   : QStringLiteral("icons.png"));
+        return 0;
+    }
 
     const QString outDir = argc > 1 ? QString::fromLocal8Bit(argv[1])
                                     : QStringLiteral("docs/screenshots");

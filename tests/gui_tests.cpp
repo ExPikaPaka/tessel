@@ -160,34 +160,35 @@ int main(int argc, char** argv)
 
     // ------------------------------------------------------------ icons
     addTest("icons render", [] {
-        const QStringList names = {
-            QStringLiteral("pencil"), QStringLiteral("brush"), QStringLiteral("eraser"),
-            QStringLiteral("bucket"), QStringLiteral("gradient"), QStringLiteral("line"),
-            QStringLiteral("shapes"), QStringLiteral("text"), QStringLiteral("clone"),
-            QStringLiteral("recolor"), QStringLiteral("picker"), QStringLiteral("zoom"),
-            QStringLiteral("pan"), QStringLiteral("select-rect"), QStringLiteral("lasso"),
-            QStringLiteral("wand"), QStringLiteral("move-selected"),
-            QStringLiteral("move-selection"), QStringLiteral("select-ellipse"),
-            QStringLiteral("new"), QStringLiteral("open"), QStringLiteral("save"),
-            QStringLiteral("undo"), QStringLiteral("redo"), QStringLiteral("layer-add"),
-            QStringLiteral("visible"), QStringLiteral("hidden"), QStringLiteral("effect"),
-        };
+        const QStringList names = icons::names();
+        CHECK(names.size() >= 60);
+        // Every glyph has to draw something at every size the interface asks
+        // for, and has to stay inside the 2 unit margin at the sizes where a
+        // stray pixel would be visible.
         for (const QString& name : names) {
-            const QPixmap pixmap = icons::pixmap(name, 24, Qt::white);
-            check(!pixmap.isNull() && pixmap.width() == 24,
-                  name.toLocal8Bit().constData(), __LINE__);
-            // A glyph must actually draw something.
-            const QImage image = pixmap.toImage();
-            bool anyInk = false;
-            for (int y = 0; y < image.height() && !anyInk; ++y) {
-                for (int x = 0; x < image.width(); ++x) {
-                    if (qAlpha(image.pixel(x, y)) > 0) {
-                        anyInk = true;
-                        break;
+            for (int size : {16, 18, 20, 22, 24}) {
+                const QPixmap pixmap = icons::pixmap(name, size, Qt::white);
+                check(!pixmap.isNull() && pixmap.width() == size,
+                      name.toLocal8Bit().constData(), __LINE__);
+                const QImage image = pixmap.toImage();
+                int ink = 0;
+                for (int y = 0; y < image.height(); ++y) {
+                    for (int x = 0; x < image.width(); ++x) {
+                        if (qAlpha(image.pixel(x, y)) > 24) {
+                            ++ink;
+                            const bool inside = x > 0 && y > 0
+                                                && x < image.width() - 1
+                                                && y < image.height() - 1;
+                            check(inside, name.toLocal8Bit().constData(), __LINE__);
+                        }
                     }
                 }
+                // A glyph that covers almost nothing is unreadable, and one
+                // that covers almost everything is a solid block.
+                const int cells = image.width() * image.height();
+                check(ink > cells / 20 && ink < cells * 9 / 10,
+                      name.toLocal8Bit().constData(), __LINE__);
             }
-            check(anyInk, name.toLocal8Bit().constData(), __LINE__);
         }
         CHECK(!icons::appIcon().isNull());
         CHECK(!icons::checkerPixmap(8).isNull());
