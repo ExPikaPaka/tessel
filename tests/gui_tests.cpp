@@ -1064,7 +1064,12 @@ int main(int argc, char** argv)
         QApplication::processEvents();
         CanvasView* view = window.findChildren<CanvasView*>().last();
         CHECK(view->tool()->id() != QLatin1String("transform"));
-        QTest::keyClick(&window, Qt::Key(0x042F), Qt::ControlModifier | Qt::ShiftModifier);
+        // Sent rather than typed: QTest cannot carry a key that has no ASCII
+        // equivalent, and the filter sees the event either way, since it is
+        // installed on the application.
+        QKeyEvent typed(QEvent::KeyPress, 0x042F,
+                        Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("Я"));
+        QApplication::sendEvent(&window, &typed);
         QApplication::processEvents();
         CHECK(view->tool()->id() == QLatin1String("transform"));
         qApp->removeEventFilter(filter);
