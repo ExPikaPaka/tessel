@@ -352,6 +352,9 @@ Layer* Document::addChild(Layer* parent, std::unique_ptr<Layer> layer, int child
         childIndex = count;
     Layer* raw = layer.get();
     parent->children_.insert(parent->children_.begin() + childIndex, std::move(layer));
+    // A layer put into a collapsed group would otherwise land out of sight.
+    if (parent != root_.get())
+        parent->expanded = true;
     activeUid_ = raw->uid();
     markStructureChanged();
     return raw;

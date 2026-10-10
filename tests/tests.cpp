@@ -856,13 +856,14 @@ int main(int argc, char** argv)
         Layer* group = doc.addGroup(QStringLiteral("Set"));
         group->opacity = 200;
         group->mode = BlendMode::Multiply;
-        group->expanded = false;
         Layer* inside = doc.addChild(
             group, std::make_unique<Layer>(16, 12, QStringLiteral("Inside"),
                                            Rgba(255, 0, 0, 255)));
         Layer* mask = doc.addMask(inside);
         ops::fillRegion(mask->image, Rect(0, 0, 8, 12), Rgba(0, 0, 0, 255));
         inside->setMaskSelected(true);
+        // Set after the child, which opens the group it lands in.
+        group->expanded = false;
         doc.invalidate();
         const Image expected = doc.composite();
         QString error;
