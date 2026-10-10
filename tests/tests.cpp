@@ -94,8 +94,7 @@ int countingRuns = 0;
 void registerCountingEffect()
 {
     fx::add(EffectRegistry::instance(), "test_counting", "Counting", "Testing",
-            {ParamSpec::intParam(QStringLiteral("shift"), QStringLiteral("Shift"), 0,
-                                 200, 10)},
+            {ParamSpec::intParam(QStringLiteral("shift"), "Shift", 0, 200, 10)},
             [](const EffectContext& context, const ParamValues& values) {
                 ++countingRuns;
                 const int shift = values.intValue(QStringLiteral("shift"), 10);
@@ -124,8 +123,7 @@ public:
     {
         fx::add(registry, id_.toLatin1().constData(), "Fake Effect",
                 category_.toLatin1().constData(),
-                {ParamSpec::intParam(QStringLiteral("amount"), QStringLiteral("Amount"),
-                                     0, 10, 3)},
+                {ParamSpec::intParam(QStringLiteral("amount"), "Amount", 0, 10, 3)},
                 [](const EffectContext& context, const ParamValues& values) {
                     const int amount = values.intValue(QStringLiteral("amount"), 3);
                     return fx::mapPixels(context, [amount](Rgba c, int, int) {
@@ -1638,13 +1636,12 @@ int main(int argc, char** argv)
 
     addTest("effect parameter defaults", [] {
         std::vector<ParamSpec> specs = {
-            ParamSpec::intParam(QStringLiteral("i"), QStringLiteral("I"), 0, 10, 7),
-            ParamSpec::boolParam(QStringLiteral("b"), QStringLiteral("B"), true),
-            ParamSpec::doubleParam(QStringLiteral("d"), QStringLiteral("D"), 0, 1, 0.25),
-            ParamSpec::colorParam(QStringLiteral("c"), QStringLiteral("C"),
-                                  Rgba(1, 2, 3, 255)),
-            ParamSpec::offsetParam(QStringLiteral("o"), QStringLiteral("O"), 0.5, -0.5),
-            ParamSpec::choiceParam(QStringLiteral("ch"), QStringLiteral("Ch"),
+            ParamSpec::intParam(QStringLiteral("i"), "I", 0, 10, 7),
+            ParamSpec::boolParam(QStringLiteral("b"), "B", true),
+            ParamSpec::doubleParam(QStringLiteral("d"), "D", 0, 1, 0.25),
+            ParamSpec::colorParam(QStringLiteral("c"), "C", Rgba(1, 2, 3, 255)),
+            ParamSpec::offsetParam(QStringLiteral("o"), "O", 0.5, -0.5),
+            ParamSpec::choiceParam(QStringLiteral("ch"), "Ch",
                                    {QStringLiteral("a"), QStringLiteral("b")}, 1),
         };
         const ParamValues values = ParamValues::defaults(specs);
@@ -2127,7 +2124,9 @@ int main(int argc, char** argv)
                                  QStringLiteral("Scanlines & Co"), QStringLiteral("1.0"),
                                  QStringLiteral("Nobody"),
                                  QStringList{QStringLiteral("Scanlines")}});
-        CHECK(report.summary() == QStringLiteral("1 effect plugin loaded."));
+        // The count goes through a plural message, so the English source text
+        // keeps its "(s)" until a translation replaces it.
+        CHECK(report.summary() == QStringLiteral("1 effect plugin(s) loaded."));
 
         report.failed.push_back({QStringLiteral("/home/someone/plugins/b.so"),
                                  QStringLiteral("cannot load")});

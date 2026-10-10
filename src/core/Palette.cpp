@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -223,9 +224,11 @@ Palette Palette::load(const QString& path, QString* error)
     const QString shown = QFileInfo(path).fileName();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
-        return fail(QStringLiteral("Cannot read %1: %2").arg(shown, file.errorString()));
+        return fail(QCoreApplication::translate("Core", "Cannot read %1: %2")
+                        .arg(shown, file.errorString()));
     if (file.size() > kMaxFileBytes) {
-        return fail(QStringLiteral("%1 is too large to be a palette (%2 MB).")
+        return fail(QCoreApplication::translate(
+                        "Core", "%1 is too large to be a palette (%2 MB).")
                         .arg(shown)
                         .arg(file.size() / (1024 * 1024)));
     }
@@ -241,7 +244,8 @@ Palette Palette::load(const QString& path, QString* error)
         || formatForPath(path) == Format::Gpl;
     Palette out = gpl ? parseGpl(text) : parseHex(text);
     if (out.isEmpty())
-        return fail(QStringLiteral("No colours found in %1.").arg(shown));
+        return fail(QCoreApplication::translate("Core", "No colours found in %1.")
+                        .arg(shown));
     if (out.name_.isEmpty())
         out.name_ = QFileInfo(path).completeBaseName();
     return out;
@@ -253,7 +257,7 @@ bool Palette::save(const QString& path, QString* error) const
         error->clear();
     const auto fail = [error, &path](const QString& reason) {
         if (error) {
-            *error = QStringLiteral("Cannot write %1: %2")
+            *error = QCoreApplication::translate("Core", "Cannot write %1: %2")
                          .arg(QFileInfo(path).fileName(), reason);
         }
         return false;
@@ -271,13 +275,15 @@ bool Palette::save(const QString& path, QString* error) const
 
 QString Palette::openFilter()
 {
-    return QStringLiteral("Palettes (*.gpl *.txt *.hex);;GIMP palette (*.gpl);;"
-                          "Hex list (*.txt *.hex);;All files (*)");
+    return QCoreApplication::translate(
+        "Core", "Palettes (*.gpl *.txt *.hex);;GIMP palette (*.gpl);;"
+                "Hex list (*.txt *.hex);;All files (*)");
 }
 
 QString Palette::saveFilter()
 {
-    return QStringLiteral("GIMP palette (*.gpl);;Hex list (*.txt);;All files (*)");
+    return QCoreApplication::translate(
+        "Core", "GIMP palette (*.gpl);;Hex list (*.txt);;All files (*)");
 }
 
 } // namespace tessel

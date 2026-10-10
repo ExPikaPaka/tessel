@@ -7,6 +7,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 #include <QKeyEvent>
 
 #include "core/ImageOps.h"
@@ -18,13 +20,17 @@ namespace {
 class PlaceTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("place"); }
-    QString name() const override { return QStringLiteral("Place Image"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Place Image");
+    }
     QString iconName() const override { return QStringLiteral("paste"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag to position the picture, a corner to scale it. "
-                              "Enter places it, Escape cancels. Anything outside the "
-                              "canvas is trimmed off.");
+        return QCoreApplication::translate(
+            "Tools", "Drag to position the picture, a corner to scale it. "
+                     "Enter places it, Escape cancels. Anything outside the "
+                     "canvas is trimmed off.");
     }
     QCursor cursor() const override { return QCursor(Qt::SizeAllCursor); }
 
@@ -76,7 +82,8 @@ public:
             layer->image = compose();
             DocumentState after = context.doc->snapshot();
             context.history->push(std::make_unique<DocumentEdit>(
-                QStringLiteral("Place Image"), QStringLiteral("paste"),
+                QCoreApplication::translate("Tools", "Place Image"),
+                QStringLiteral("paste"),
                 std::move(before_), std::move(after)));
             context.doc->invalidateLayer(layer);
         }
@@ -240,7 +247,9 @@ private:
         previewing_ = true;
         context.repaintAll();
         const QRectF box = placedRect(offset_, scale_);
-        context.say(QStringLiteral("Placed at %1, %2   %3 x %4   %5%")
+        context.say(
+                    QCoreApplication::translate(
+                        "Tools", "Placed at %1, %2   %3 x %4   %5%")
                         .arg(int(std::lround(box.x())))
                         .arg(int(std::lround(box.y())))
                         .arg(int(std::lround(box.width())))

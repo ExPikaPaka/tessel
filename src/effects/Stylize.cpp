@@ -60,11 +60,17 @@ float sobelMagnitude(const Image& src, int x, int y, float& gx, float& gy)
 void registerStylize(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ edge detect
-    fx::add(registry, "edge_detect", "Edge Detect", "Stylize",
+    fx::add(registry, "edge_detect", QT_TRANSLATE_NOOP("Effects", "Edge Detect"),
+            "Stylize",
             {
-                ParamSpec::angleParam("angle", "Angle", 45.0),
-                ParamSpec::doubleParam("strength", "Strength", 0.1, 8.0, 1.5, 0.1, 1),
-                ParamSpec::boolParam("colored", "Keep colour", false),
+                ParamSpec::angleParam("angle", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                      45.0),
+                ParamSpec::doubleParam("strength",
+                                       QT_TRANSLATE_NOOP("Effects", "Strength"),
+                                       0.1, 8.0, 1.5, 0.1, 1),
+                ParamSpec::boolParam("colored",
+                                     QT_TRANSLATE_NOOP("Effects", "Keep colour"),
+                                     false),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radians = values.doubleValue("angle", 45.0) * M_PI / 180.0;
@@ -88,9 +94,10 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ emboss
-    fx::add(registry, "emboss", "Emboss", "Stylize",
+    fx::add(registry, "emboss", QT_TRANSLATE_NOOP("Effects", "Emboss"), "Stylize",
             {
-                ParamSpec::angleParam("angle", "Angle", 0.0),
+                ParamSpec::angleParam("angle", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                      0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radians = values.doubleValue("angle", 0.0) * M_PI / 180.0;
@@ -114,9 +121,10 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ relief
-    fx::add(registry, "relief", "Relief", "Stylize",
+    fx::add(registry, "relief", QT_TRANSLATE_NOOP("Effects", "Relief"), "Stylize",
             {
-                ParamSpec::angleParam("angle", "Angle", 45.0),
+                ParamSpec::angleParam("angle", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                      45.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radians = values.doubleValue("angle", 45.0) * M_PI / 180.0;
@@ -139,10 +147,14 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ outline
-    fx::add(registry, "outline", "Outline", "Stylize",
+    fx::add(registry, "outline", QT_TRANSLATE_NOOP("Effects", "Outline"), "Stylize",
             {
-                ParamSpec::intParam("thickness", "Thickness", 1, 50, 3, " px"),
-                ParamSpec::intParam("intensity", "Intensity", 0, 100, 50),
+                ParamSpec::intParam("thickness",
+                                    QT_TRANSLATE_NOOP("Effects", "Thickness"),
+                                    1, 50, 3, " px"),
+                ParamSpec::intParam("intensity",
+                                    QT_TRANSLATE_NOOP("Effects", "Intensity"),
+                                    0, 100, 50),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int thickness = std::max(1, values.intValue("thickness", 3));
@@ -166,10 +178,14 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ oil painting
-    fx::add(registry, "oil_painting", "Oil Painting", "Artistic",
+    fx::add(registry, "oil_painting", QT_TRANSLATE_NOOP("Effects", "Oil Painting"),
+            "Artistic",
             {
-                ParamSpec::intParam("brush", "Brush size", 1, 8, 3, " px"),
-                ParamSpec::intParam("coarseness", "Coarseness", 2, 255, 50),
+                ParamSpec::intParam("brush", QT_TRANSLATE_NOOP("Effects", "Brush size"),
+                                    1, 8, 3, " px"),
+                ParamSpec::intParam("coarseness",
+                                    QT_TRANSLATE_NOOP("Effects", "Coarseness"),
+                                    2, 255, 50),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int radius = std::clamp(values.intValue("brush", 3), 1, 8);
@@ -206,10 +222,15 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ pencil sketch
-    fx::add(registry, "pencil_sketch", "Pencil Sketch", "Artistic",
+    fx::add(registry, "pencil_sketch", QT_TRANSLATE_NOOP("Effects", "Pencil Sketch"),
+            "Artistic",
             {
-                ParamSpec::intParam("tip", "Pencil tip size", 1, 20, 2, " px"),
-                ParamSpec::intParam("range", "Colour range", -20, 20, 0),
+                ParamSpec::intParam("tip",
+                                    QT_TRANSLATE_NOOP("Effects", "Pencil tip size"),
+                                    1, 20, 2, " px"),
+                ParamSpec::intParam("range",
+                                    QT_TRANSLATE_NOOP("Effects", "Colour range"),
+                                    -20, 20, 0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int tip = std::max(1, values.intValue("tip", 2));
@@ -238,10 +259,14 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ ink sketch
-    fx::add(registry, "ink_sketch", "Ink Sketch", "Artistic",
+    fx::add(registry, "ink_sketch", QT_TRANSLATE_NOOP("Effects", "Ink Sketch"),
+            "Artistic",
             {
-                ParamSpec::intParam("ink", "Ink outline", 0, 99, 50),
-                ParamSpec::intParam("coloring", "Colouring", 0, 100, 50),
+                ParamSpec::intParam("ink", QT_TRANSLATE_NOOP("Effects", "Ink outline"),
+                                    0, 99, 50),
+                ParamSpec::intParam("coloring",
+                                    QT_TRANSLATE_NOOP("Effects", "Colouring"),
+                                    0, 100, 50),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const float ink = values.intValue("ink", 50) / 50.0f;
@@ -264,11 +289,16 @@ void registerStylize(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ mosaic tiles
-    fx::add(registry, "mosaic", "Mosaic Tiles", "Artistic",
+    fx::add(registry, "mosaic", QT_TRANSLATE_NOOP("Effects", "Mosaic Tiles"),
+            "Artistic",
             {
-                ParamSpec::intParam("tile", "Tile size", 2, 100, 10, " px"),
-                ParamSpec::intParam("gap", "Grout width", 0, 20, 1, " px"),
-                ParamSpec::colorParam("grout", "Grout colour", Rgba(24, 24, 28, 255)),
+                ParamSpec::intParam("tile", QT_TRANSLATE_NOOP("Effects", "Tile size"),
+                                    2, 100, 10, " px"),
+                ParamSpec::intParam("gap", QT_TRANSLATE_NOOP("Effects", "Grout width"),
+                                    0, 20, 1, " px"),
+                ParamSpec::colorParam("grout",
+                                      QT_TRANSLATE_NOOP("Effects", "Grout colour"),
+                                      Rgba(24, 24, 28, 255)),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int tile = std::max(2, values.intValue("tile", 10));

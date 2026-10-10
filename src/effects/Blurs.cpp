@@ -101,9 +101,11 @@ Image discBlur(const Image& src, int radius, const Rect& region)
 void registerBlurs(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ gaussian
-    fx::add(registry, "gaussian_blur", "Gaussian Blur", "Blurs",
+    fx::add(registry, "gaussian_blur", QT_TRANSLATE_NOOP("Effects", "Gaussian Blur"),
+            "Blurs",
             {
-                ParamSpec::doubleParam("radius", "Radius", 0.0, 200.0, 4.0, 0.5, 1, " px"),
+                ParamSpec::doubleParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                       0.0, 200.0, 4.0, 0.5, 1, " px"),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radius = values.doubleValue("radius", 4.0);
@@ -113,9 +115,10 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ unfocus
-    fx::add(registry, "unfocus", "Unfocus", "Blurs",
+    fx::add(registry, "unfocus", QT_TRANSLATE_NOOP("Effects", "Unfocus"), "Blurs",
             {
-                ParamSpec::intParam("radius", "Radius", 1, 200, 6, " px"),
+                ParamSpec::intParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                    1, 200, 6, " px"),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 return discBlur(*context.source, values.intValue("radius", 6),
@@ -123,11 +126,16 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ motion blur
-    fx::add(registry, "motion_blur", "Motion Blur", "Blurs",
+    fx::add(registry, "motion_blur", QT_TRANSLATE_NOOP("Effects", "Motion Blur"),
+            "Blurs",
             {
-                ParamSpec::angleParam("angle", "Angle", 25.0),
-                ParamSpec::intParam("distance", "Distance", 1, 200, 25, " px"),
-                ParamSpec::boolParam("centered", "Centered", true),
+                ParamSpec::angleParam("angle", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                      25.0),
+                ParamSpec::intParam("distance",
+                                    QT_TRANSLATE_NOOP("Effects", "Distance"),
+                                    1, 200, 25, " px"),
+                ParamSpec::boolParam("centered",
+                                     QT_TRANSLATE_NOOP("Effects", "Centered"), true),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double radians = values.doubleValue("angle", 25.0) * M_PI / 180.0;
@@ -161,11 +169,15 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ radial blur
-    fx::add(registry, "radial_blur", "Radial Blur", "Blurs",
+    fx::add(registry, "radial_blur", QT_TRANSLATE_NOOP("Effects", "Radial Blur"),
+            "Blurs",
             {
-                ParamSpec::doubleParam("amount", "Angle", 0.0, 180.0, 10.0, 0.5, 1, " deg"),
-                ParamSpec::offsetParam("center", "Center", 0.0, 0.0),
-                ParamSpec::intParam("quality", "Quality", 1, 8, 3),
+                ParamSpec::doubleParam("amount", QT_TRANSLATE_NOOP("Effects", "Angle"),
+                                       0.0, 180.0, 10.0, 0.5, 1, " deg"),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Center"),
+                                       0.0, 0.0),
+                ParamSpec::intParam("quality", QT_TRANSLATE_NOOP("Effects", "Quality"),
+                                    1, 8, 3),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double amount = values.doubleValue("amount", 10.0) * M_PI / 180.0;
@@ -200,10 +212,12 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ zoom blur
-    fx::add(registry, "zoom_blur", "Zoom Blur", "Blurs",
+    fx::add(registry, "zoom_blur", QT_TRANSLATE_NOOP("Effects", "Zoom Blur"), "Blurs",
             {
-                ParamSpec::intParam("amount", "Amount", 0, 100, 10),
-                ParamSpec::offsetParam("center", "Center", 0.0, 0.0),
+                ParamSpec::intParam("amount", QT_TRANSLATE_NOOP("Effects", "Amount"),
+                                    0, 100, 10),
+                ParamSpec::offsetParam("center", QT_TRANSLATE_NOOP("Effects", "Center"),
+                                       0.0, 0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double amount = values.intValue("amount", 10) / 100.0;
@@ -233,11 +247,16 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ fragment
-    fx::add(registry, "fragment", "Fragment", "Blurs",
+    fx::add(registry, "fragment", QT_TRANSLATE_NOOP("Effects", "Fragment"), "Blurs",
             {
-                ParamSpec::intParam("fragments", "Fragments", 2, 50, 4),
-                ParamSpec::intParam("distance", "Distance", 0, 200, 8, " px"),
-                ParamSpec::angleParam("rotation", "Rotation", 0.0),
+                ParamSpec::intParam("fragments",
+                                    QT_TRANSLATE_NOOP("Effects", "Fragments"),
+                                    2, 50, 4),
+                ParamSpec::intParam("distance",
+                                    QT_TRANSLATE_NOOP("Effects", "Distance"),
+                                    0, 200, 8, " px"),
+                ParamSpec::angleParam("rotation",
+                                      QT_TRANSLATE_NOOP("Effects", "Rotation"), 0.0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int count = std::max(2, values.intValue("fragments", 4));
@@ -271,10 +290,14 @@ void registerBlurs(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ surface blur
-    fx::add(registry, "surface_blur", "Surface Blur", "Blurs",
+    fx::add(registry, "surface_blur", QT_TRANSLATE_NOOP("Effects", "Surface Blur"),
+            "Blurs",
             {
-                ParamSpec::intParam("radius", "Radius", 1, 12, 6, " px"),
-                ParamSpec::intParam("threshold", "Threshold", 1, 100, 25),
+                ParamSpec::intParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                    1, 12, 6, " px"),
+                ParamSpec::intParam("threshold",
+                                    QT_TRANSLATE_NOOP("Effects", "Threshold"),
+                                    1, 100, 25),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int radius = std::clamp(values.intValue("radius", 6), 1, 12);

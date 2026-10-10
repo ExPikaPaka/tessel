@@ -298,12 +298,14 @@ bool Session::write(int key, const DocumentState& state, const QString& original
 {
     if (!isOpen()) {
         if (error)
-            *error = QStringLiteral("No recovery directory is available.");
+            *error = QCoreApplication::translate(
+                "Core", "No recovery directory is available.");
         return false;
     }
     if (state.layers.empty() || state.width <= 0 || state.height <= 0) {
         if (error)
-            *error = QStringLiteral("%1 has nothing to save.").arg(title);
+            *error = QCoreApplication::translate(
+                "Core", "%1 has nothing to save.").arg(title);
         return false;
     }
     // A throwaway document, so the existing writer can be used as it is. It is
@@ -417,7 +419,7 @@ void Autosaver::saveNow()
         session_ = std::make_unique<Session>();
     if (!session_->isOpen()) {
         session_.reset();
-        emit failed(QStringLiteral("Tessel could not create its recovery directory in %1.")
+        emit failed(tr("Tessel could not create its recovery directory in %1.")
                         .arg(QDir::toNativeSeparators(root())));
         return;
     }

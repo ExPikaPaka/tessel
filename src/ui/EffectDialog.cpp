@@ -360,8 +360,8 @@ bool EffectSession::computeBlocking(const ParamValues& values, QWidget* uiParent
         job->done.store(true, std::memory_order_release);
     });
     if (uiParent) {
-        QProgressDialog box(QStringLiteral("Applying %1...").arg(effect_->name()),
-                            QStringLiteral("Cancel"), 0, 1000, uiParent);
+        QProgressDialog box(tr("Applying %1...").arg(effect_->name()),
+                            tr("Cancel"), 0, 1000, uiParent);
         box.setWindowTitle(effect_->name());
         // Application modal on purpose: the loop below keeps delivering events
         // so the window carries on painting, and nothing else may edit the
@@ -558,7 +558,7 @@ void ParamForm::addRow(QFormLayout* form, const ParamSpec& spec)
         connect(button, &QPushButton::clicked, this, [this, key, button, paintButton] {
             const Rgba current = values_.colorValue(key);
             const QColor chosen = QColorDialog::getColor(
-                current.toQColor(), this, QStringLiteral("Select colour"),
+                current.toQColor(), this, tr("Select colour"),
                 QColorDialog::ShowAlphaChannel);
             if (!chosen.isValid())
                 return;
@@ -606,9 +606,9 @@ void ParamForm::addRow(QFormLayout* form, const ParamSpec& spec)
         };
         connect(spinX, &QDoubleSpinBox::valueChanged, this, update);
         connect(spinY, &QDoubleSpinBox::valueChanged, this, update);
-        layout->addWidget(new QLabel(QStringLiteral("X"), row));
+        layout->addWidget(new QLabel(tr("X"), row));
         layout->addWidget(spinX, 1);
-        layout->addWidget(new QLabel(QStringLiteral("Y"), row));
+        layout->addWidget(new QLabel(tr("Y"), row));
         layout->addWidget(spinY, 1);
         editors_.insert(key, row);
         form->addRow(spec.label, row);
@@ -672,7 +672,7 @@ void EffectDialog::buildControls()
     root->addWidget(form_);
 
     if (effect_->params().empty())
-        root->addWidget(new QLabel(QStringLiteral("This effect has no settings."), this));
+        root->addWidget(new QLabel(tr("This effect has no settings."), this));
 
     progress_ = new QProgressBar(this);
     progress_->setRange(0, 1000);
@@ -768,7 +768,7 @@ void fillEffectMenu(QMenu* menu, const std::function<void(Effect*)>& chosen)
             menu->addSeparator();
             separated = true;
         }
-        QMenu* submenu = menu->addMenu(category);
+        QMenu* submenu = menu->addMenu(effectCategoryLabel(category));
         submenu->setIcon(icons::get(QStringLiteral("effect"), 20));
         addEntries(submenu, list);
     }
@@ -799,7 +799,7 @@ StoredEffectDialog::StoredEffectDialog(Effect* effect, Document* doc, History* h
     connect(form_, &ParamForm::valuesChanged, this, [this] { apply(); });
     root->addWidget(form_);
     if (!effect_ || effect_->params().empty()) {
-        root->addWidget(new QLabel(QStringLiteral("This effect has no settings."),
+        root->addWidget(new QLabel(tr("This effect has no settings."),
                                    this));
     }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel

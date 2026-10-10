@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 #include "core/ImageOps.h"
 
 namespace tessel {
@@ -12,30 +14,40 @@ namespace {
 class ColorPickerTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("picker"); }
-    QString name() const override { return QStringLiteral("Color Picker"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Color Picker");
+    }
     QString iconName() const override { return QStringLiteral("picker"); }
     QString shortcut() const override { return QStringLiteral("K"); }
     QString hint() const override
     {
-        return QStringLiteral("Click to pick the primary colour, right click for the "
-                              "secondary colour.");
+        return QCoreApplication::translate(
+            "Tools", "Click to pick the primary colour, right click for the "
+                     "secondary colour.");
     }
     QCursor cursor() const override { return QCursor(Qt::CrossCursor); }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addCombo(QStringLiteral("sampling"), QStringLiteral("Sampling"),
-                     {QStringLiteral("Layer"), QStringLiteral("Image")},
+        bar.addCombo(QStringLiteral("sampling"),
+                     QCoreApplication::translate("Tools", "Sampling"),
+                     {QCoreApplication::translate("Tools", "Layer"),
+                      QCoreApplication::translate("Tools", "Image")},
                      fromImage_ ? 1 : 0);
-        bar.addCombo(QStringLiteral("radius"), QStringLiteral("Sample size"),
-                     {QStringLiteral("1 x 1"), QStringLiteral("3 x 3"),
-                      QStringLiteral("5 x 5"), QStringLiteral("9 x 9")},
+        bar.addCombo(QStringLiteral("radius"),
+                     QCoreApplication::translate("Tools", "Sample size"),
+                     {QCoreApplication::translate("Tools", "1 x 1"),
+                      QCoreApplication::translate("Tools", "3 x 3"),
+                      QCoreApplication::translate("Tools", "5 x 5"),
+                      QCoreApplication::translate("Tools", "9 x 9")},
                      radiusIndex_);
-        bar.addCombo(QStringLiteral("after"), QStringLiteral("After click"),
-                     {QStringLiteral("Do not switch"),
-                      QStringLiteral("Switch to previous tool"),
-                      QStringLiteral("Switch to Pencil"),
-                      QStringLiteral("Switch to Paintbrush")},
+        bar.addCombo(QStringLiteral("after"),
+                     QCoreApplication::translate("Tools", "After click"),
+                     {QCoreApplication::translate("Tools", "Do not switch"),
+                      QCoreApplication::translate("Tools", "Switch to previous tool"),
+                      QCoreApplication::translate("Tools", "Switch to Pencil"),
+                      QCoreApplication::translate("Tools", "Switch to Paintbrush")},
                      afterIndex_);
     }
 
@@ -109,7 +121,7 @@ private:
         }
         if (context.pickedColor)
             context.pickedColor(picked, !event.isSecondary());
-        context.say(QStringLiteral("R %1  G %2  B %3  A %4")
+        context.say(QCoreApplication::translate("Tools", "R %1  G %2  B %3  A %4")
                         .arg(picked.r).arg(picked.g).arg(picked.b).arg(picked.a));
     }
 
@@ -121,13 +133,17 @@ private:
 class ZoomTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("zoom"); }
-    QString name() const override { return QStringLiteral("Zoom"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Zoom");
+    }
     QString iconName() const override { return QStringLiteral("zoom"); }
     QString shortcut() const override { return QStringLiteral("Z"); }
     QString hint() const override
     {
-        return QStringLiteral("Click to zoom in, right click to zoom out, or drag a "
-                              "rectangle to zoom into it.");
+        return QCoreApplication::translate(
+            "Tools", "Click to zoom in, right click to zoom out, or drag a "
+                     "rectangle to zoom into it.");
     }
     QCursor cursor() const override { return QCursor(Qt::CrossCursor); }
 
@@ -201,10 +217,16 @@ private:
 class PanTool : public Tool {
 public:
     QString id() const override { return QStringLiteral("pan"); }
-    QString name() const override { return QStringLiteral("Pan"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Pan");
+    }
     QString iconName() const override { return QStringLiteral("pan"); }
     QString shortcut() const override { return QStringLiteral("H"); }
-    QString hint() const override { return QStringLiteral("Drag to scroll the canvas."); }
+    QString hint() const override
+    {
+        return QCoreApplication::translate("Tools", "Drag to scroll the canvas.");
+    }
     QCursor cursor() const override { return QCursor(Qt::OpenHandCursor); }
 
     void press(ToolContext&, const ToolEvent& event) override

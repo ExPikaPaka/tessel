@@ -1,6 +1,7 @@
 #include "ui/Docks.h"
 
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDropEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -12,6 +13,7 @@
 #include <QVBoxLayout>
 
 #include "core/ImageOps.h"
+#include "core/Strings.h"
 #include "effects/Effect.h"
 #include "tools/Tool.h"
 #include "ui/Icons.h"
@@ -30,7 +32,10 @@ QString storedEffectNames(const Layer& layer)
     for (const LayerEffect& entry : layer.effects()) {
         Effect* effect = EffectRegistry::instance().byId(entry.effectId);
         const QString name = effect ? effect->name() : entry.effectId;
-        names.append(entry.enabled ? name : QStringLiteral("%1 (off)").arg(name));
+        names.append(entry.enabled
+                         ? name
+                         : QCoreApplication::translate("Panels", "%1 (off)")
+                               .arg(name));
     }
     return names.join(QStringLiteral(", "));
 }
@@ -77,7 +82,7 @@ ToolsPalette::ToolsPalette(QWidget* parent) : QWidget(parent)
         const QString keys = tool->shortcut();
         button->setToolTip(keys.isEmpty()
                                ? tool->name()
-                               : QStringLiteral("%1 (%2)").arg(tool->name(), keys));
+                               : tr("%1 (%2)").arg(tool->name(), keys));
         connect(button, &QToolButton::clicked, this, [this, id] {
             setCurrentTool(id);
             emit toolSelected(id);
@@ -273,22 +278,30 @@ LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
         const char* tip;
         void (LayersPanel::*signal)();
     };
+    // The tips are marked here and looked up below, because a table cannot
+    // hold a translation.
     const ButtonSpec specs[] = {
-        {"layer-add", "Add New Layer (Ctrl+Shift+N)", &LayersPanel::addLayerRequested},
-        {"layer", "Add Group (Ctrl+Shift+G)", &LayersPanel::addGroupRequested},
-        {"layer-delete", "Delete Layer (Ctrl+Shift+Delete)", &LayersPanel::deleteLayerRequested},
-        {"layer-duplicate", "Duplicate Layer (Ctrl+Shift+D)", &LayersPanel::duplicateLayerRequested},
-        {"layer-merge", "Merge Layer Down (Ctrl+M)", &LayersPanel::mergeDownRequested},
-        {"up", "Move Layer Up", &LayersPanel::moveUpRequested},
-        {"down", "Move Layer Down", &LayersPanel::moveDownRequested},
-        {"layer-props", "Layer Properties (F4)", &LayersPanel::propertiesRequested},
+        {"layer-add", QT_TR_NOOP("Add New Layer (Ctrl+Shift+N)"),
+         &LayersPanel::addLayerRequested},
+        {"layer", QT_TR_NOOP("Add Group (Ctrl+Shift+G)"),
+         &LayersPanel::addGroupRequested},
+        {"layer-delete", QT_TR_NOOP("Delete Layer (Ctrl+Shift+Delete)"),
+         &LayersPanel::deleteLayerRequested},
+        {"layer-duplicate", QT_TR_NOOP("Duplicate Layer (Ctrl+Shift+D)"),
+         &LayersPanel::duplicateLayerRequested},
+        {"layer-merge", QT_TR_NOOP("Merge Layer Down (Ctrl+M)"),
+         &LayersPanel::mergeDownRequested},
+        {"up", QT_TR_NOOP("Move Layer Up"), &LayersPanel::moveUpRequested},
+        {"down", QT_TR_NOOP("Move Layer Down"), &LayersPanel::moveDownRequested},
+        {"layer-props", QT_TR_NOOP("Layer Properties (F4)"),
+         &LayersPanel::propertiesRequested},
     };
     for (const ButtonSpec& spec : specs) {
         auto* button = new QToolButton(this);
         button->setIcon(icons::get(QString::fromLatin1(spec.icon), 18));
         button->setProperty("iconName", QString::fromLatin1(spec.icon));
         button->setIconSize(QSize(18, 18));
-        button->setToolTip(QString::fromLatin1(spec.tip));
+        button->setToolTip(tr(spec.tip));
         button->setAutoRaise(true);
         connect(button, &QToolButton::clicked, this, spec.signal);
         buttons->addWidget(button);
@@ -447,24 +460,24 @@ void LayersPanel::appendRows(QTreeWidgetItem* parentItem, const Layer* parent)
         }
         item->setData(0, LayerRowDelegate::Thumbnail, QVariant::fromValue(thumbnail));
         const int percent = int(std::lround(layer->opacity / 2.55));
-        QString detail = QStringLiteral("%1%  %2").arg(percent).arg(
-            blendModeName(layer->mode));
+        QString detail = tr("%1%  %2").arg(percent).arg(
+            blendModeLabel(layer->mode));
         if (layer->isGroup())
-            detail = QStringLiteral("group  %1").arg(detail);
+            detail = tr("group  %1").arg(detail);
         else if (layer->isAdjustment())
-            detail = QStringLiteral("adjust  %1").arg(detail);
+            detail = tr("adjust  %1").arg(detail);
         const QString effectNames = storedEffectNames(*layer);
         if (!layer->isAdjustment() && !effectNames.isEmpty())
-            detail += QStringLiteral("  fx");
+            detail += tr("  fx");
         item->setData(0, LayerRowDelegate::Detail, detail);
-        QString tip = QStringLiteral("%1\nOpacity %2%\nBlend mode: %3")
+        QString tip = tr("%1\nOpacity %2%\nBlend mode: %3")
                           .arg(layer->name)
                           .arg(percent)
-                          .arg(blendModeName(layer->mode));
+                          .arg(blendModeLabel(layer->mode));
         if (!effectNames.isEmpty()) {
             tip += layer->isAdjustment()
-                ? QStringLiteral("\nAdjustment: %1").arg(effectNames)
-                : QStringLiteral("\nEffects: %1").arg(effectNames);
+                ? tr("\nAdjustment: %1").arg(effectNames)
+                : tr("\nEffects: %1").arg(effectNames);
         }
         if (layer->hasMask()) {
             item->setData(0, LayerRowDelegate::MaskThumbnail,
@@ -472,10 +485,10 @@ void LayersPanel::appendRows(QTreeWidgetItem* parentItem, const Layer* parent)
                               ops::resize(*layer->maskImage(), 36, 36, true).toQImage()));
             item->setData(0, LayerRowDelegate::MaskSelected, layer->maskSelected());
             item->setData(0, LayerRowDelegate::MaskEnabled, layer->maskEnabled());
-            tip += layer->maskEnabled() ? QStringLiteral("\nMask on")
-                                        : QStringLiteral("\nMask off");
-            tip += layer->maskSelected() ? QStringLiteral("\nPainting goes to the mask")
-                                         : QStringLiteral("\nPainting goes to the layer");
+            tip += layer->maskEnabled() ? tr("\nMask on")
+                                        : tr("\nMask off");
+            tip += layer->maskSelected() ? tr("\nPainting goes to the mask")
+                                         : tr("\nPainting goes to the layer");
         }
         item->setToolTip(0, tip);
         Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable
@@ -517,13 +530,13 @@ HistoryPanel::HistoryPanel(QWidget* parent) : QWidget(parent)
     undoButton_->setIcon(icons::get(QStringLiteral("undo"), 18));
     undoButton_->setProperty("iconName", QStringLiteral("undo"));
     undoButton_->setIconSize(QSize(18, 18));
-    undoButton_->setToolTip(QStringLiteral("Undo (Ctrl+Z)"));
+    undoButton_->setToolTip(tr("Undo (Ctrl+Z)"));
     undoButton_->setAutoRaise(true);
     redoButton_ = new QToolButton(this);
     redoButton_->setIcon(icons::get(QStringLiteral("redo"), 18));
     redoButton_->setProperty("iconName", QStringLiteral("redo"));
     redoButton_->setIconSize(QSize(18, 18));
-    redoButton_->setToolTip(QStringLiteral("Redo (Ctrl+Y)"));
+    redoButton_->setToolTip(tr("Redo (Ctrl+Y)"));
     redoButton_->setAutoRaise(true);
     buttons->addWidget(undoButton_);
     buttons->addWidget(redoButton_);
@@ -558,8 +571,8 @@ void HistoryPanel::refresh()
     updating_ = true;
     list_->clear();
     auto* start = new QListWidgetItem(icons::get(QStringLiteral("image"), 16),
-                                      QStringLiteral("Original image"), list_);
-    start->setToolTip(QStringLiteral("The image as it was opened or created"));
+                                      tr("Original image"), list_);
+    start->setToolTip(tr("The image as it was opened or created"));
     if (history_) {
         for (int i = 0; i < history_->count(); ++i) {
             const HistoryItem* item = history_->itemAt(i);
@@ -577,7 +590,7 @@ void HistoryPanel::refresh()
             list_->item(i)->setForeground(dim);
         }
         const double megabytes = history_->byteCount() / (1024.0 * 1024.0);
-        info_->setText(QStringLiteral("%1 steps  -  %2 MB")
+        info_->setText(tr("%1 steps  -  %2 MB")
                            .arg(history_->count())
                            .arg(megabytes, 0, 'f', 1));
     }

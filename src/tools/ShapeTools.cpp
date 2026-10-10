@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
+
 #include <QFont>
 #include <QFontMetricsF>
 #include <QKeyEvent>
@@ -11,6 +13,7 @@
 #include <QPolygonF>
 
 #include "core/ImageOps.h"
+#include "core/Strings.h"
 
 namespace tessel {
 
@@ -154,19 +157,25 @@ protected:
     void buildShapeOptions(ToolOptionsBar& bar, bool withFillStyle)
     {
         if (withFillStyle) {
-            bar.addCombo(QStringLiteral("fillstyle"), QStringLiteral("Style"),
-                         {QStringLiteral("Outline"), QStringLiteral("Filled"),
-                          QStringLiteral("Outline and fill")},
+            bar.addCombo(QStringLiteral("fillstyle"),
+                         QCoreApplication::translate("Tools", "Style"),
+                         {QCoreApplication::translate("Tools", "Outline"),
+                          QCoreApplication::translate("Tools", "Filled"),
+                          QCoreApplication::translate("Tools", "Outline and fill")},
                          int(fillStyle_));
         }
-        bar.addSpin(QStringLiteral("width"), QStringLiteral("Width"), 1, 500,
+        bar.addSpin(QStringLiteral("width"),
+                    QCoreApplication::translate("Tools", "Width"), 1, 500,
                     int(std::lround(penWidth_)), QStringLiteral(" px"));
-        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+        bar.addPercent(QStringLiteral("opacity"),
+                       QCoreApplication::translate("Tools", "Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+        bar.addCheck(QStringLiteral("antialias"),
+                     QCoreApplication::translate("Tools", "Antialiasing"),
                      antialias_);
-        bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                     blendModeNames(), int(blend_));
+        bar.addCombo(QStringLiteral("blend"),
+                     QCoreApplication::translate("Tools", "Blending"),
+                     blendModeLabels(), int(blend_));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -234,26 +243,34 @@ protected:
 class LineCurveTool : public InteractiveShapeTool {
 public:
     QString id() const override { return QStringLiteral("line"); }
-    QString name() const override { return QStringLiteral("Line / Curve"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Line / Curve");
+    }
     QString iconName() const override { return QStringLiteral("line"); }
     QString shortcut() const override { return QStringLiteral("O"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag for a line, then drag the middle handles to bend "
-                              "it. Enter finishes, Escape cancels.");
+        return QCoreApplication::translate(
+            "Tools", "Drag for a line, then drag the middle handles to bend "
+                     "it. Enter finishes, Escape cancels.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
         buildShapeOptions(bar, false);
         bar.addSeparator();
-        bar.addCombo(QStringLiteral("startcap"), QStringLiteral("Start"),
-                     {QStringLiteral("Flat"), QStringLiteral("Arrow"),
-                      QStringLiteral("Round")},
+        bar.addCombo(QStringLiteral("startcap"),
+                     QCoreApplication::translate("Tools", "Start"),
+                     {QCoreApplication::translate("Tools", "Flat"),
+                      QCoreApplication::translate("Tools", "Arrow"),
+                      QCoreApplication::translate("Tools", "Round")},
                      startCap_);
-        bar.addCombo(QStringLiteral("endcap"), QStringLiteral("End"),
-                     {QStringLiteral("Flat"), QStringLiteral("Arrow"),
-                      QStringLiteral("Round")},
+        bar.addCombo(QStringLiteral("endcap"),
+                     QCoreApplication::translate("Tools", "End"),
+                     {QCoreApplication::translate("Tools", "Flat"),
+                      QCoreApplication::translate("Tools", "Arrow"),
+                      QCoreApplication::translate("Tools", "Round")},
                      endCap_);
     }
 
@@ -431,36 +448,58 @@ public:
 
     static QStringList shapeNames()
     {
-        return {QStringLiteral("Rectangle"), QStringLiteral("Rounded rectangle"),
-                QStringLiteral("Ellipse"), QStringLiteral("Triangle"),
-                QStringLiteral("Right triangle"), QStringLiteral("Trapezoid"),
-                QStringLiteral("Parallelogram"), QStringLiteral("Diamond"),
-                QStringLiteral("Pentagon"), QStringLiteral("Hexagon"),
-                QStringLiteral("Heptagon"), QStringLiteral("Octagon"),
-                QStringLiteral("Star (3 points)"), QStringLiteral("Star (4 points)"),
-                QStringLiteral("Star (5 points)"), QStringLiteral("Star (6 points)"),
-                QStringLiteral("Star (8 points)"), QStringLiteral("Arrow"),
-                QStringLiteral("Double arrow"), QStringLiteral("Chevron"),
-                QStringLiteral("Cross"), QStringLiteral("Plus"),
-                QStringLiteral("Heart"), QStringLiteral("Crescent"),
-                QStringLiteral("Cloud"), QStringLiteral("Speech bubble"),
-                QStringLiteral("Ring"), QStringLiteral("Pie wedge"),
-                QStringLiteral("Lightning"), QStringLiteral("Teardrop")};
+        return {
+            QCoreApplication::translate("Tools", "Rectangle"),
+            QCoreApplication::translate("Tools", "Rounded rectangle"),
+            QCoreApplication::translate("Tools", "Ellipse"),
+            QCoreApplication::translate("Tools", "Triangle"),
+            QCoreApplication::translate("Tools", "Right triangle"),
+            QCoreApplication::translate("Tools", "Trapezoid"),
+            QCoreApplication::translate("Tools", "Parallelogram"),
+            QCoreApplication::translate("Tools", "Diamond"),
+            QCoreApplication::translate("Tools", "Pentagon"),
+            QCoreApplication::translate("Tools", "Hexagon"),
+            QCoreApplication::translate("Tools", "Heptagon"),
+            QCoreApplication::translate("Tools", "Octagon"),
+            QCoreApplication::translate("Tools", "Star (3 points)"),
+            QCoreApplication::translate("Tools", "Star (4 points)"),
+            QCoreApplication::translate("Tools", "Star (5 points)"),
+            QCoreApplication::translate("Tools", "Star (6 points)"),
+            QCoreApplication::translate("Tools", "Star (8 points)"),
+            QCoreApplication::translate("Tools", "Arrow"),
+            QCoreApplication::translate("Tools", "Double arrow"),
+            QCoreApplication::translate("Tools", "Chevron"),
+            QCoreApplication::translate("Tools", "Cross"),
+            QCoreApplication::translate("Tools", "Plus"),
+            QCoreApplication::translate("Tools", "Heart"),
+            QCoreApplication::translate("Tools", "Crescent"),
+            QCoreApplication::translate("Tools", "Cloud"),
+            QCoreApplication::translate("Tools", "Speech bubble"),
+            QCoreApplication::translate("Tools", "Ring"),
+            QCoreApplication::translate("Tools", "Pie wedge"),
+            QCoreApplication::translate("Tools", "Lightning"),
+            QCoreApplication::translate("Tools", "Teardrop"),
+        };
     }
 
     QString id() const override { return QStringLiteral("shapes"); }
-    QString name() const override { return QStringLiteral("Shapes"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Shapes");
+    }
     QString iconName() const override { return QStringLiteral("shapes"); }
     QString shortcut() const override { return QStringLiteral("O"); }
     QString hint() const override
     {
-        return QStringLiteral("Drag to draw. Shift keeps the proportions, Enter "
-                              "finishes, Escape cancels.");
+        return QCoreApplication::translate(
+            "Tools", "Drag to draw. Shift keeps the proportions, Enter "
+                     "finishes, Escape cancels.");
     }
 
     void buildOptions(ToolOptionsBar& bar) override
     {
-        bar.addCombo(QStringLiteral("kind"), QStringLiteral("Shape"), shapeNames(),
+        bar.addCombo(QStringLiteral("kind"),
+                     QCoreApplication::translate("Tools", "Shape"), shapeNames(),
                      int(kind_));
         buildShapeOptions(bar, true);
     }
@@ -524,7 +563,7 @@ public:
             box_ = QRectF(anchor_, QPointF(anchor_.x() + w, anchor_.y() + h)).normalized();
         }
         renderPreview(context);
-        context.say(QStringLiteral("%1 x %2")
+        context.say(QCoreApplication::translate("Tools", "%1 x %2")
                         .arg(int(std::lround(box_.width())))
                         .arg(int(std::lround(box_.height()))));
     }
@@ -868,26 +907,27 @@ int pruneStaleText(Document& doc)
 
 QString droppedTextMessage(int count)
 {
-    if (count == 1) {
-        return QStringLiteral("A piece of text is no longer editable: the layer "
-                              "changed under it. The pixels stay as they are.");
-    }
-    return QStringLiteral("%1 pieces of text are no longer editable: the layer "
-                          "changed under them. The pixels stay as they are.")
-        .arg(count);
+    return QCoreApplication::translate(
+        "Tools", "%n piece(s) of text are no longer editable: the layer changed "
+                 "under them. The pixels stay as they are.",
+        nullptr, count);
 }
 
 class TextTool : public InteractiveShapeTool {
 public:
     QString id() const override { return QStringLiteral("text"); }
-    QString name() const override { return QStringLiteral("Text"); }
+    QString name() const override
+    {
+        return QCoreApplication::translate("Tools", "Text");
+    }
     QString iconName() const override { return QStringLiteral("text"); }
     QString shortcut() const override { return QStringLiteral("T"); }
     QString hint() const override
     {
-        return QStringLiteral("Click and type. Enter adds a line, Ctrl+Enter or a tool "
-                              "change finishes, Escape cancels. Click text in a dashed "
-                              "box to edit it again, drag inside the box to move it.");
+        return QCoreApplication::translate(
+            "Tools", "Click and type. Enter adds a line, Ctrl+Enter or a tool "
+                     "change finishes, Escape cancels. Click text in a dashed "
+                     "box to edit it again, drag inside the box to move it.");
     }
     QCursor cursor() const override { return QCursor(Qt::IBeamCursor); }
 
@@ -897,25 +937,31 @@ public:
         // alignment back on the bar.
         bar_ = &bar;
         bar.addFontCombo(QStringLiteral("family"), family_);
-        bar.addSpin(QStringLiteral("size"), QStringLiteral("Size"), 4, 1000, pointSize_,
+        bar.addSpin(QStringLiteral("size"),
+                    QCoreApplication::translate("Tools", "Size"), 4, 1000, pointSize_,
                     QStringLiteral(" pt"));
         bar.addToggle(QStringLiteral("bold"), QStringLiteral("text"),
-                      QStringLiteral("Bold"), bold_);
+                      QCoreApplication::translate("Tools", "Bold"), bold_);
         bar.addToggle(QStringLiteral("italic"), QStringLiteral("line"),
-                      QStringLiteral("Italic"), italic_);
+                      QCoreApplication::translate("Tools", "Italic"), italic_);
         bar.addToggle(QStringLiteral("underline"), QStringLiteral("adjust"),
-                      QStringLiteral("Underline"), underline_);
-        bar.addCombo(QStringLiteral("align"), QStringLiteral("Align"),
-                     {QStringLiteral("Left"), QStringLiteral("Centre"),
-                      QStringLiteral("Right")},
+                      QCoreApplication::translate("Tools", "Underline"), underline_);
+        bar.addCombo(QStringLiteral("align"),
+                     QCoreApplication::translate("Tools", "Align"),
+                     {QCoreApplication::translate("Tools", "Left"),
+                      QCoreApplication::translate("Tools", "Centre"),
+                      QCoreApplication::translate("Tools", "Right")},
                      align_);
         bar.addSeparator();
-        bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+        bar.addPercent(QStringLiteral("opacity"),
+                       QCoreApplication::translate("Tools", "Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+        bar.addCheck(QStringLiteral("antialias"),
+                     QCoreApplication::translate("Tools", "Antialiasing"),
                      antialias_);
-        bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                     blendModeNames(), int(blend_));
+        bar.addCombo(QStringLiteral("blend"),
+                     QCoreApplication::translate("Tools", "Blending"),
+                     blendModeLabels(), int(blend_));
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -991,7 +1037,10 @@ public:
         if (!moving_)
             return;
         moving_ = false;
-        context.say(QStringLiteral("Text moved. Ctrl+Enter finishes, Escape cancels."));
+        context.say(
+                    QCoreApplication::translate(
+                        "Tools",
+                        "Text moved. Ctrl+Enter finishes, Escape cancels."));
     }
 
     void commit(ToolContext& context) override
@@ -1270,9 +1319,10 @@ private:
         renderPreview(context);
         if (bar_)
             bar_->startTool(this);
-        context.say(QStringLiteral("Editing text laid down earlier. Drag inside the "
-                                   "box to move it, Ctrl+Enter finishes, Escape "
-                                   "leaves it as it was."));
+        context.say(QCoreApplication::translate(
+            "Tools", "Editing text laid down earlier. Drag inside the "
+                     "box to move it, Ctrl+Enter finishes, Escape "
+                     "leaves it as it was."));
     }
 
     TextItem currentItem(const ToolContext& context, int layerUid, const Rect& box) const

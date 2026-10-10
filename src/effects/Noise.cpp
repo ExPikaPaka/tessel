@@ -9,12 +9,19 @@ namespace tessel {
 void registerNoise(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ add noise
-    fx::add(registry, "add_noise", "Add Noise", "Noise",
+    fx::add(registry, "add_noise", QT_TRANSLATE_NOOP("Effects", "Add Noise"), "Noise",
             {
-                ParamSpec::intParam("intensity", "Intensity", 0, 100, 64),
-                ParamSpec::intParam("saturation", "Colour saturation", 0, 400, 100, "%"),
-                ParamSpec::intParam("coverage", "Coverage", 0, 100, 100, "%"),
-                ParamSpec::intParam("seed", "Seed", 0, 999, 1),
+                ParamSpec::intParam("intensity",
+                                    QT_TRANSLATE_NOOP("Effects", "Intensity"),
+                                    0, 100, 64),
+                ParamSpec::intParam("saturation",
+                                    QT_TRANSLATE_NOOP("Effects", "Colour saturation"),
+                                    0, 400, 100, "%"),
+                ParamSpec::intParam("coverage",
+                                    QT_TRANSLATE_NOOP("Effects", "Coverage"),
+                                    0, 100, 100, "%"),
+                ParamSpec::intParam("seed", QT_TRANSLATE_NOOP("Effects", "Seed"),
+                                    0, 999, 1),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const float intensity = values.intValue("intensity", 64) / 100.0f;
@@ -39,10 +46,13 @@ void registerNoise(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ median
-    fx::add(registry, "median", "Median", "Noise",
+    fx::add(registry, "median", QT_TRANSLATE_NOOP("Effects", "Median"), "Noise",
             {
-                ParamSpec::intParam("radius", "Radius", 1, 20, 3, " px"),
-                ParamSpec::intParam("percentile", "Percentile", 1, 100, 50),
+                ParamSpec::intParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                    1, 20, 3, " px"),
+                ParamSpec::intParam("percentile",
+                                    QT_TRANSLATE_NOOP("Effects", "Percentile"),
+                                    1, 100, 50),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int radius = std::clamp(values.intValue("radius", 3), 1, 20);
@@ -80,10 +90,14 @@ void registerNoise(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ reduce noise
-    fx::add(registry, "reduce_noise", "Reduce Noise", "Noise",
+    fx::add(registry, "reduce_noise", QT_TRANSLATE_NOOP("Effects", "Reduce Noise"),
+            "Noise",
             {
-                ParamSpec::intParam("radius", "Radius", 1, 10, 3, " px"),
-                ParamSpec::doubleParam("strength", "Strength", 0.0, 1.0, 0.4, 0.02, 2),
+                ParamSpec::intParam("radius", QT_TRANSLATE_NOOP("Effects", "Radius"),
+                                    1, 10, 3, " px"),
+                ParamSpec::doubleParam("strength",
+                                       QT_TRANSLATE_NOOP("Effects", "Strength"),
+                                       0.0, 1.0, 0.4, 0.02, 2),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int radius = std::clamp(values.intValue("radius", 3), 1, 10);

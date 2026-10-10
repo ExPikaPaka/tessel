@@ -4,6 +4,8 @@
 #include <cmath>
 #include <vector>
 
+#include <QCoreApplication>
+
 namespace tessel::units {
 
 namespace {
@@ -108,11 +110,11 @@ double resolutionFromDotsPerMetre(double dpm)
 QString unitName(Unit unit)
 {
     switch (unit) {
-    case Unit::Inches: return QStringLiteral("Inches");
-    case Unit::Centimetres: return QStringLiteral("Centimetres");
-    case Unit::Percent: return QStringLiteral("Percent");
+    case Unit::Inches: return QCoreApplication::translate("Core", "Inches");
+    case Unit::Centimetres: return QCoreApplication::translate("Core", "Centimetres");
+    case Unit::Percent: return QCoreApplication::translate("Core", "Percent");
     case Unit::Pixels:
-    default: return QStringLiteral("Pixels");
+    default: return QCoreApplication::translate("Core", "Pixels");
     }
 }
 
@@ -204,7 +206,7 @@ QString describePrintSize(int widthPixels, int heightPixels, double resolution,
     // A print size has to be physical, so pixels and percent borrow inches.
     const Unit physical = (unit == Unit::Centimetres) ? Unit::Centimetres
                                                       : Unit::Inches;
-    return QStringLiteral("%1 at %2 ppi")
+    return QCoreApplication::translate("Core", "%1 at %2 ppi")
         .arg(describeSize(widthPixels, heightPixels, resolution, physical),
              trimmed(sanitize(resolution), 2));
 }

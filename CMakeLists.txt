@@ -55,6 +55,8 @@ add_library(tessel_core STATIC
   src/core/Recovery.cpp
   src/core/Recovery.h
   src/core/Palette.cpp
+  src/core/Strings.cpp
+  src/core/Strings.h
   src/core/Units.cpp
   src/effects/Effect.cpp
   src/effects/EffectPluginHost.cpp
@@ -122,6 +124,42 @@ target_link_libraries(tessel PRIVATE tessel_ui)
 target_compile_options(tessel PRIVATE ${TESSEL_WARNING_FLAGS})
 set_target_properties(tessel PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)
 
+# ----------------------------------------------------------------- translations
+# The .ts files in translations/ are the hand written source of every language;
+# lrelease compiles them to .qm during an ordinary build and the .qm files are
+# embedded in tessel_ui as a resource under /i18n, so one executable carries
+# all of them and src/main.cpp loads one through QTranslator.
+#
+# To refresh the .ts files after changing a string:
+#     cmake --build build --target update_translations
+#
+# The Linguist tools are optional on purpose: a build without them is simply
+# an English only build, which is what the untranslated source text already
+# is, rather than a build that fails.
+find_package(Qt6 6.4 QUIET COMPONENTS LinguistTools)
+if(Qt6LinguistTools_FOUND)
+  # lupdate is pointed at the sources rather than at a target: the strings are
+  # spread over tessel_core, tessel_ui and the executable, and Qt 6.4 would
+  # have scanned only the one target this call names.
+  file(GLOB_RECURSE TESSEL_I18N_SOURCES CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+       "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+  qt_add_translations(tessel_ui
+    TS_FILES translations/tessel_ru.ts
+    SOURCES ${TESSEL_I18N_SOURCES}
+    # Without this lupdate cannot follow "ui/MainWindow.h" and puts half the
+    # strings of a class in a context without its namespace.
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    RESOURCE_PREFIX "/i18n"
+    # -locations none keeps line numbers out of the .ts files, so a diff shows
+    # the strings that changed rather than the ones that moved.
+    LUPDATE_OPTIONS -no-obsolete -locations none)
+  target_compile_definitions(tessel_ui PUBLIC TESSEL_HAS_TRANSLATIONS)
+else()
+  message(WARNING
+    "Qt Linguist tools were not found: building an English only Tessel.")
+endif()
+
 # ----------------------------------------------------------------- docs tool
 # Renders the interface to PNG files for the README. Off by default because it
 # is only needed when the documentation images are refreshed.
@@ -129,6 +167,7 @@ option(TESSEL_BUILD_SCREENSHOT_TOOL "Build the documentation screenshot tool" OF
 if(TESSEL_BUILD_SCREENSHOT_TOOL)
   qt_add_executable(tessel_screenshots tools/screenshot_tool.cpp)
   target_link_libraries(tessel_screenshots PRIVATE tessel_ui)
+  set_target_properties(tessel_screenshots PROPERTIES QT_EXCLUDE_FROM_TRANSLATION ON)
 endif()
 
 # ----------------------------------------------------------------- example plugin
@@ -146,6 +185,7 @@ if(TESSEL_BUILD_EXAMPLE_PLUGIN)
   target_link_libraries(tessel_example_plugin PRIVATE tessel_core)
   target_compile_options(tessel_example_plugin PRIVATE ${TESSEL_WARNING_FLAGS})
   set_target_properties(tessel_example_plugin PROPERTIES
+    QT_EXCLUDE_FROM_TRANSLATION ON
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
   )
@@ -156,6 +196,7 @@ enable_testing()
 add_executable(tessel_tests tests/tests.cpp)
 target_link_libraries(tessel_tests PRIVATE tessel_core)
 add_test(NAME core COMMAND tessel_tests)
+set_target_properties(tessel_tests PROPERTIES QT_EXCLUDE_FROM_TRANSLATION ON)
 
 # With the example plugin built, the core suite loads that very library through
 # QPluginLoader instead of only exercising the loader's seams.
@@ -170,6 +211,11 @@ endif()
 qt_add_executable(tessel_gui_tests tests/gui_tests.cpp)
 target_link_libraries(tessel_gui_tests PRIVATE tessel_ui Qt6::Test)
 add_test(NAME gui COMMAND tessel_gui_tests)
+set_target_properties(tessel_gui_tests PROPERTIES QT_EXCLUDE_FROM_TRANSLATION ON)
+# The suite reads the .ts files themselves, to check that no translation lost
+# a placeholder on the way.
+target_compile_definitions(tessel_gui_tests PRIVATE
+  TESSEL_TRANSLATIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/translations")
 
 # Same again for the interface suite, which then checks that the window really
 # did load the library and put its effect in the Effects menu.

@@ -73,13 +73,19 @@ public:
     //
     //   id        unique across the whole program, so prefix it with something
     //             of your own. An id that is already taken is ignored.
+    //   name      shown in the menu. It is looked up in the "Effects"
+    //             translation context, so a plugin that ships a .qm of its own
+    //             can be translated the way the built in effects are.
     //   category  the Effects submenu the effect appears under. An existing
     //             name such as "Blurs" or "Stylize" joins that submenu, a new
     //             name gets a submenu of its own after the built in ones.
-    //             "Adjustments" puts it in the Adjustments menu instead.
+    //             "Adjustments" puts it in the Adjustments menu instead. It is
+    //             a key rather than a label: the built in ones are translated
+    //             for the menu, a new one is shown exactly as written here.
     //   params    the controls the dialog is generated from, in the order they
     //             should appear. An effect with no parameters is applied
-    //             straight away with no dialog.
+    //             straight away with no dialog. The labels are looked up in
+    //             the "Effects" context as well.
     //   body      run on a worker thread, possibly many times a second while
     //             the dialog previews on the canvas. It must be deterministic
     //             for a given context and parameter set, must not touch the

@@ -4,6 +4,7 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
 #include <QPolygonF>
 
 namespace tessel {
@@ -50,7 +51,8 @@ ops::Lut levelsLut(double inBlack, double inWhite, double gamma, double outBlack
 void registerAdjustments(EffectRegistry& registry)
 {
     // ------------------------------------------------------------ auto level
-    fx::add(registry, "auto_level", "Auto Level", "Adjustments", {},
+    fx::add(registry, "auto_level", QT_TRANSLATE_NOOP("Effects", "Auto Level"),
+            "Adjustments", {},
             [](const EffectContext& context, const ParamValues&) {
                 const ops::Histogram histogram =
                     ops::computeHistogram(*context.source, context.clip, context.region);
@@ -69,7 +71,8 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+L");
 
     // ------------------------------------------------------------ black and white
-    fx::add(registry, "black_and_white", "Black and White", "Adjustments", {},
+    fx::add(registry, "black_and_white",
+            QT_TRANSLATE_NOOP("Effects", "Black and White"), "Adjustments", {},
             [](const EffectContext& context, const ParamValues&) {
                 return fx::mapPixels(context, [](Rgba c, int, int) {
                     const uint8_t v = ops::luminance8(c);
@@ -79,10 +82,15 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+G");
 
     // ------------------------------------------------------------ brightness / contrast
-    fx::add(registry, "brightness_contrast", "Brightness / Contrast", "Adjustments",
+    fx::add(registry, "brightness_contrast",
+            QT_TRANSLATE_NOOP("Effects", "Brightness / Contrast"), "Adjustments",
             {
-                ParamSpec::intParam("brightness", "Brightness", -100, 100, 0),
-                ParamSpec::intParam("contrast", "Contrast", -100, 100, 0),
+                ParamSpec::intParam("brightness",
+                                    QT_TRANSLATE_NOOP("Effects", "Brightness"),
+                                    -100, 100, 0),
+                ParamSpec::intParam("contrast",
+                                    QT_TRANSLATE_NOOP("Effects", "Contrast"),
+                                    -100, 100, 0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double brightness = values.intValue("brightness") * 2.55;
@@ -110,16 +118,22 @@ void registerAdjustments(EffectRegistry& registry)
         identity << QPointF(0, 0) << QPointF(255, 255);
         std::vector<ParamSpec> specs;
         ParamSpec channel = ParamSpec::choiceParam(
-            "channel", "Transfer map", {"Luminosity", "Red", "Green", "Blue"}, 0);
+            "channel", QT_TRANSLATE_NOOP("Effects", "Transfer map"),
+            {QCoreApplication::translate("Effects", "Luminosity"),
+             QCoreApplication::translate("Effects", "Red"),
+             QCoreApplication::translate("Effects", "Green"),
+             QCoreApplication::translate("Effects", "Blue")},
+            0);
         specs.push_back(channel);
         for (const char* id : {"curve_rgb", "curve_r", "curve_g", "curve_b"}) {
             ParamSpec spec;
             spec.type = ParamType::Curve;
             spec.id = QString::fromLatin1(id);
-            spec.label = QStringLiteral("Curve");
+            spec.label = QCoreApplication::translate("Effects", "Curve");
             specs.push_back(spec);
         }
-        fx::add(registry, "curves", "Curves", "Adjustments", specs,
+        fx::add(registry, "curves", QT_TRANSLATE_NOOP("Effects", "Curves"),
+                "Adjustments", specs,
                 [](const EffectContext& context, const ParamValues& values) {
                     const ops::Lut master = lutFromVariant(values.raw("curve_rgb"));
                     ops::Lut red = combineLuts(master, lutFromVariant(values.raw("curve_r")));
@@ -133,11 +147,17 @@ void registerAdjustments(EffectRegistry& registry)
     }
 
     // ------------------------------------------------------------ hue / saturation
-    fx::add(registry, "hue_saturation", "Hue / Saturation", "Adjustments",
+    fx::add(registry, "hue_saturation",
+            QT_TRANSLATE_NOOP("Effects", "Hue / Saturation"), "Adjustments",
             {
-                ParamSpec::intParam("hue", "Hue", -180, 180, 0, " deg"),
-                ParamSpec::intParam("saturation", "Saturation", 0, 200, 100, "%"),
-                ParamSpec::intParam("lightness", "Lightness", -100, 100, 0),
+                ParamSpec::intParam("hue", QT_TRANSLATE_NOOP("Effects", "Hue"),
+                                    -180, 180, 0, " deg"),
+                ParamSpec::intParam("saturation",
+                                    QT_TRANSLATE_NOOP("Effects", "Saturation"),
+                                    0, 200, 100, "%"),
+                ParamSpec::intParam("lightness",
+                                    QT_TRANSLATE_NOOP("Effects", "Lightness"),
+                                    -100, 100, 0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const float hueShift = static_cast<float>(values.intValue("hue"));
@@ -161,7 +181,8 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+U");
 
     // ------------------------------------------------------------ invert
-    fx::add(registry, "invert_colors", "Invert Colors", "Adjustments", {},
+    fx::add(registry, "invert_colors", QT_TRANSLATE_NOOP("Effects", "Invert Colors"),
+            "Adjustments", {},
             [](const EffectContext& context, const ParamValues&) {
                 return fx::mapLut(context, [](ops::Lut& r, ops::Lut& g, ops::Lut& b) {
                     for (int i = 0; i < 256; ++i) {
@@ -175,7 +196,8 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+I");
 
     // ------------------------------------------------------------ invert alpha
-    fx::add(registry, "invert_alpha", "Invert Alpha", "Adjustments", {},
+    fx::add(registry, "invert_alpha", QT_TRANSLATE_NOOP("Effects", "Invert Alpha"),
+            "Adjustments", {},
             [](const EffectContext& context, const ParamValues&) {
                 return fx::mapPixels(context, [](Rgba c, int, int) {
                     // Opaque becomes clear and clear becomes opaque; the colour
@@ -186,16 +208,30 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Alt+I");
 
     // ------------------------------------------------------------ levels
-    fx::add(registry, "levels", "Levels", "Adjustments",
+    fx::add(registry, "levels", QT_TRANSLATE_NOOP("Effects", "Levels"), "Adjustments",
             {
-                ParamSpec::intParam("in_black", "Input black", 0, 254, 0),
-                ParamSpec::intParam("in_white", "Input white", 1, 255, 255),
-                ParamSpec::doubleParam("gamma", "Gamma", 0.1, 10.0, 1.0, 0.01, 2),
-                ParamSpec::intParam("out_black", "Output black", 0, 255, 0),
-                ParamSpec::intParam("out_white", "Output white", 0, 255, 255),
-                ParamSpec::boolParam("red", "Red channel", true),
-                ParamSpec::boolParam("green", "Green channel", true),
-                ParamSpec::boolParam("blue", "Blue channel", true),
+                ParamSpec::intParam("in_black",
+                                    QT_TRANSLATE_NOOP("Effects", "Input black"),
+                                    0, 254, 0),
+                ParamSpec::intParam("in_white",
+                                    QT_TRANSLATE_NOOP("Effects", "Input white"),
+                                    1, 255, 255),
+                ParamSpec::doubleParam("gamma", QT_TRANSLATE_NOOP("Effects", "Gamma"),
+                                       0.1, 10.0, 1.0, 0.01, 2),
+                ParamSpec::intParam("out_black",
+                                    QT_TRANSLATE_NOOP("Effects", "Output black"),
+                                    0, 255, 0),
+                ParamSpec::intParam("out_white",
+                                    QT_TRANSLATE_NOOP("Effects", "Output white"),
+                                    0, 255, 255),
+                ParamSpec::boolParam("red", QT_TRANSLATE_NOOP("Effects", "Red channel"),
+                                     true),
+                ParamSpec::boolParam("green",
+                                     QT_TRANSLATE_NOOP("Effects", "Green channel"),
+                                     true),
+                ParamSpec::boolParam("blue",
+                                     QT_TRANSLATE_NOOP("Effects", "Blue channel"),
+                                     true),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const ops::Lut active = levelsLut(
@@ -214,9 +250,11 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+L");
 
     // ------------------------------------------------------------ posterize
-    fx::add(registry, "posterize", "Posterize", "Adjustments",
+    fx::add(registry, "posterize", QT_TRANSLATE_NOOP("Effects", "Posterize"),
+            "Adjustments",
             {
-                ParamSpec::intParam("levels", "Levels", 2, 64, 16),
+                ParamSpec::intParam("levels", QT_TRANSLATE_NOOP("Effects", "Levels"),
+                                    2, 64, 16),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int steps = std::max(2, values.intValue("levels", 16));
@@ -234,7 +272,7 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+P");
 
     // ------------------------------------------------------------ sepia
-    fx::add(registry, "sepia", "Sepia", "Adjustments", {},
+    fx::add(registry, "sepia", QT_TRANSLATE_NOOP("Effects", "Sepia"), "Adjustments", {},
             [](const EffectContext& context, const ParamValues&) {
                 return fx::mapPixels(context, [](Rgba c, int, int) {
                     const float v = ops::luminance(c);
@@ -245,12 +283,25 @@ void registerAdjustments(EffectRegistry& registry)
             "Ctrl+Shift+E");
 
     // ------------------------------------------------------------ colour balance
-    fx::add(registry, "color_balance", "Color Balance", "Adjustments",
+    fx::add(registry, "color_balance", QT_TRANSLATE_NOOP("Effects", "Color Balance"),
+            "Adjustments",
             {
-                ParamSpec::intParam("red", "Red", -100, 100, 0),
-                ParamSpec::intParam("green", "Green", -100, 100, 0),
-                ParamSpec::intParam("blue", "Blue", -100, 100, 0),
-                ParamSpec::choiceParam("tones", "Affect", {"Shadows", "Midtones", "Highlights", "All tones"}, 3),
+                ParamSpec::intParam("red", QT_TRANSLATE_NOOP("Effects", "Red"),
+                                    -100, 100, 0),
+                ParamSpec::intParam("green", QT_TRANSLATE_NOOP("Effects", "Green"),
+                                    -100, 100, 0),
+                ParamSpec::intParam("blue", QT_TRANSLATE_NOOP("Effects", "Blue"),
+                                    -100, 100, 0),
+                ParamSpec::choiceParam("tones", QT_TRANSLATE_NOOP("Effects", "Affect"),
+                                       {QCoreApplication::translate("Effects",
+                                                                    "Shadows"),
+                                        QCoreApplication::translate("Effects",
+                                                                    "Midtones"),
+                                        QCoreApplication::translate("Effects",
+                                                                    "Highlights"),
+                                        QCoreApplication::translate("Effects",
+                                                                    "All tones")},
+                                       3),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double red = values.intValue("red") / 100.0;
@@ -275,10 +326,13 @@ void registerAdjustments(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ temperature
-    fx::add(registry, "temperature", "Color Temperature", "Adjustments",
+    fx::add(registry, "temperature", QT_TRANSLATE_NOOP("Effects", "Color Temperature"),
+            "Adjustments",
             {
-                ParamSpec::intParam("warmth", "Warmth", -100, 100, 0),
-                ParamSpec::intParam("tint", "Tint", -100, 100, 0),
+                ParamSpec::intParam("warmth", QT_TRANSLATE_NOOP("Effects", "Warmth"),
+                                    -100, 100, 0),
+                ParamSpec::intParam("tint", QT_TRANSLATE_NOOP("Effects", "Tint"),
+                                    -100, 100, 0),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const double warmth = values.intValue("warmth") / 100.0;
@@ -295,10 +349,14 @@ void registerAdjustments(EffectRegistry& registry)
             });
 
     // ------------------------------------------------------------ threshold
-    fx::add(registry, "threshold", "Threshold", "Adjustments",
+    fx::add(registry, "threshold", QT_TRANSLATE_NOOP("Effects", "Threshold"),
+            "Adjustments",
             {
-                ParamSpec::intParam("level", "Level", 0, 255, 128),
-                ParamSpec::boolParam("keep_color", "Keep colour", false),
+                ParamSpec::intParam("level", QT_TRANSLATE_NOOP("Effects", "Level"),
+                                    0, 255, 128),
+                ParamSpec::boolParam("keep_color",
+                                     QT_TRANSLATE_NOOP("Effects", "Keep colour"),
+                                     false),
             },
             [](const EffectContext& context, const ParamValues& values) {
                 const int level = values.intValue("level", 128);

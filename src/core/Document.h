@@ -6,6 +6,7 @@
 #include <optional>
 #include <vector>
 
+#include <QCoreApplication>
 #include <QString>
 #include <QStringList>
 
@@ -374,7 +375,7 @@ private:
     std::unique_ptr<Layer> root_;
     Selection selection_;
     QString filePath_;
-    QString title_ = QStringLiteral("Untitled");
+    QString title_ = QCoreApplication::translate("Core", "Untitled");
     bool modified_ = false;
 
     // Bumped by invalidate(), which says that pixels somewhere changed without

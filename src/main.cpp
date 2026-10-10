@@ -5,9 +5,12 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFileInfo>
+#include <QLibraryInfo>
+#include <QLocale>
 #include <QSettings>
 #include <QTimer>
 #include <QStringList>
+#include <QTranslator>
 
 #include "tessel_version.h"
 #include "ui/Icons.h"
@@ -15,6 +18,45 @@
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 #include "ui/WheelFilter.h"
+
+namespace {
+
+// The language the interface starts in. No setting, or "system", means follow
+// the system locale; otherwise the setting names the locale, as in "en" or
+// "ru". It is read once here: changing it takes a restart, which is what the
+// Settings dialog says.
+QLocale startupLocale(const QSettings& settings)
+{
+    const QString name =
+        settings.value(QStringLiteral("language"), QStringLiteral("system")).toString();
+    if (name.isEmpty() || name == QLatin1String("system"))
+        return QLocale::system();
+    return QLocale(name);
+}
+
+// Qt's own strings go in first (the buttons of the standard dialogs, the file
+// chooser, the colour dialog), then ours: the translator installed last is
+// asked first, so ours wins wherever both carry the same text.
+//
+// Either load may fail, which is not an error: it only means there is no
+// translation for that language and the English source text is used.
+void installTranslators(QApplication& app, const QLocale& locale)
+{
+    auto* qt = new QTranslator(&app);
+    if (qt->load(locale, QStringLiteral("qtbase"), QStringLiteral("_"),
+                 QLibraryInfo::path(QLibraryInfo::TranslationsPath))) {
+        QCoreApplication::installTranslator(qt);
+    }
+    auto* ours = new QTranslator(&app);
+    // The .qm files are built into the executable as a resource, so one binary
+    // carries every language it was built with.
+    if (ours->load(locale, QStringLiteral("tessel"), QStringLiteral("_"),
+                   QStringLiteral(":/i18n"))) {
+        QCoreApplication::installTranslator(ours);
+    }
+}
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -34,30 +76,36 @@ int main(int argc, char** argv)
     QApplication::setOrganizationName(QStringLiteral("Tessel"));
     QApplication::setDesktopFileName(QStringLiteral("org.tessel.Tessel"));
 
+    // Before the parser, so that --help is answered in the chosen language.
+    QSettings settings;
+    installTranslators(app, startupLocale(settings));
+
     QCommandLineParser parser;
     parser.setApplicationDescription(
-        QStringLiteral("Tessel - a layered raster image editor"));
+        QCoreApplication::translate("Main", "Tessel - a layered raster image editor"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("files"),
-                                 QStringLiteral("Images to open."),
+                                 QCoreApplication::translate("Main", "Images to open."),
                                  QStringLiteral("[files...]"));
-    QCommandLineOption lightOption(QStringList{QStringLiteral("light")},
-                                   QStringLiteral("Start with the light theme."));
+    QCommandLineOption lightOption(
+        QStringList{QStringLiteral("light")},
+        QCoreApplication::translate("Main", "Start with the light theme."));
     parser.addOption(lightOption);
     // Development aid: render the window to a PNG and exit, which makes it
     // possible to check the interface without a display.
-    QCommandLineOption shotOption(QStringList{QStringLiteral("screenshot")},
-                                  QStringLiteral("Save a window screenshot and exit."),
-                                  QStringLiteral("file"));
+    QCommandLineOption shotOption(
+        QStringList{QStringLiteral("screenshot")},
+        QCoreApplication::translate("Main", "Save a window screenshot and exit."),
+        QStringLiteral("file"));
     parser.addOption(shotOption);
-    QCommandLineOption shotDelayOption(QStringList{QStringLiteral("screenshot-delay")},
-                                       QStringLiteral("Milliseconds to wait first."),
-                                       QStringLiteral("ms"), QStringLiteral("700"));
+    QCommandLineOption shotDelayOption(
+        QStringList{QStringLiteral("screenshot-delay")},
+        QCoreApplication::translate("Main", "Milliseconds to wait first."),
+        QStringLiteral("ms"), QStringLiteral("700"));
     parser.addOption(shotDelayOption);
     parser.process(app);
 
-    QSettings settings;
     const bool dark = !parser.isSet(lightOption)
         && settings.value(QStringLiteral("theme"), QStringLiteral("dark")).toString()
             != QStringLiteral("light");

@@ -1,5 +1,6 @@
 #include "ui/RecoveryDialog.h"
 
+#include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QHeaderView>
@@ -18,13 +19,15 @@ namespace {
 QString savedAtText(const QDateTime& savedAt)
 {
     if (!savedAt.isValid())
-        return QStringLiteral("unknown");
+        return QCoreApplication::translate("Dialogs", "unknown");
     const QDateTime now = QDateTime::currentDateTime();
     const qint64 minutes = savedAt.secsTo(now) / 60;
     if (minutes < 1)
-        return QStringLiteral("just now");
-    if (minutes < 60)
-        return QStringLiteral("%1 minutes ago").arg(minutes);
+        return QCoreApplication::translate("Dialogs", "just now");
+    if (minutes < 60) {
+        return QCoreApplication::translate("Dialogs", "%n minute(s) ago", nullptr,
+                                           int(minutes));
+    }
     if (savedAt.date() == now.date())
         return savedAt.toString(QStringLiteral("HH:mm"));
     return savedAt.toString(QStringLiteral("d MMM HH:mm"));
@@ -43,15 +46,15 @@ RecoveryDialog::RecoveryDialog(const std::vector<recovery::Entry>& entries,
                                QWidget* parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("Recover Unsaved Images"));
+    setWindowTitle(tr("Recover Unsaved Images"));
     setWindowIcon(icons::get(QStringLiteral("open"), 22));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
     auto* intro = new QLabel(
-        QStringLiteral("Tessel did not close cleanly last time. These images "
-                       "were saved automatically and have not been opened yet."),
+        tr("Tessel did not close cleanly last time. These images were saved "
+           "automatically and have not been opened yet."),
         this);
     intro->setWordWrap(true);
     root->addWidget(intro);
@@ -61,8 +64,8 @@ RecoveryDialog::RecoveryDialog(const std::vector<recovery::Entry>& entries,
     list_->setRootIsDecorated(false);
     list_->setUniformRowHeights(true);
     list_->setSelectionMode(QAbstractItemView::NoSelection);
-    list_->setHeaderLabels({QStringLiteral("Image"), QStringLiteral("Size"),
-                            QStringLiteral("Saved")});
+    list_->setHeaderLabels({tr("Image"), tr("Size"),
+                            tr("Saved")});
     for (const recovery::Entry& entry : entries) {
         auto* item = new QTreeWidgetItem(list_);
         item->setText(0, entry.displayName());
@@ -71,7 +74,7 @@ RecoveryDialog::RecoveryDialog(const std::vector<recovery::Entry>& entries,
         // The original path is the one thing that tells two images with the
         // same name apart, so it goes in the tooltip rather than nowhere.
         item->setToolTip(0, entry.originalPath.isEmpty()
-                                ? QStringLiteral("Never saved to a file")
+                                ? tr("Never saved to a file")
                                 : QFileInfo(entry.originalPath).absoluteFilePath());
     }
     list_->header()->setStretchLastSection(false);
@@ -82,16 +85,16 @@ RecoveryDialog::RecoveryDialog(const std::vector<recovery::Entry>& entries,
     root->addWidget(list_, 1);
 
     auto* buttons = new QDialogButtonBox(this);
-    QPushButton* recover = buttons->addButton(QStringLiteral("Recover"),
+    QPushButton* recover = buttons->addButton(tr("Recover"),
                                               QDialogButtonBox::AcceptRole);
-    QPushButton* discard = buttons->addButton(QStringLiteral("Discard"),
+    QPushButton* discard = buttons->addButton(tr("Discard"),
                                               QDialogButtonBox::DestructiveRole);
-    QPushButton* later = buttons->addButton(QStringLiteral("Decide Later"),
+    QPushButton* later = buttons->addButton(tr("Decide Later"),
                                             QDialogButtonBox::RejectRole);
     recover->setDefault(true);
-    recover->setToolTip(QStringLiteral("Open every image as an unsaved document"));
-    discard->setToolTip(QStringLiteral("Delete the recovery files"));
-    later->setToolTip(QStringLiteral("Leave the files and ask again next time"));
+    recover->setToolTip(tr("Open every image as an unsaved document"));
+    discard->setToolTip(tr("Delete the recovery files"));
+    later->setToolTip(tr("Leave the files and ask again next time"));
     connect(recover, &QPushButton::clicked, this, [this] { finish(Choice::Recover); });
     connect(discard, &QPushButton::clicked, this, [this] { finish(Choice::Discard); });
     connect(later, &QPushButton::clicked, this, [this] { finish(Choice::Later); });

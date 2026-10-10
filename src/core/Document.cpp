@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include <QCoreApplication>
 #include <QFileInfo>
 
 #include "core/ImageOps.h"
@@ -264,8 +265,8 @@ Document::Document(int width, int height, Rgba background)
 {
     root_ = std::make_unique<Layer>(Image(), QStringLiteral("Document"));
     root_->group_ = true;
-    auto layer = std::make_unique<Layer>(width_, height_,
-                                         QStringLiteral("Background"), background);
+    auto layer = std::make_unique<Layer>(
+        width_, height_, QCoreApplication::translate("Core", "Background"), background);
     addChild(root_.get(), std::move(layer));
 }
 
@@ -499,14 +500,16 @@ Layer* Document::addEmptyLayer(int index)
 {
     auto layer = std::make_unique<Layer>(
         width_, height_,
-        uniqueLayerName(QStringLiteral("Layer %1").arg(nextLayerSerial())));
+        uniqueLayerName(QCoreApplication::translate("Core", "Layer %1")
+                            .arg(nextLayerSerial())));
     return addLayer(std::move(layer), index);
 }
 
 Layer* Document::addGroup(const QString& name, int index)
 {
     auto group = Layer::makeGroup(
-        name.isEmpty() ? uniqueLayerName(QStringLiteral("Group %1").arg(nextLayerSerial()))
+        name.isEmpty() ? uniqueLayerName(QCoreApplication::translate("Core", "Group %1")
+                                             .arg(nextLayerSerial()))
                        : name);
     Layer* parent = root_.get();
     int childIndex = -1;
@@ -526,8 +529,8 @@ Layer* Document::duplicateLayer(int index)
     Layer* source = layerAt(index);
     if (!source)
         return nullptr;
-    auto copy = source->clone(
-        uniqueLayerName(source->name + QStringLiteral(" copy")));
+    auto copy = source->clone(uniqueLayerName(
+        source->name + QCoreApplication::translate("Core", " copy")));
     Layer* parent = source->parent() ? source->parent() : root_.get();
     return addChild(parent, std::move(copy), source->indexInParent() + 1);
 }
@@ -705,7 +708,7 @@ void Document::flatten()
 {
     Image merged = composite();
     const QString name = root_->children_.empty()
-                             ? QStringLiteral("Background")
+                             ? QCoreApplication::translate("Core", "Background")
                              : root_->children_.front()->name;
     root_->children_.clear();
     auto layer = std::make_unique<Layer>(std::move(merged), name);
@@ -719,7 +722,8 @@ Layer* Document::addAdjustmentLayer(const QString& effectId, const ParamValues& 
                                     const QString& name, int index)
 {
     auto layer = Layer::makeAdjustment(
-        name.isEmpty() ? uniqueLayerName(QStringLiteral("Adjustment %1")
+        name.isEmpty() ? uniqueLayerName(QCoreApplication::translate("Core",
+                                                                     "Adjustment %1")
                                              .arg(nextLayerSerial()))
                        : uniqueLayerName(name),
         effectId, values);
@@ -859,7 +863,8 @@ Layer* Document::setMask(Layer* layer, Image mask, bool enabled)
 {
     if (!layer)
         return nullptr;
-    auto maskLayer = std::make_unique<Layer>(std::move(mask), QStringLiteral("Mask"));
+    auto maskLayer = std::make_unique<Layer>(
+        std::move(mask), QCoreApplication::translate("Core", "Mask"));
     maskLayer->parent_ = layer;
     maskLayer->setUid(++uidCounter_);
     layer->mask_ = std::move(maskLayer);
@@ -1201,7 +1206,8 @@ std::unique_ptr<Layer> Document::restoreLayer(const DocumentState::LayerState& s
     layer->setUid(state.uid);
     uidCounter_ = std::max(uidCounter_, state.uid);
     if (state.hasMask) {
-        auto mask = std::make_unique<Layer>(state.mask, QStringLiteral("Mask"));
+        auto mask = std::make_unique<Layer>(
+            state.mask, QCoreApplication::translate("Core", "Mask"));
         mask->setUid(state.maskUid);
         mask->parent_ = layer.get();
         uidCounter_ = std::max(uidCounter_, state.maskUid);
@@ -1265,16 +1271,18 @@ QPoint anchorOffset(Anchor anchor, int oldW, int oldH, int newW, int newH)
 const char* anchorName(Anchor anchor)
 {
     switch (anchor) {
-    case Anchor::TopLeft: return "Top left";
-    case Anchor::Top: return "Top";
-    case Anchor::TopRight: return "Top right";
-    case Anchor::Left: return "Left";
-    case Anchor::Right: return "Right";
-    case Anchor::BottomLeft: return "Bottom left";
-    case Anchor::Bottom: return "Bottom";
-    case Anchor::BottomRight: return "Bottom right";
+    // Marked rather than translated: the caller shows these, and a language
+    // change must not be frozen into a string returned long before.
+    case Anchor::TopLeft: return QT_TRANSLATE_NOOP("Core", "Top left");
+    case Anchor::Top: return QT_TRANSLATE_NOOP("Core", "Top");
+    case Anchor::TopRight: return QT_TRANSLATE_NOOP("Core", "Top right");
+    case Anchor::Left: return QT_TRANSLATE_NOOP("Core", "Left");
+    case Anchor::Right: return QT_TRANSLATE_NOOP("Core", "Right");
+    case Anchor::BottomLeft: return QT_TRANSLATE_NOOP("Core", "Bottom left");
+    case Anchor::Bottom: return QT_TRANSLATE_NOOP("Core", "Bottom");
+    case Anchor::BottomRight: return QT_TRANSLATE_NOOP("Core", "Bottom right");
     case Anchor::Center:
-    default: return "Center";
+    default: return QT_TRANSLATE_NOOP("Core", "Center");
     }
 }
 

@@ -219,7 +219,7 @@ CurvesDialog::CurvesDialog(Effect* effect, Document* doc, History* history, Rgba
                            Rgba secondary, QWidget* parent)
     : QDialog(parent), effect_(effect), preview_(effect, doc, history, primary, secondary)
 {
-    setWindowTitle(QStringLiteral("Curves"));
+    setWindowTitle(tr("Curves"));
     setWindowIcon(icons::get(QStringLiteral("adjust"), 22));
     setModal(false);
     values_ = ParamValues::defaults(effect_->params());
@@ -238,20 +238,20 @@ CurvesDialog::CurvesDialog(Effect* effect, Document* doc, History* history, Rgba
     root->setSpacing(8);
 
     auto* top = new QHBoxLayout;
-    top->addWidget(new QLabel(QStringLiteral("Transfer map"), this));
+    top->addWidget(new QLabel(tr("Transfer map"), this));
     channel_ = new QComboBox(this);
-    channel_->addItems({QStringLiteral("Luminosity"), QStringLiteral("Red"),
-                        QStringLiteral("Green"), QStringLiteral("Blue")});
+    channel_->addItems({tr("Luminosity"), tr("Red"),
+                        tr("Green"), tr("Blue")});
     top->addWidget(channel_, 1);
-    auto* resetChannel = new QPushButton(QStringLiteral("Reset channel"), this);
+    auto* resetChannel = new QPushButton(tr("Reset channel"), this);
     top->addWidget(resetChannel);
     root->addLayout(top);
 
     editor_ = new CurveEditor(this);
     root->addWidget(editor_, 1);
 
-    auto* hint = new QLabel(QStringLiteral("Click to add a control point, drag to move "
-                                           "it, right click to remove it."),
+    auto* hint = new QLabel(tr("Click to add a control point, drag to move "
+                               "it, right click to remove it."),
                             this);
     hint->setStyleSheet(QStringLiteral("color: %1; font-size: 8pt;")
                             .arg(theme::textColor().darker(140).name()));
@@ -436,7 +436,7 @@ LevelsDialog::LevelsDialog(Effect* effect, Document* doc, History* history, Rgba
                            Rgba secondary, QWidget* parent)
     : QDialog(parent), effect_(effect), preview_(effect, doc, history, primary, secondary)
 {
-    setWindowTitle(QStringLiteral("Levels"));
+    setWindowTitle(tr("Levels"));
     setWindowIcon(icons::get(QStringLiteral("adjust"), 22));
     setModal(false);
     values_ = ParamValues::defaults(effect_->params());
@@ -476,24 +476,24 @@ LevelsDialog::LevelsDialog(Effect* effect, Document* doc, History* history, Rgba
         spin->setKeyboardTracking(false);
     gamma_->setKeyboardTracking(false);
 
-    form->addRow(QStringLiteral("Input black"), inBlack_);
-    form->addRow(QStringLiteral("Input white"), inWhite_);
-    form->addRow(QStringLiteral("Gamma"), gamma_);
-    form->addRow(QStringLiteral("Output black"), outBlack_);
-    form->addRow(QStringLiteral("Output white"), outWhite_);
+    form->addRow(tr("Input black"), inBlack_);
+    form->addRow(tr("Input white"), inWhite_);
+    form->addRow(tr("Gamma"), gamma_);
+    form->addRow(tr("Output black"), outBlack_);
+    form->addRow(tr("Output white"), outWhite_);
 
     auto* channels = new QHBoxLayout;
-    red_ = new QCheckBox(QStringLiteral("Red"), this);
-    green_ = new QCheckBox(QStringLiteral("Green"), this);
-    blue_ = new QCheckBox(QStringLiteral("Blue"), this);
+    red_ = new QCheckBox(tr("Red"), this);
+    green_ = new QCheckBox(tr("Green"), this);
+    blue_ = new QCheckBox(tr("Blue"), this);
     for (QCheckBox* box : {red_, green_, blue_}) {
         box->setChecked(true);
         channels->addWidget(box);
     }
     channels->addStretch(1);
-    auto* autoButton = new QPushButton(QStringLiteral("Auto"), this);
+    auto* autoButton = new QPushButton(tr("Auto"), this);
     channels->addWidget(autoButton);
-    form->addRow(QStringLiteral("Channels"), channels);
+    form->addRow(tr("Channels"), channels);
     root->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel
