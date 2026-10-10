@@ -168,7 +168,10 @@
     <dl class="defs">
       <dt>Paintbrush (<kbd>B</kbd>)</dt>
       <dd>Drag to paint, right drag to paint with the secondary colour. Width, opacity,
-        antialiasing, blending and hardness.</dd>
+        antialiasing, blending and hardness. Hardness sets how wide the soft edge is: at the
+        top of the range the stroke has a crisp rim, and at the bottom it is a faint haze that
+        fades across the whole width. One stroke lays down one coat, so passing back over your
+        own stroke does not darken it; release and draw again to build the colour up.</dd>
       <dt>Pencil (<kbd>P</kbd>)</dt>
       <dd>Single hard pixels, with no antialiasing. Only a blending box, since nothing else
         would apply.</dd>
@@ -272,7 +275,9 @@
     <h3>Moving what is selected</h3>
     <p><strong>Move Selected Pixels</strong> (<kbd>M</kbd>) lifts the selected pixels onto a
       floating buffer: drag it anywhere, nudge it with the arrow keys, or drag a corner handle
-      to scale it. <kbd>Enter</kbd> drops it, <kbd>Esc</kbd> puts it back.
+      to scale it. <kbd>Enter</kbd> drops it where it stands, and <kbd>Esc</kbd> drops it and
+      clears the selection as well; <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes the whole move back in
+      one step.
       <strong>Move Selection</strong> (<kbd>M</kbd> again) slides the outline on its own and
       leaves the pixels where they are, which is the quickest way to reuse a shape somewhere
       else.</p>

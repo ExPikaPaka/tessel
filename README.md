@@ -28,10 +28,19 @@ of it can exist. What Tessel borrows is the workflow and the layout, both of whi
 are implemented here from the ground up, including every icon, which is drawn
 procedurally with QPainter rather than loaded from a file.
 
+## Downloading a build
+
+Every release carries a Linux tarball and a Windows zip, both built and tested
+by CI: https://github.com/ExPikaPaka/tessel/releases
+
+The Windows zip has the Qt runtime beside the executable, so it runs from the
+folder it is unpacked into. The Linux tarball links against the system Qt 6.
+
 ## Building
 
 Requirements: a C++20 compiler, CMake 3.21 or newer, Qt 6.4 or newer (Widgets),
-and zlib.
+and zlib. The same source builds with MSVC on Windows; CI does it with Qt from
+the official installer and zlib from vcpkg.
 
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
     cmake --build build
@@ -43,7 +52,8 @@ To install system wide, together with its desktop entry and icon:
 
 On Arch and derivatives the dependencies are `qt6-base`, `cmake`, `ninja` and
 `gcc`. On Debian and Ubuntu they are `qt6-base-dev`, `cmake`, `ninja-build`,
-`g++` and `zlib1g-dev`.
+`g++` and `zlib1g-dev`. Qt Test is part of Qt 6 base and is used by the
+interface test suite.
 
 ## Running the tests
 
@@ -128,6 +138,9 @@ selection tools (press it again to cycle), M for the two move tools, B
 paintbrush, P pencil, E eraser, F paint bucket, G gradient, K colour picker, L
 clone stamp, R recolor, T text, O line and shapes, Z zoom and H pan. X swaps the
 palette colours and D resets them.
+
+Shortcuts that hold Ctrl or Alt are matched by the key's position, so they keep
+working while a non Latin keyboard layout is active.
 
 ## How the code is laid out
 
