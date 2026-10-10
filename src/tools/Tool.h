@@ -74,6 +74,13 @@ struct ToolEvent {
     Qt::MouseButton button = Qt::NoButton;
     Qt::MouseButtons buttons = Qt::NoButton;
     Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    // A mouse has no pressure sensor and no tilt, so it reports a full press
+    // and a pen held upright. Every tool can therefore read these without
+    // asking where the event came from.
+    double pressure = 1.0;
+    double tiltX = 0.0;   // degrees from vertical, positive to the right
+    double tiltY = 0.0;   // degrees from vertical, positive downwards
+    bool fromTablet = false;
 
     bool isSecondary() const
     {
@@ -154,6 +161,26 @@ void registerPlaceTool(ToolRegistry& registry);
 bool startPlacement(ToolContext& context, Image picture, const QString& layerName,
                     bool onNewLayer);
 
+// Custom brush tips. A tip is a PNG whose alpha, or whose luminance when it
+// has none, is the shape the brush stamps. The list of tips and the one in use
+// outlive the session through QSettings; an empty path means the built in round
+// tip, which keeps its own swept distance field code path.
+namespace brushtips {
+
+QStringList remembered();
+QString chosen();
+// Loads the file, keeps it in the list and makes it the current tip. False if
+// nothing usable could be read out of it, and then nothing is remembered.
+bool remember(const QString& path);
+void choose(const QString& path);
+void forgetAll();
+// Re-reads the settings, which is how a fresh run picks up the last tip.
+void reload();
+// The stamp itself, trimmed to what it actually marks. Null if unreadable.
+Mask load(const QString& path);
+
+} // namespace brushtips
+
 // The row of tool specific controls under the main toolbar.
 class ToolOptionsBar : public QWidget {
     Q_OBJECT
@@ -182,6 +209,10 @@ public:
                         const QStringList& items, int index);
     QToolButton* addToggle(const QString& key, const QString& iconName,
                            const QString& tooltip, bool checked);
+    // A small checkable button labelled with a word rather than a glyph, for
+    // the switches that have nothing worth drawing an icon for.
+    QToolButton* addTextToggle(const QString& key, const QString& text,
+                               const QString& tooltip, bool checked);
     QFontComboBox* addFontCombo(const QString& key, const QString& family);
     void addLabel(const QString& text);
     void addSeparator();

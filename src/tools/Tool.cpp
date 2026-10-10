@@ -355,6 +355,23 @@ QToolButton* ToolOptionsBar::addToggle(const QString& key, const QString& iconNa
     return button;
 }
 
+QToolButton* ToolOptionsBar::addTextToggle(const QString& key, const QString& text,
+                                           const QString& tooltip, bool checked)
+{
+    auto* button = new QToolButton(this);
+    button->setText(text);
+    button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    button->setCheckable(true);
+    button->setChecked(checked);
+    button->setToolTip(tooltip);
+    button->setAutoRaise(true);
+    values_[key] = checked;
+    connect(button, &QToolButton::toggled, this,
+            [this, key](bool next) { publish(key, next); });
+    addWidget(button);
+    return button;
+}
+
 QFontComboBox* ToolOptionsBar::addFontCombo(const QString& key, const QString& family)
 {
     auto* combo = new QFontComboBox(this);

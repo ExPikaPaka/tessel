@@ -16,6 +16,9 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QKeyEvent>
+#include <QPointingDevice>
+#include <QSettings>
+#include <QTabletEvent>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -99,6 +102,33 @@ void drag(Tool* tool, ToolContext& context, QPointF from, QPointF to,
         tool->move(context, move);
     }
     tool->release(context, makeEvent(to, button, modifiers));
+}
+
+// The same gesture from a pen held at one steady pressure. A mouse reports a
+// full press, which is what makeEvent leaves in place.
+ToolEvent makePenEvent(QPointF pos, double pressure,
+                       Qt::MouseButton button = Qt::LeftButton)
+{
+    ToolEvent event = makeEvent(pos, button);
+    event.fromTablet = true;
+    event.pressure = pressure;
+    return event;
+}
+
+void penDrag(Tool* tool, ToolContext& context, QPointF from, QPointF to,
+             double pressure)
+{
+    tool->press(context, makePenEvent(from, pressure));
+    const int steps = 6;
+    for (int i = 1; i <= steps; ++i) {
+        const double t = double(i) / steps;
+        ToolEvent move = makePenEvent(QPointF(from.x() + (to.x() - from.x()) * t,
+                                              from.y() + (to.y() - from.y()) * t),
+                                      pressure);
+        move.button = Qt::NoButton;
+        tool->move(context, move);
+    }
+    tool->release(context, makePenEvent(to, pressure));
 }
 
 // The selection dialogs are modal, so the answer has to be typed in from a
@@ -1009,6 +1039,526 @@ int main(int argc, char** argv)
         drag(brush, solidContext, QPointF(20, 50), QPointF(180, 50));
         CHECK(solidView.document()->activeLayer()->image.at(100, 50).a == 255);
         brush->optionChanged(QStringLiteral("width"), 12);
+    });
+
+    addTest("a tablet press carries its pressure to the tool", [] {
+        // Tablet events arrive addressed to the viewport, and one that nobody
+        // accepts comes back as a synthesised mouse event, so this checks both
+        // that the tool is reached and that it is reached only once.
+        class Probe : public Tool {
+        public:
+            QString id() const override { return QStringLiteral("probe"); }
+            QString name() const override { return QStringLiteral("Probe"); }
+            void press(ToolContext&, const ToolEvent& event) override
+            {
+                seen.push_back(event);
+            }
+            void move(ToolContext&, const ToolEvent& event) override
+            {
+                seen.push_back(event);
+            }
+            void release(ToolContext&, const ToolEvent& event) override
+            {
+                seen.push_back(event);
+            }
+            void doubleClick(ToolContext&, const ToolEvent&) override { ++doubles; }
+            std::vector<ToolEvent> seen;
+            int doubles = 0;
+        };
+
+        Probe probe;
+        auto doc = std::make_unique<Document>(120, 120, Rgba(255, 255, 255, 255));
+        CanvasView view(std::move(doc));
+        view.setTool(&probe);
+
+        const QPointingDevice* pen = QPointingDevice::primaryPointingDevice();
+        const auto send = [&](QEvent::Type type, QPointF at, double pressure) {
+            QTabletEvent event(type, pen, at, at, pressure, 12.0f, -5.0f, 0.0f, 0.0,
+                               0.0f, Qt::NoModifier, Qt::LeftButton,
+                               type == QEvent::TabletRelease ? Qt::NoButton
+                                                             : Qt::LeftButton);
+            QApplication::sendEvent(view.viewport(), &event);
+        };
+        send(QEvent::TabletPress, QPointF(20, 20), 0.42);
+        send(QEvent::TabletMove, QPointF(30, 24), 0.8);
+        send(QEvent::TabletRelease, QPointF(40, 28), 0.0);
+        QApplication::processEvents();
+
+        CHECK(probe.seen.size() == 3);
+        if (probe.seen.size() == 3) {
+            CHECK(probe.seen[0].fromTablet);
+            CHECK(nearly(probe.seen[0].pressure, 0.42, 1e-3));
+            CHECK(nearly(probe.seen[1].pressure, 0.8, 1e-3));
+            CHECK(nearly(probe.seen[1].tiltX, 12.0, 1e-3));
+            CHECK(nearly(probe.seen[1].tiltY, -5.0, 1e-3));
+        }
+
+        // A mouse has no sensor, and says a full press rather than nothing.
+        QMouseEvent mouse(QEvent::MouseButtonPress, QPointF(10, 10), QPointF(10, 10),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(view.viewport(), &mouse);
+        CHECK(probe.seen.size() == 4);
+        if (probe.seen.size() == 4) {
+            CHECK(!probe.seen.back().fromTablet);
+            CHECK(nearly(probe.seen.back().pressure, 1.0));
+        }
+
+        // Accepting the tablet events costs the double click Qt used to make
+        // out of them, so a double tap has to be recognised on the way in.
+        CHECK(probe.doubles == 0);
+        send(QEvent::TabletPress, QPointF(50, 50), 0.5);
+        send(QEvent::TabletRelease, QPointF(50, 50), 0.0);
+        send(QEvent::TabletPress, QPointF(50, 50), 0.5);
+        CHECK(probe.doubles == 1);
+        view.setTool(nullptr);
+    });
+
+    addTest("the painting tools open with the new options switched off", [] {
+        // Everything added for a tablet starts out doing nothing, so a mouse
+        // paints what it has always painted until one of them is turned on.
+        for (const char* id : {"brush", "pencil", "eraser"}) {
+            Tool* tool = ToolRegistry::instance().byId(QString::fromLatin1(id));
+            check(tool != nullptr, id, __LINE__);
+            ToolOptionsBar bar;
+            bar.startTool(tool);
+            check(!bar.value(QStringLiteral("pressureOpacity")).toBool(), id,
+                  __LINE__);
+            check(bar.value(QStringLiteral("stabilise")).toInt() == 0, id, __LINE__);
+        }
+
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        ToolOptionsBar brushBar;
+        brushBar.startTool(brush);
+        CHECK(!brushBar.value(QStringLiteral("pressureWidth")).toBool());
+        CHECK(brushBar.value(QStringLiteral("tip")).toInt() == 0);   // Round
+        // The level the check box used to stand for when it was checked, and
+        // Normal rather than Overwrite.
+        CHECK(brushBar.value(QStringLiteral("antialias")).toInt() == 2);
+        CHECK(brushBar.value(QStringLiteral("blend")).toInt() == 0);
+
+        // The pencil nib is one pixel, so it is not offered a width switch at
+        // all rather than one that does nothing.
+        Tool* pencil = ToolRegistry::instance().byId(QStringLiteral("pencil"));
+        ToolOptionsBar pencilBar;
+        pencilBar.startTool(pencil);
+        CHECK(!pencilBar.value(QStringLiteral("pressureWidth")).isValid());
+    });
+
+    addTest("pressure drives the brush width and the opacity when asked", [] {
+        // Both switches are off to start with, so a light touch has to paint
+        // exactly what a mouse paints until one of them is turned on.
+        auto doc = std::make_unique<Document>(240, 220, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(0, 0, 0, 255));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 95);
+        ToolContext context = view.makeContext();
+
+        const Image& image = view.document()->activeLayer()->image;
+        const auto spread = [&image](int x, int y) {
+            int count = 0;
+            for (int dy = -40; dy <= 40; ++dy) {
+                if (image.at(x, y + dy).a > 128)
+                    ++count;
+            }
+            return count;
+        };
+
+        penDrag(brush, context, QPointF(20, 40), QPointF(220, 40), 0.3);
+        const int ignored = spread(120, 40);
+        CHECK(image.at(120, 40).a == 255);
+        CHECK(ignored >= 38 && ignored <= 42);
+
+        brush->optionChanged(QStringLiteral("pressureWidth"), true);
+        penDrag(brush, context, QPointF(20, 110), QPointF(220, 110), 0.3);
+        const int narrow = spread(120, 110);
+        CHECK(image.at(120, 110).a == 255);   // a light touch still marks
+        CHECK(narrow >= 8 && narrow < ignored / 2);
+        // Full pressure is the width that was asked for.
+        penDrag(brush, context, QPointF(20, 180), QPointF(220, 180), 1.0);
+        CHECK(spread(120, 180) == ignored);
+        brush->optionChanged(QStringLiteral("pressureWidth"), false);
+
+        // Opacity is the other mapping: the width stays put and the pigment
+        // thins out instead.
+        auto thinDoc = std::make_unique<Document>(240, 100, Rgba(0, 0, 0, 0));
+        CanvasView thinView(std::move(thinDoc));
+        thinView.setTool(brush);
+        thinView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        ToolContext thinContext = thinView.makeContext();
+        brush->optionChanged(QStringLiteral("pressureOpacity"), true);
+        penDrag(brush, thinContext, QPointF(20, 50), QPointF(220, 50), 0.3);
+        const Image& thin = thinView.document()->activeLayer()->image;
+        CHECK(thin.at(120, 50).a > 60 && thin.at(120, 50).a < 130);
+        int faint = 0;
+        for (int dy = -40; dy <= 40; ++dy) {
+            if (thin.at(120, 50 + dy).a > 40)
+                ++faint;
+        }
+        CHECK(faint >= 38 && faint <= 42);   // as wide as ever
+        brush->optionChanged(QStringLiteral("pressureOpacity"), false);
+
+        // The pencil has the one switch, since a single pixel nib has no
+        // width to scale.
+        Tool* pencil = ToolRegistry::instance().byId(QStringLiteral("pencil"));
+        thinView.setTool(pencil);
+        pencil->optionChanged(QStringLiteral("pressureOpacity"), true);
+        ToolContext pencilContext = thinView.makeContext();
+        penDrag(pencil, pencilContext, QPointF(20, 90), QPointF(220, 90), 0.5);
+        CHECK(thin.at(120, 90).a > 100 && thin.at(120, 90).a < 170);
+        pencil->optionChanged(QStringLiteral("pressureOpacity"), false);
+
+        // And so does the eraser, which takes less away at a light touch.
+        Tool* eraser = ToolRegistry::instance().byId(QStringLiteral("eraser"));
+        auto fullDoc = std::make_unique<Document>(240, 120, Rgba(0, 0, 0, 255));
+        CanvasView fullView(std::move(fullDoc));
+        fullView.setTool(eraser);
+        ToolContext eraseContext = fullView.makeContext();
+        eraser->optionChanged(QStringLiteral("width"), 30);
+        eraser->optionChanged(QStringLiteral("pressureOpacity"), true);
+        penDrag(eraser, eraseContext, QPointF(20, 40), QPointF(220, 40), 0.3);
+        penDrag(eraser, eraseContext, QPointF(20, 90), QPointF(220, 90), 1.0);
+        const Image& erased = fullView.document()->activeLayer()->image;
+        CHECK(erased.at(120, 40).a > 100 && erased.at(120, 40).a < 200);
+        CHECK(erased.at(120, 90).a == 0);
+        eraser->optionChanged(QStringLiteral("pressureOpacity"), false);
+        eraser->optionChanged(QStringLiteral("width"), 24);
+
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("stabilisation steadies a shaky line and still ends where it ended", [] {
+        // The same wobbling drag twice: untouched it follows every twitch, and
+        // turned up it comes out as a line, but either way the last stretch
+        // has to reach the point where the pointer came up.
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        brush->optionChanged(QStringLiteral("width"), 6);
+        brush->optionChanged(QStringLiteral("hardness"), 100);
+
+        const auto shake = [brush](CanvasView& view) {
+            ToolContext context = view.makeContext();
+            brush->press(context, makeEvent(QPointF(20, 60)));
+            for (int i = 1; i <= 16; ++i) {
+                const double x = 20.0 + i * 10.0;
+                const double y = 60.0 + ((i % 2) ? 10.0 : -10.0);
+                ToolEvent step = makeEvent(QPointF(x, y));
+                step.button = Qt::NoButton;
+                brush->move(context, step);
+            }
+            brush->release(context, makeEvent(QPointF(180, 60)));
+        };
+        // How far from the middle line the paint reaches, over the stretch
+        // where the wobble is in full swing.
+        const auto wander = [](const Image& image) {
+            int worst = 0;
+            for (int x = 60; x <= 150; ++x) {
+                for (int dy = 1; dy <= 25; ++dy) {
+                    if (image.at(x, 60 + dy).a > 128 || image.at(x, 60 - dy).a > 128)
+                        worst = std::max(worst, dy);
+                }
+            }
+            return worst;
+        };
+
+        auto rawDoc = std::make_unique<Document>(220, 140, Rgba(0, 0, 0, 0));
+        CanvasView rawView(std::move(rawDoc));
+        rawView.setTool(brush);
+        rawView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        shake(rawView);
+        const int loose = wander(rawView.document()->activeLayer()->image);
+        CHECK(loose >= 10);   // the wobble is all there
+
+        auto steadyDoc = std::make_unique<Document>(220, 140, Rgba(0, 0, 0, 0));
+        CanvasView steadyView(std::move(steadyDoc));
+        steadyView.setTool(brush);
+        steadyView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        brush->optionChanged(QStringLiteral("stabilise"), 100);
+        shake(steadyView);
+        const Image& steady = steadyView.document()->activeLayer()->image;
+        CHECK(wander(steady) <= 4);
+        CHECK(steady.at(100, 60).a == 255);   // and it is still a line
+        // The release point is painted whatever the smoothing was holding back.
+        CHECK(steady.at(178, 60).a > 128);
+
+        brush->optionChanged(QStringLiteral("stabilise"), 0);
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("a custom brush tip is stamped along the stroke", [] {
+        // A tip that is nothing like a disc, so the stroke it leaves cannot be
+        // mistaken for the round brush's swept field: a bar four times wider
+        // than it is tall.
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        QImage bar(64, 64, QImage::Format_ARGB32);
+        bar.fill(Qt::transparent);
+        for (int y = 22; y < 42; ++y) {
+            for (int x = 0; x < 64; ++x)
+                bar.setPixelColor(x, y, QColor(255, 255, 255, 255));
+        }
+        const QString path = dir.filePath(QStringLiteral("bar.png"));
+        CHECK(bar.save(path, "PNG"));
+
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 100);
+        brush->optionChanged(QStringLiteral("tipFile"), path);
+
+        auto doc = std::make_unique<Document>(220, 140, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(0, 0, 0, 255));
+        ToolContext context = view.makeContext();
+        drag(brush, context, QPointF(40, 70), QPointF(180, 70));
+
+        const Image& image = view.document()->activeLayer()->image;
+        CHECK(image.at(110, 70).a == 255);
+        CHECK(image.at(110, 74).a == 255);
+        // The bar is thirteen pixels tall once it is fitted to a forty pixel
+        // brush, where the round tip would have painted all the way out.
+        CHECK(image.at(110, 85).a == 0);
+        CHECK(image.at(110, 55).a == 0);
+
+        // No beads: a soft tip has to come out as even along the stroke as the
+        // round brush does.
+        auto softDoc = std::make_unique<Document>(220, 140, Rgba(0, 0, 0, 0));
+        CanvasView softView(std::move(softDoc));
+        softView.setTool(brush);
+        softView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        ToolContext softContext = softView.makeContext();
+        brush->optionChanged(QStringLiteral("hardness"), 50);
+        drag(brush, softContext, QPointF(40, 70), QPointF(180, 70));
+        const Image& soft = softView.document()->activeLayer()->image;
+        for (int row : {70, 74, 78}) {
+            int lowest = 255, highest = 0;
+            for (int x = 70; x <= 150; ++x) {
+                lowest = std::min(lowest, int(soft.at(x, row).a));
+                highest = std::max(highest, int(soft.at(x, row).a));
+            }
+            check(highest - lowest <= 3, "even along a stamped stroke", __LINE__);
+            check(highest > 20, "and there is paint to measure", __LINE__);
+        }
+        // Hardness thins the pigment the same way it does for the round brush.
+        CHECK(soft.at(110, 70).a < 255);
+
+        // Opacity and the blending mode go through the same path as ever.
+        auto overDoc = std::make_unique<Document>(220, 140, Rgba(128, 128, 128, 255));
+        CanvasView overView(std::move(overDoc));
+        overView.setTool(brush);
+        overView.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext overContext = overView.makeContext();
+        brush->optionChanged(QStringLiteral("hardness"), 100);
+        brush->optionChanged(QStringLiteral("opacity"), 50);
+        drag(brush, overContext, QPointF(40, 40), QPointF(180, 40));
+        const Image& over = overView.document()->activeLayer()->image;
+        CHECK(over.at(110, 40).r > 180 && over.at(110, 40).r < 215);
+        brush->optionChanged(QStringLiteral("opacity"), 100);
+        // Multiply by white leaves a mid grey exactly where it was.
+        brush->optionChanged(QStringLiteral("blend"),
+                             int(blendModeNames().indexOf(QStringLiteral("Multiply"))));
+        drag(brush, overContext, QPointF(40, 100), QPointF(180, 100));
+        CHECK(over.at(110, 100).r == 128);
+
+        brush->optionChanged(QStringLiteral("blend"), 0);
+        brush->optionChanged(QStringLiteral("tip"), 0);
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+        brushtips::forgetAll();
+    });
+
+    addTest("a brush tip without alpha comes from its luminance", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        // No alpha channel at all, so the bright part is the stamp.
+        QImage plain(40, 40, QImage::Format_RGB32);
+        plain.fill(Qt::black);
+        for (int y = 10; y < 30; ++y) {
+            for (int x = 12; x < 28; ++x)
+                plain.setPixelColor(x, y, QColor(255, 255, 255));
+        }
+        const QString path = dir.filePath(QStringLiteral("plain.png"));
+        CHECK(plain.save(path, "PNG"));
+
+        const Mask tip = brushtips::load(path);
+        // Trimmed to what it marks, which is the bright block and nothing else.
+        CHECK(tip.width() == 16 && tip.height() == 20);
+        CHECK(tip.at(8, 10) > 0.99f);
+        CHECK(tip.maxValue() > 0.99f);
+
+        // An unreadable file is not remembered, and the list is left alone.
+        const QStringList before = brushtips::remembered();
+        CHECK(!brushtips::remember(dir.filePath(QStringLiteral("nothing.png"))));
+        CHECK(brushtips::remembered() == before);
+    });
+
+    addTest("a custom brush tip is remembered between runs", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        QImage disc(48, 48, QImage::Format_ARGB32);
+        disc.fill(Qt::transparent);
+        for (int y = 0; y < 48; ++y) {
+            for (int x = 0; x < 48; ++x) {
+                if (std::hypot(x - 23.5, y - 23.5) <= 20.0)
+                    disc.setPixelColor(x, y, QColor(0, 0, 0, 255));
+            }
+        }
+        const QString path = dir.filePath(QStringLiteral("disc.png"));
+        CHECK(disc.save(path, "PNG"));
+
+        brushtips::forgetAll();
+        CHECK(brushtips::remembered().isEmpty());
+        CHECK(brushtips::chosen().isEmpty());
+        CHECK(brushtips::remember(path));
+        CHECK(brushtips::chosen() == path);
+
+        // It went through the settings, which is what makes the next run find
+        // it again.
+        CHECK(QSettings().value(QStringLiteral("tools/brushTips"))
+                  .toStringList()
+                  .contains(path));
+        brushtips::reload();
+        CHECK(brushtips::remembered() == QStringList{path});
+        CHECK(brushtips::chosen() == path);
+
+        // The options bar offers Round, the remembered tip and the chooser,
+        // and opens on the tip that is in use.
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        ToolOptionsBar bar;
+        bar.startTool(brush);
+        CHECK(bar.value(QStringLiteral("tip")).toInt() == 1);
+        bool sawRound = false;
+        bool sawTip = false;
+        for (QComboBox* combo : bar.findChildren<QComboBox*>()) {
+            sawRound = sawRound || combo->findText(QStringLiteral("Round")) >= 0;
+            sawTip = sawTip || combo->findText(QStringLiteral("disc")) >= 0;
+        }
+        CHECK(sawRound);
+        CHECK(sawTip);
+
+        brush->optionChanged(QStringLiteral("tip"), 0);
+        CHECK(brushtips::chosen().isEmpty());
+        brushtips::forgetAll();
+    });
+
+    addTest("Overwrite blending replaces what is under the brush", [] {
+        // Painting over an opaque field with a soft brush: composited it stays
+        // opaque, overwritten it takes the coverage of the brush with it, so
+        // the field can be faded out to the stroke colour.
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 20);
+
+        ToolOptionsBar bar;
+        bar.startTool(brush);
+        bool sawOverwrite = false;
+        for (QComboBox* combo : bar.findChildren<QComboBox*>())
+            sawOverwrite = sawOverwrite || combo->findText(QStringLiteral("Overwrite")) >= 0;
+        CHECK(sawOverwrite);
+
+        auto normalDoc = std::make_unique<Document>(220, 120, Rgba(255, 0, 0, 255));
+        CanvasView normalView(std::move(normalDoc));
+        normalView.setTool(brush);
+        normalView.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext normalContext = normalView.makeContext();
+        drag(brush, normalContext, QPointF(40, 60), QPointF(180, 60));
+        const Rgba composited = normalView.document()->activeLayer()->image.at(110, 60);
+        CHECK(composited.a == 255);     // nothing was taken away
+        CHECK(composited.g < 255);      // and the red is still showing through
+
+        auto doc = std::make_unique<Document>(220, 120, Rgba(255, 0, 0, 255));
+        CanvasView view(std::move(doc));
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        ToolContext context = view.makeContext();
+        brush->optionChanged(QStringLiteral("blend"), int(blendModeNames().size()));
+        drag(brush, context, QPointF(40, 60), QPointF(180, 60));
+
+        const Image& image = view.document()->activeLayer()->image;
+        const Rgba middle = image.at(110, 60);
+        CHECK(middle.r == 255 && middle.g == 255 && middle.b == 255);
+        CHECK(middle.a > 100 && middle.a < 200);   // the coverage, not opacity
+        CHECK(image.at(110, 78).a < 40);           // faded right out at the rim
+        CHECK(image.at(110, 100) == Rgba(255, 0, 0, 255));   // and untouched outside
+
+        brush->optionChanged(QStringLiteral("blend"), 0);
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("the antialiasing level sets how wide the edge ramp is", [] {
+        // Level zero is what the old unchecked box did: the hardness slider is
+        // ignored and the brush covers completely. The levels above it widen
+        // the narrowest ramp an edge is allowed to come down to, and the wider
+        // that ramp the more of its coverage the rim gives up, which is the
+        // one number that counts the whole edge at once. The stroke runs on a
+        // slant so its edge meets the pixel grid at every phase; an edge laid
+        // straight along a row only ever lands one way and cannot tell a third
+        // of a pixel from half of one.
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 100);
+
+        const auto inkAt = [brush](const QVariant& level) {
+            auto doc = std::make_unique<Document>(240, 240, Rgba(0, 0, 0, 0));
+            CanvasView view(std::move(doc));
+            view.setTool(brush);
+            view.setPrimaryColor(Rgba(0, 0, 0, 255));
+            ToolContext context = view.makeContext();
+            brush->optionChanged(QStringLiteral("antialias"), level);
+            drag(brush, context, QPointF(30, 30), QPointF(210, 150));
+            const Image& image = view.document()->activeLayer()->image;
+            long long total = 0;
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x)
+                    total += image.at(x, y).a;
+            }
+            return total;
+        };
+
+        long long previous = inkAt(1);
+        for (int level = 2; level <= 4; ++level) {
+            const long long ink = inkAt(level);
+            check(ink < previous, "a higher level gives up more of the rim",
+                  __LINE__);
+            previous = ink;
+        }
+        // What the check box used to mean is still exactly what it means.
+        CHECK(inkAt(2) == inkAt(QVariant(true)));
+        CHECK(inkAt(0) == inkAt(QVariant(false)));
+
+        // And the widest ramp is a ramp where the default is still solid.
+        const auto edgeAlpha = [brush](const QVariant& level) {
+            auto doc = std::make_unique<Document>(240, 120, Rgba(0, 0, 0, 0));
+            CanvasView view(std::move(doc));
+            view.setTool(brush);
+            view.setPrimaryColor(Rgba(0, 0, 0, 255));
+            ToolContext context = view.makeContext();
+            brush->optionChanged(QStringLiteral("antialias"), level);
+            drag(brush, context, QPointF(30, 60), QPointF(210, 60));
+            return int(view.document()->activeLayer()->image.at(120, 79).a);
+        };
+        CHECK(edgeAlpha(2) == 255);
+        CHECK(edgeAlpha(4) > 16 && edgeAlpha(4) < 160);
+
+        // At level zero the hardness slider has nothing to say, so even the
+        // softest brush covers in one pass.
+        brush->optionChanged(QStringLiteral("hardness"), 1);
+        brush->optionChanged(QStringLiteral("antialias"), 0);
+        auto hardDoc = std::make_unique<Document>(240, 120, Rgba(0, 0, 0, 0));
+        CanvasView hardView(std::move(hardDoc));
+        hardView.setTool(brush);
+        hardView.setPrimaryColor(Rgba(0, 0, 0, 255));
+        ToolContext hardContext = hardView.makeContext();
+        drag(brush, hardContext, QPointF(30, 60), QPointF(210, 60));
+        CHECK(hardView.document()->activeLayer()->image.at(120, 60).a == 255);
+
+        brush->optionChanged(QStringLiteral("antialias"), 2);
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
     });
 
     addTest("the rotate zoom shortcut reaches the transform tool", [] {

@@ -2,8 +2,15 @@
 #include "tools/Tool.h"
 
 #include <cmath>
+#include <vector>
 
+#include <QComboBox>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QImage>
 #include <QKeyEvent>
+#include <QPointer>
+#include <QSettings>
 
 #include "core/ImageOps.h"
 #include "core/Parallel.h"
@@ -25,6 +32,163 @@ void clipToSelection(Mask& mask, const Document& doc, const Rect& area)
         for (int x = box.x; x < box.right(); ++x)
             line[x] *= sel[x];
     }
+}
+
+// Paint.NET's Overwrite: the stroke colour and its coverage become the pixel
+// instead of being composited over it, so a soft brush can fade whatever is
+// under it out to that colour rather than only adding to it.
+void colorReplace(Image& dst, const Mask& mask, Rgba color, const Rect& region)
+{
+    const Rect area = region.intersected(dst.rect()).intersected(mask.rect());
+    if (area.isEmpty())
+        return;
+    const float colorAlpha = color.a * (1.0f / 255.0f);
+    for (int y = area.y; y < area.bottom(); ++y) {
+        Rgba* line = dst.row(y);
+        const float* m = mask.row(y);
+        for (int x = area.x; x < area.right(); ++x) {
+            if (m[x] <= 0.0f)
+                continue;
+            line[x] = Rgba(color.r, color.g, color.b, toByte(m[x] * colorAlpha));
+        }
+    }
+}
+
+// Antialiasing used to be a yes or no switch. These are the steps that
+// replaced it, from no ramp beyond the unavoidable one to the widest ramp
+// worth having.
+const QStringList& antialiasLevelNames()
+{
+    static const QStringList names = {
+        QStringLiteral("None"), QStringLiteral("Low"), QStringLiteral("Normal"),
+        QStringLiteral("High"), QStringLiteral("Maximum"),
+    };
+    return names;
+}
+
+// The Blending box of the stroke tools: the layer blend modes, and one entry
+// past them for Overwrite, which is not a blend at all.
+const QStringList& strokeBlendNames()
+{
+    static const QStringList names = [] {
+        QStringList out = blendModeNames();
+        out.append(QStringLiteral("Overwrite"));
+        return out;
+    }();
+    return names;
+}
+
+// Tablet pressure maps straight onto the setting it drives, with a floor so
+// the lightest touch the pen reports still leaves a mark rather than nothing.
+double pressureScale(double pressure)
+{
+    return 0.08 + 0.92 * std::clamp(pressure, 0.0, 1.0);
+}
+
+// Weighted average of the last few pointer positions, the newest weighing the
+// most so the line follows the hand instead of trailing behind it. A window of
+// one point is the raw position, which is how stabilisation zero stays exactly
+// what the stroke engine used to be handed.
+class PointSmoother {
+public:
+    void setWindow(int window) { window_ = std::max(1, window); }
+
+    void reset(QPointF at)
+    {
+        points_.clear();
+        points_.push_back(at);
+    }
+
+    QPointF push(QPointF at)
+    {
+        points_.push_back(at);
+        while (int(points_.size()) > window_)
+            points_.erase(points_.begin());
+        if (window_ <= 1 || points_.size() < 2)
+            return at;
+        double x = 0.0, y = 0.0, total = 0.0;
+        for (size_t i = 0; i < points_.size(); ++i) {
+            const double weight = double(i + 1);
+            x += points_[i].x() * weight;
+            y += points_[i].y() * weight;
+            total += weight;
+        }
+        return QPointF(x / total, y / total);
+    }
+
+private:
+    std::vector<QPointF> points_;
+    int window_ = 1;
+};
+
+// Bilinear reading of a mask, zero outside it.
+float sampleMask(const Mask& mask, double x, double y)
+{
+    const int x0 = int(std::floor(x)), y0 = int(std::floor(y));
+    const float fx = float(x - x0), fy = float(y - y0);
+    const float top =
+        mask.at(x0, y0) + (mask.at(x0 + 1, y0) - mask.at(x0, y0)) * fx;
+    const float bottom =
+        mask.at(x0, y0 + 1) + (mask.at(x0 + 1, y0 + 1) - mask.at(x0, y0 + 1)) * fx;
+    return top + (bottom - top) * fy;
+}
+
+// Fits a loaded tip to the brush width and bakes the hardness into it, so the
+// stroke itself only has to stamp the result. QImage does the scaling because
+// it averages when it shrinks, and a tip file is usually far larger than the
+// brush: sampling such a tip directly came out speckled.
+Mask buildTipStamp(const Mask& source, double diameter, double hardness)
+{
+    if (source.isNull())
+        return Mask();
+    const double hard = std::clamp(hardness, 0.0, 0.999);
+    const double side = std::max(1.0, diameter);
+    const double scale = side / std::max(source.width(), source.height());
+    const int tipW = std::max(1, int(std::lround(source.width() * scale)));
+    const int tipH = std::max(1, int(std::lround(source.height() * scale)));
+
+    // Carried through a premultiplied image with the coverage in every
+    // channel, which every QImage scaling path handles the same way.
+    QImage carrier(source.width(), source.height(), QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < source.height(); ++y) {
+        const float* in = source.row(y);
+        QRgb* out = reinterpret_cast<QRgb*>(carrier.scanLine(y));
+        for (int x = 0; x < source.width(); ++x) {
+            const int v = int(std::clamp(in[x], 0.0f, 1.0f) * 255.0f + 0.5f);
+            out[x] = qRgba(v, v, v, v);
+        }
+    }
+    const QImage scaled = carrier.scaled(tipW, tipH, Qt::IgnoreAspectRatio,
+                                         Qt::SmoothTransformation);
+
+    // The stamp is square and a little larger than the brush, which leaves the
+    // blurred edge of a soft tip somewhere to fade out.
+    const int size = int(std::ceil(side)) + 4;
+    Mask stamp(size, size);
+    const int offsetX = (size - scaled.width()) / 2;
+    const int offsetY = (size - scaled.height()) / 2;
+    for (int y = 0; y < scaled.height(); ++y) {
+        const QRgb* in = reinterpret_cast<const QRgb*>(scaled.constScanLine(y));
+        float* out = stamp.row(y + offsetY);
+        for (int x = 0; x < scaled.width(); ++x)
+            out[x + offsetX] = qAlpha(in[x]) * (1.0f / 255.0f);
+    }
+
+    // Hardness fades the edge across the same band the round brush fades
+    // across, and the same density rule applies, so a soft custom tip is a
+    // haze that builds up between strokes rather than one flat coat.
+    const double blur = (1.0 - hard) * side * 0.5;
+    if (blur > 0.25)
+        stamp = ops::blurMask(stamp, blur);
+    const double density = 0.10 + 0.90 * std::min(1.0, hard / 0.35);
+    if (density < 1.0) {
+        for (int y = 0; y < stamp.height(); ++y) {
+            float* line = stamp.row(y);
+            for (int x = 0; x < stamp.width(); ++x)
+                line[x] *= float(density);
+        }
+    }
+    return stamp;
 }
 
 // ---------------------------------------------------------------- stroke base
@@ -52,8 +216,12 @@ public:
         secondary_ = event.isSecondary();
         busy_ = true;
         last_ = event.pos;
+        pressure_ = std::clamp(event.pressure, 0.0, 1.0);
+        smoother_.reset(event.pos);
+        carry_ = 0.0;
+        prepareTip();
         onStrokeStart(context, event);
-        addStroke(event.pos, event.pos);
+        addStroke(event.pos, event.pos, pressure_, pressure_);
         flush(context, stampBounds(event.pos, event.pos));
     }
 
@@ -62,15 +230,32 @@ public:
         if (!busy_ || !layer_)
             return;
         const QPointF from = last_;
-        addStroke(from, event.pos);
-        last_ = event.pos;
-        flush(context, stampBounds(from, event.pos));
+        const QPointF to = smoother_.push(event.pos);
+        const double pressure = std::clamp(event.pressure, 0.0, 1.0);
+        addStroke(from, to, pressure_, pressure);
+        last_ = to;
+        pressure_ = pressure;
+        flush(context, stampBounds(from, to));
     }
 
     void release(ToolContext& context, const ToolEvent& event) override
     {
         if (!busy_ || !layer_)
             return;
+        // Stabilisation keeps the line a little behind the pointer, so the
+        // last stretch runs to the raw release position: the stroke has to end
+        // where the pointer came up, not where the average had got to.
+        if (event.pos != last_) {
+            // A pen reports no pressure at all as it leaves the tablet, which
+            // would taper that last stretch away to nothing.
+            const double pressure = event.pressure > 0.0
+                ? std::clamp(event.pressure, 0.0, 1.0)
+                : pressure_;
+            const QPointF from = last_;
+            addStroke(from, event.pos, pressure_, pressure);
+            last_ = event.pos;
+            flush(context, stampBounds(from, event.pos));
+        }
         busy_ = false;
         const Rect area = dirty_.intersected(layer_->image.rect());
         if (!area.isEmpty()) {
@@ -104,32 +289,82 @@ public:
     bool isBusy() const override { return busy_; }
 
 protected:
+    // Antialiasing level. Zero is what the old check box did when it was
+    // unchecked: the hardness slider is ignored and the edge is as crisp as
+    // the field allows. The steps above it say how narrow a ramp the edge may
+    // come down to, which is the only part of a hard brush where antialiasing
+    // shows at all. Level two is what the checked box used to do, so the
+    // default brush is unchanged.
+    static constexpr int kAntialiasLevels = 4;
+    static constexpr int kDefaultAntialiasLevel = 2;
+    // How many positions the strongest stabilisation averages over.
+    static constexpr int kMaxSmoothing = 16;
+
     virtual double diameter() const { return width_; }
-    virtual double hardness() const { return antialias_ ? 0.72 : 1.0; }
+    virtual double hardness() const { return antialiased() ? 0.72 : 1.0; }
     virtual float strength() const { return 1.0f; }
     virtual bool wantsSinglePixel() const { return false; }
+    // The brush tip this tool paints with. Null is the built in round tip,
+    // which keeps the swept distance field to itself.
+    virtual const Mask* tipSource() const { return nullptr; }
     virtual void onStrokeStart(ToolContext&, const ToolEvent&) {}
     // Paints `coverage_` into the layer for the given rectangle, starting from
     // the untouched backup so repeated passes stay idempotent.
     virtual void applyStroke(ToolContext& context, const Rect& area) = 0;
+
+    bool antialiased() const { return antialiasLevel_ > 0; }
+
+    double edgeRamp() const
+    {
+        static constexpr double ramps[kAntialiasLevels + 1] = {0.5, 0.35, 0.5,
+                                                               0.7, 1.0};
+        return ramps[std::clamp(antialiasLevel_, 0, kAntialiasLevels)];
+    }
 
     Rgba strokeColor(const ToolContext& context) const
     {
         return secondary_ ? context.secondary : context.primary;
     }
 
-    void addStroke(QPointF from, QPointF to)
+    // Lays the stroke colour into the layer the way the Blending box asks.
+    void paintColor(Mask& mask, Rgba color, const Rect& area)
+    {
+        if (overwrite_)
+            colorReplace(layer_->image, mask, color, area);
+        else
+            ops::colorOver(layer_->image, mask, color, blend_, area);
+    }
+
+    // Both pressure mappings are off unless the user asks for them, and a
+    // mouse reports a full press, so a mouse stroke is unaffected either way.
+    double widthScale(double pressure) const
+    {
+        return pressureWidth_ ? pressureScale(pressure) : 1.0;
+    }
+
+    float amountFor(double pressure) const
+    {
+        return pressureOpacity_ ? float(strength() * pressureScale(pressure))
+                                : strength();
+    }
+
+    void addStroke(QPointF from, QPointF to, double pressureFrom, double pressureTo)
     {
         if (wantsSinglePixel()) {
             if (from == to) {
-                coverage_.setAt(int(std::floor(from.x())), int(std::floor(from.y())),
-                                1.0f);
+                maxAt(int(std::floor(from.x())), int(std::floor(from.y())),
+                      amountFor(pressureTo));
             } else {
-                drawPixelLine(from, to);
+                drawPixelLine(from, to, amountFor(pressureFrom),
+                              amountFor(pressureTo));
             }
             return;
         }
-        accumulateSegment(from, to);
+        if (!tipStamp_.isNull()) {
+            stampTipAlong(from, to, pressureFrom, pressureTo);
+            return;
+        }
+        accumulateSegment(from, to, pressureFrom, pressureTo);
     }
 
     // Coverage of the brush swept along one segment, measured as the true
@@ -148,15 +383,25 @@ protected:
     // that edge is the crescent that used to appear along fast strokes and
     // through crossings. Paint builds up between strokes instead, which is
     // where compositing already does it, and what Paint.NET does too.
-    void accumulateSegment(QPointF from, QPointF to)
+    void accumulateSegment(QPointF from, QPointF to, double pressureFrom,
+                           double pressureTo)
     {
-        const double radius = std::max(0.5, diameter() / 2.0);
+        const double full = std::max(0.5, diameter() / 2.0);
+        // Pressure narrows the brush along the segment, so the radius and the
+        // pigment are read off the distance travelled rather than fixed for
+        // the whole run. With both switches off the two ends agree and the
+        // arithmetic is the same as it ever was.
+        const double radiusFrom = std::max(0.5, full * widthScale(pressureFrom));
+        const double radiusTo = std::max(0.5, full * widthScale(pressureTo));
         const double hard = std::clamp(hardness(), 0.0, 0.999);
-        const double inner = radius * hard;
+        const float amountFrom = amountFor(pressureFrom);
+        const float amountTo = amountFor(pressureTo);
+        const bool varying = radiusFrom != radiusTo || amountFrom != amountTo;
         // Half a pixel of ramp even at maximum hardness, so edges stay
-        // antialiased instead of turning into stair steps.
-        const double falloff = std::max(radius - inner, 0.5);
-        const float amount = strength();
+        // antialiased instead of turning into stair steps. The antialiasing
+        // level widens that floor.
+        const double ramp = edgeRamp();
+        const double fallFrom = std::max(radiusFrom - radiusFrom * hard, ramp);
         // Shape of the falloff across that band. A straight ramp meets the
         // centre line at an angle and the rim at an angle, so a soft brush
         // came out as a flat grey strip with a spine down the middle rather
@@ -197,6 +442,14 @@ protected:
                     const double dx = px - abx * along;
                     const double dy = py - aby * along;
                     const double distance = std::sqrt(dx * dx + dy * dy);
+                    double radius = radiusFrom;
+                    double falloff = fallFrom;
+                    float amount = amountFrom;
+                    if (varying) {
+                        radius = radiusFrom + (radiusTo - radiusFrom) * along;
+                        falloff = std::max(radius - radius * hard, ramp);
+                        amount = amountFrom + float(along) * (amountTo - amountFrom);
+                    }
                     double across = (radius - distance) / falloff;
                     if (across <= 0.0)
                         continue;
@@ -212,16 +465,81 @@ protected:
         }, 32);
     }
 
+    // A custom tip is stamped along the segment with a gap small enough that
+    // neighbouring stamps overlap well inside their soft edges, which is what
+    // keeps the stroke from coming out as a string of beads. The distance left
+    // over carries into the next segment, so the rhythm does not restart every
+    // time the pointer reports a new position.
+    void stampTipAlong(QPointF from, QPointF to, double pressureFrom,
+                       double pressureTo)
+    {
+        // A twelfth of the width the stamps are actually being laid down at,
+        // which is a gap pressure cannot open up by thinning them.
+        const double step = std::max(0.5, diameter() * 0.08
+            * std::min(widthScale(pressureFrom), widthScale(pressureTo)));
+        const double abx = to.x() - from.x();
+        const double aby = to.y() - from.y();
+        const double length = std::hypot(abx, aby);
+        if (length < 1.0e-9) {
+            stampTip(from, pressureTo);
+            carry_ = step;
+            return;
+        }
+        double at = carry_;
+        while (at <= length) {
+            const double t = at / length;
+            stampTip(QPointF(from.x() + abx * t, from.y() + aby * t),
+                     pressureFrom + (pressureTo - pressureFrom) * t);
+            at += step;
+        }
+        carry_ = at - length;
+    }
+
+    // One stamp of the prepared tip, taken into the coverage with a maximum so
+    // one stroke still lays down one coat however much the stamps overlap. The
+    // tip is prepared once at the full brush width and pressure shrinks it
+    // here, because a smooth stamp loses nothing worth seeing when it is read
+    // at a smaller size, while preparing one per stamp would mean a blur per
+    // stamp.
+    void stampTip(QPointF at, double pressure)
+    {
+        const double scale = widthScale(pressure);
+        if (scale <= 0.0)
+            return;
+        const double side = tipStamp_.width() * scale;
+        const float amount = amountFor(pressure);
+        const double left = at.x() - side / 2.0;
+        const double top = at.y() - side / 2.0;
+        const int span = int(std::ceil(side)) + 2;
+        const Rect box = Rect(int(std::floor(left)), int(std::floor(top)), span, span)
+                             .intersected(coverage_.rect());
+        if (box.isEmpty())
+            return;
+        for (int y = box.y; y < box.bottom(); ++y) {
+            float* line = coverage_.row(y);
+            const double v = (y + 0.5 - top) / scale - 0.5;
+            for (int x = box.x; x < box.right(); ++x) {
+                const double u = (x + 0.5 - left) / scale - 0.5;
+                const float value = sampleMask(tipStamp_, u, v) * amount;
+                if (value > line[x])
+                    line[x] = value;
+            }
+        }
+    }
+
     // Bresenham, so the pencil stays exactly one pixel wide and aliased.
-    void drawPixelLine(QPointF from, QPointF to)
+    void drawPixelLine(QPointF from, QPointF to, float amountFrom, float amountTo)
     {
         int x0 = int(std::floor(from.x())), y0 = int(std::floor(from.y()));
         const int x1 = int(std::floor(to.x())), y1 = int(std::floor(to.y()));
         const int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0);
         const int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+        const int span = std::max(dx, -dy);
         int error = dx + dy;
+        int step = 0;
         while (true) {
-            coverage_.setAt(x0, y0, 1.0f);
+            const float t = span > 0 ? float(step) / float(span) : 1.0f;
+            maxAt(x0, y0, amountFrom + (amountTo - amountFrom) * t);
             if (x0 == x1 && y0 == y1)
                 break;
             const int doubled = 2 * error;
@@ -233,12 +551,17 @@ protected:
                 error += dx;
                 y0 += sy;
             }
+            ++step;
         }
     }
 
     Rect stampBounds(QPointF a, QPointF b) const
     {
-        const double pad = wantsSinglePixel() ? 2.0 : diameter() / 2.0 + 2.0;
+        // A custom tip's stamp is a shade wider than the brush so its soft
+        // edge has room, and sampling it reaches half a pixel wider again.
+        const double pad = wantsSinglePixel()
+            ? 2.0
+            : diameter() / 2.0 + (tipStamp_.isNull() ? 2.0 : 4.0);
         const int x0 = int(std::floor(std::min(a.x(), b.x()) - pad));
         const int y0 = int(std::floor(std::min(a.y(), b.y()) - pad));
         const int x1 = int(std::ceil(std::max(a.x(), b.x()) + pad));
@@ -264,12 +587,39 @@ protected:
                     int(std::lround(width_)), QStringLiteral(" px"));
         bar.addPercent(QStringLiteral("opacity"), QStringLiteral("Opacity"),
                        int(std::lround(opacity_ * 100.0)));
-        bar.addCheck(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
-                     antialias_);
+        bar.addCombo(QStringLiteral("antialias"), QStringLiteral("Antialiasing"),
+                     antialiasLevelNames(), antialiasLevel_);
         if (withBlendMode) {
             bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                         blendModeNames(), int(blend_));
+                         strokeBlendNames(),
+                         overwrite_ ? int(blendModeNames().size()) : int(blend_));
         }
+    }
+
+    // The two pressure switches, both off by default so a mouse behaves as it
+    // always has.
+    void buildPressureOptions(ToolOptionsBar& bar, bool withWidth = true)
+    {
+        bar.addSeparator();
+        bar.addLabel(QStringLiteral("Pressure"));
+        if (withWidth) {
+            bar.addTextToggle(QStringLiteral("pressureWidth"),
+                              QStringLiteral("Width"),
+                              QStringLiteral("Tablet pressure sets how wide the "
+                                             "brush is"),
+                              pressureWidth_);
+        }
+        bar.addTextToggle(QStringLiteral("pressureOpacity"),
+                          QStringLiteral("Opacity"),
+                          QStringLiteral("Tablet pressure sets how opaque the "
+                                         "stroke is"),
+                          pressureOpacity_);
+    }
+
+    void buildStabiliseOption(ToolOptionsBar& bar)
+    {
+        bar.addPercent(QStringLiteral("stabilise"), QStringLiteral("Stabilisation"),
+                       stabilisation_, 0, 100);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -278,11 +628,41 @@ protected:
             width_ = std::max(1, value.toInt());
         else if (key == QLatin1String("opacity"))
             opacity_ = std::clamp(value.toInt(), 1, 100) / 100.0;
-        else if (key == QLatin1String("antialias"))
-            antialias_ = value.toBool();
-        else if (key == QLatin1String("blend"))
-            blend_ = static_cast<BlendMode>(std::clamp(value.toInt(), 0,
-                                                      int(BlendMode::Count) - 1));
+        else if (key == QLatin1String("antialias")) {
+            // This was a check box, so a plain yes or no still means off or
+            // the level the box used to stand for.
+            antialiasLevel_ = value.typeId() == QMetaType::Bool
+                ? (value.toBool() ? kDefaultAntialiasLevel : 0)
+                : std::clamp(value.toInt(), 0, kAntialiasLevels);
+        } else if (key == QLatin1String("blend")) {
+            // One entry past the blend modes is Overwrite, which is not a
+            // blend mode: it replaces what is under the brush.
+            const int modes = int(blendModeNames().size());
+            const int index = std::clamp(value.toInt(), 0, modes);
+            overwrite_ = index == modes;
+            if (!overwrite_)
+                blend_ = static_cast<BlendMode>(index);
+        } else if (key == QLatin1String("pressureWidth"))
+            pressureWidth_ = value.toBool();
+        else if (key == QLatin1String("pressureOpacity"))
+            pressureOpacity_ = value.toBool();
+        else if (key == QLatin1String("stabilise"))
+            setStabilisation(value.toInt());
+    }
+
+    void setStabilisation(int amount)
+    {
+        stabilisation_ = std::clamp(amount, 0, 100);
+        smoother_.setWindow(
+            1 + int(std::lround(stabilisation_ / 100.0 * (kMaxSmoothing - 1))));
+    }
+
+    void prepareTip()
+    {
+        const Mask* source = tipSource();
+        tipStamp_ = source && !source->isNull()
+            ? buildTipStamp(*source, diameter(), hardness())
+            : Mask();
     }
 
     Mask& coverage() { return coverage_; }
@@ -291,17 +671,31 @@ protected:
 
     double width_ = 12.0;
     double opacity_ = 1.0;
-    bool antialias_ = true;
+    int antialiasLevel_ = kDefaultAntialiasLevel;
     BlendMode blend_ = BlendMode::Normal;
+    bool overwrite_ = false;
     bool secondary_ = false;
+    bool pressureWidth_ = false;
+    bool pressureOpacity_ = false;
+    int stabilisation_ = 0;
 
 private:
+    void maxAt(int x, int y, float value)
+    {
+        if (value > coverage_.at(x, y))
+            coverage_.setAt(x, y, value);
+    }
+
     Layer* layer_ = nullptr;
     int layerUid_ = 0;
     Image backup_;
     Mask coverage_;
+    Mask tipStamp_;
+    PointSmoother smoother_;
     QPointF last_;
     Rect dirty_;
+    double pressure_ = 1.0;
+    double carry_ = 0.0;
     bool busy_ = false;
 };
 
@@ -319,24 +713,47 @@ public:
 
     void buildOptions(ToolOptionsBar& bar) override
     {
+        syncTip();
         buildCommonOptions(bar);
         bar.addSeparator();
         bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
                        int(std::lround(hardness_ * 100.0)));
+        buildStabiliseOption(bar);
+        bar.addSeparator();
+        tipCombo_ = bar.addCombo(QStringLiteral("tip"), QStringLiteral("Tip"),
+                                 tipItems(), tipIndex());
+        buildPressureOptions(bar);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
     {
         if (key == QLatin1String("hardness"))
             hardness_ = std::clamp(value.toInt(), 1, 100) / 100.0;
+        else if (key == QLatin1String("tip"))
+            chooseTip(value.toInt());
+        else if (key == QLatin1String("tipFile"))
+            // A path rather than a position in the box, which is how a tip can
+            // be set without the box being there to pick it from.
+            loadTip(value.toString());
         else
             StrokeTool::optionChanged(key, value);
+    }
+
+    void press(ToolContext& context, const ToolEvent& event) override
+    {
+        syncTip();
+        StrokeTool::press(context, event);
     }
 
 protected:
     double hardness() const override
     {
-        return antialias_ ? std::clamp(hardness_, 0.02, 0.995) : 1.0;
+        return antialiased() ? std::clamp(hardness_, 0.02, 0.995) : 1.0;
+    }
+
+    const Mask* tipSource() const override
+    {
+        return tip_.isNull() ? nullptr : &tip_;
     }
 
     void applyStroke(ToolContext& context, const Rect& area) override
@@ -345,11 +762,81 @@ protected:
         clipToSelection(mask, *context.doc, area);
         Rgba color = strokeColor(context);
         color.a = toByte(color.a * (1.0f / 255.0f) * float(opacity_));
-        ops::colorOver(layer()->image, mask, color, blend_, area);
+        paintColor(mask, color, area);
     }
 
 private:
+    // Round first, then the remembered tips, then the way to add one.
+    QStringList tipItems() const
+    {
+        QStringList items{QStringLiteral("Round")};
+        for (const QString& path : brushtips::remembered())
+            items.append(QFileInfo(path).completeBaseName());
+        items.append(QStringLiteral("Load from file..."));
+        return items;
+    }
+
+    int tipIndex() const
+    {
+        const int found = int(brushtips::remembered().indexOf(tipPath_));
+        return found < 0 ? 0 : found + 1;
+    }
+
+    void chooseTip(int index)
+    {
+        const QStringList tips = brushtips::remembered();
+        if (index <= 0)
+            brushtips::choose(QString());
+        else if (index <= tips.size())
+            brushtips::remember(tips.at(index - 1));
+        else
+            browseForTip();
+        syncTip();
+    }
+
+    void loadTip(const QString& path)
+    {
+        if (!path.isEmpty() && brushtips::remember(path))
+            syncTip();
+    }
+
+    // The last entry of the box opens a file chooser, and a tip picked there
+    // joins the list so it can be chosen again without the chooser.
+    void browseForTip()
+    {
+        const QString path = QFileDialog::getOpenFileName(
+            tipCombo_ ? tipCombo_->window() : nullptr,
+            QStringLiteral("Choose a brush tip"), QString(),
+            QStringLiteral("Brush tips (*.png *.PNG)"));
+        const int before = int(brushtips::remembered().size());
+        if (!path.isEmpty())
+            loadTip(path);
+        if (!tipCombo_)
+            return;
+        if (int(brushtips::remembered().size()) > before)
+            tipCombo_->insertItem(before + 1, QFileInfo(tipPath_).completeBaseName());
+        // Whether or not a tip was picked, the box has to end up showing the
+        // tip actually in use rather than the chooser entry.
+        tipCombo_->setCurrentIndex(tipIndex());
+    }
+
+    // The settings hold which tip is in use, so this is also how a fresh run
+    // starts out with the tip the last one ended with. A file that has gone
+    // missing leaves the path in place and the stamp empty, which is the round
+    // tip, rather than being read again on every stroke.
+    void syncTip()
+    {
+        const QString path = brushtips::chosen();
+        if (path == tipPath_)
+            return;
+        tipPath_ = path;
+        tip_ = path.isEmpty() ? Mask() : brushtips::load(path);
+    }
+
     double hardness_ = 0.75;
+    Mask tip_;
+    QString tipPath_;
+    QPointer<QComboBox> tipCombo_;
 };
 
 // ---------------------------------------------------------------- pencil
@@ -369,7 +856,12 @@ public:
     void buildOptions(ToolOptionsBar& bar) override
     {
         bar.addCombo(QStringLiteral("blend"), QStringLiteral("Blending"),
-                     blendModeNames(), int(blend_));
+                     strokeBlendNames(),
+                     overwrite_ ? int(blendModeNames().size()) : int(blend_));
+        buildStabiliseOption(bar);
+        // The nib is a single pixel, so there is no width for pressure to
+        // scale; it only has the pigment to work on.
+        buildPressureOptions(bar, false);
     }
 
 protected:
@@ -379,7 +871,7 @@ protected:
     {
         Mask mask = coverage();
         clipToSelection(mask, *context.doc, area);
-        ops::colorOver(layer()->image, mask, strokeColor(context), blend_, area);
+        paintColor(mask, strokeColor(context), area);
     }
 };
 
@@ -404,6 +896,8 @@ public:
         bar.addSeparator();
         bar.addPercent(QStringLiteral("hardness"), QStringLiteral("Hardness"),
                        int(std::lround(hardness_ * 100.0)));
+        buildStabiliseOption(bar);
+        buildPressureOptions(bar);
     }
 
     void optionChanged(const QString& key, const QVariant& value) override
@@ -417,7 +911,7 @@ public:
 protected:
     double hardness() const override
     {
-        return antialias_ ? std::clamp(hardness_, 0.02, 0.995) : 1.0;
+        return antialiased() ? std::clamp(hardness_, 0.02, 0.995) : 1.0;
     }
 
     void applyStroke(ToolContext& context, const Rect& area) override
@@ -927,6 +1421,121 @@ private:
 };
 
 } // namespace
+
+// ---------------------------------------------------------------- brush tips
+
+namespace brushtips {
+
+namespace {
+
+constexpr char kListKey[] = "tools/brushTips";
+constexpr char kChosenKey[] = "tools/brushTip";
+
+struct Library {
+    QStringList tips;
+    QString chosen;
+    bool loaded = false;
+};
+
+Library& library()
+{
+    static Library one;
+    if (!one.loaded) {
+        one.loaded = true;
+        QSettings settings;
+        one.tips = settings.value(QLatin1String(kListKey)).toStringList();
+        one.chosen = settings.value(QLatin1String(kChosenKey)).toString();
+    }
+    return one;
+}
+
+void save()
+{
+    QSettings settings;
+    settings.setValue(QLatin1String(kListKey), library().tips);
+    settings.setValue(QLatin1String(kChosenKey), library().chosen);
+}
+
+} // namespace
+
+QStringList remembered() { return library().tips; }
+
+QString chosen() { return library().chosen; }
+
+bool remember(const QString& path)
+{
+    if (load(path).isNull())
+        return false;
+    Library& lib = library();
+    if (!lib.tips.contains(path))
+        lib.tips.append(path);
+    lib.chosen = path;
+    save();
+    return true;
+}
+
+void choose(const QString& path)
+{
+    library().chosen = path;
+    save();
+}
+
+void forgetAll()
+{
+    Library& lib = library();
+    lib.tips.clear();
+    lib.chosen.clear();
+    save();
+}
+
+void reload()
+{
+    library().loaded = false;
+    library();
+}
+
+// A tip is the alpha channel where the file has one that varies, and the
+// luminance otherwise, so a cut out shape and a plain grey stamp both work.
+// What comes out is trimmed to what it actually marks: a tip drawn in the
+// middle of a large empty canvas would otherwise scale down to a dot.
+Mask load(const QString& path)
+{
+    QImage image(path);
+    if (image.isNull())
+        return Mask();
+    const bool hadAlpha = image.hasAlphaChannel();
+    image = image.convertToFormat(QImage::Format_ARGB32);
+    bool varies = false;
+    for (int y = 0; hadAlpha && !varies && y < image.height(); ++y) {
+        const QRgb* line = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(line[x]) != 255) {
+                varies = true;
+                break;
+            }
+        }
+    }
+
+    Mask mask(image.width(), image.height());
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb* line = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+        float* out = mask.row(y);
+        for (int x = 0; x < image.width(); ++x)
+            out[x] = (varies ? qAlpha(line[x]) : qGray(line[x])) * (1.0f / 255.0f);
+    }
+
+    const Rect bounds = mask.boundsAbove(0.004f);
+    if (bounds.isEmpty())
+        return Mask();
+    Mask trimmed(bounds.w, bounds.h);
+    for (int y = 0; y < bounds.h; ++y) {
+        const float* in = mask.row(bounds.y + y) + bounds.x;
+        std::copy(in, in + bounds.w, trimmed.row(y));
+    }
+    return trimmed;
+}
+
+} // namespace brushtips
 
 void registerPaintTools(ToolRegistry& registry)
 {
