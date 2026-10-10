@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 
 #include "core/ImageOps.h"
+#include "core/Parallel.h"
 
 namespace tessel {
 
@@ -47,14 +48,12 @@ public:
         layerUid_ = layer->uid();
         backup_ = layer->image;
         coverage_ = Mask(layer->width(), layer->height());
-        kernel_ = buildKernel();
-        carry_ = 0.0;
         dirty_ = Rect();
         secondary_ = event.isSecondary();
         busy_ = true;
         last_ = event.pos;
         onStrokeStart(context, event);
-        stamp(event.pos);
+        addStroke(event.pos, event.pos);
         flush(context, stampBounds(event.pos, event.pos));
     }
 
@@ -63,7 +62,7 @@ public:
         if (!busy_ || !layer_)
             return;
         const QPointF from = last_;
-        walk(from, event.pos);
+        addStroke(from, event.pos);
         last_ = event.pos;
         flush(context, stampBounds(from, event.pos));
     }
@@ -107,7 +106,6 @@ public:
 protected:
     virtual double diameter() const { return width_; }
     virtual double hardness() const { return antialias_ ? 0.72 : 1.0; }
-    virtual double spacing() const { return 0.15; }
     virtual float strength() const { return 1.0f; }
     virtual bool wantsSinglePixel() const { return false; }
     virtual void onStrokeStart(ToolContext&, const ToolEvent&) {}
@@ -120,41 +118,74 @@ protected:
         return secondary_ ? context.secondary : context.primary;
     }
 
-    Mask buildKernel() const
-    {
-        if (wantsSinglePixel())
-            return Mask(1, 1, 1.0f);
-        return ops::brushKernel(diameter(), hardness());
-    }
-
-    void stamp(QPointF at)
+    void addStroke(QPointF from, QPointF to)
     {
         if (wantsSinglePixel()) {
-            coverage_.setAt(int(std::floor(at.x())), int(std::floor(at.y())), 1.0f);
+            if (from == to) {
+                coverage_.setAt(int(std::floor(from.x())), int(std::floor(from.y())),
+                                1.0f);
+            } else {
+                drawPixelLine(from, to);
+            }
             return;
         }
-        ops::stampMax(coverage_, kernel_, at.x(), at.y(), strength());
+        accumulateSegment(from, to);
     }
 
-    void walk(QPointF from, QPointF to)
+    // Coverage of the brush swept along one segment, measured as the true
+    // distance from each pixel to that segment.
+    //
+    // This used to stamp a dab every few pixels and take the maximum. The
+    // maximum of two offset cones dips between their centres, so a soft brush
+    // laid down a visible string of beads: at 15 percent spacing a 40 pixel
+    // brush rippled between full strength and about 85 percent along its own
+    // centre line. A swept distance field has no such ripple, and because each
+    // segment's field is exact and the segments share endpoints, taking the
+    // maximum across them stays smooth at the joints too.
+    void accumulateSegment(QPointF from, QPointF to)
     {
-        if (wantsSinglePixel()) {
-            drawPixelLine(from, to);
+        const double radius = std::max(0.5, diameter() / 2.0);
+        const double hard = std::clamp(hardness(), 0.0, 0.999);
+        const double inner = radius * hard;
+        // Half a pixel of ramp even at maximum hardness, so edges stay
+        // antialiased instead of turning into stair steps.
+        const double falloff = std::max(radius - inner, 0.5);
+        const float amount = strength();
+
+        const Rect box = stampBounds(from, to).intersected(coverage_.rect());
+        if (box.isEmpty())
             return;
-        }
-        const double dx = to.x() - from.x();
-        const double dy = to.y() - from.y();
-        const double length = std::hypot(dx, dy);
-        if (length < 1.0e-6)
-            return;
-        const double step = std::max(0.65, diameter() * spacing());
-        double pos = step - carry_;
-        while (pos <= length) {
-            const double t = pos / length;
-            stamp(QPointF(from.x() + dx * t, from.y() + dy * t));
-            pos += step;
-        }
-        carry_ = std::fmod(length - (pos - step), step);
+
+        const double abx = to.x() - from.x();
+        const double aby = to.y() - from.y();
+        const double lengthSq = abx * abx + aby * aby;
+
+        parallelFor(box.y, box.bottom(), [&](int y0, int y1) {
+            for (int y = y0; y < y1; ++y) {
+                float* line = coverage_.row(y);
+                for (int x = box.x; x < box.right(); ++x) {
+                    const double px = x + 0.5 - from.x();
+                    const double py = y + 0.5 - from.y();
+                    double along = lengthSq > 1.0e-12
+                        ? (px * abx + py * aby) / lengthSq
+                        : 0.0;
+                    along = std::clamp(along, 0.0, 1.0);
+                    const double dx = px - abx * along;
+                    const double dy = py - aby * along;
+                    const double distance = std::sqrt(dx * dx + dy * dy);
+                    double coverage = (radius - distance) / falloff;
+                    if (coverage <= 0.0)
+                        continue;
+                    coverage = std::min(1.0, coverage);
+                    // Smoothstep removes the crease a linear ramp leaves where
+                    // it reaches full strength.
+                    const float value =
+                        float(coverage * coverage * (3.0 - 2.0 * coverage)) * amount;
+                    if (value > line[x])
+                        line[x] = value;
+                }
+            }
+        }, 32);
     }
 
     // Bresenham, so the pencil stays exactly one pixel wide and aliased.
@@ -245,8 +276,6 @@ private:
     int layerUid_ = 0;
     Image backup_;
     Mask coverage_;
-    Mask kernel_;
-    double carry_ = 0.0;
     QPointF last_;
     Rect dirty_;
     bool busy_ = false;

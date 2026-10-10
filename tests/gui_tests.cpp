@@ -534,6 +534,84 @@ int main(int argc, char** argv)
         CHECK(std::abs((before.y() - after.y()) + 25) <= 2);
     });
 
+    addTest("soft brush lays down an even stroke", [] {
+        // Dabs spaced along the path and combined with a maximum used to leave
+        // a visible ripple on the centre line of a soft brush. The coverage
+        // along the middle of a straight stroke must now be flat.
+        auto doc = std::make_unique<Document>(220, 100, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"));
+        CHECK(brush != nullptr);
+        view.setTool(brush);
+        view.setPrimaryColor(Rgba(255, 255, 255, 255));
+        // A wide, very soft brush, which is the case that beaded worst.
+        brush->optionChanged(QStringLiteral("width"), 40);
+        brush->optionChanged(QStringLiteral("hardness"), 5);
+
+        ToolContext context = view.makeContext();
+        drag(brush, context, QPointF(20, 50), QPointF(200, 50));
+
+        const Image& result = view.document()->activeLayer()->image;
+        int lowest = 255, highest = 0;
+        for (int x = 40; x <= 180; ++x) {
+            const int alpha = result.at(x, 50).a;
+            lowest = std::min(lowest, alpha);
+            highest = std::max(highest, alpha);
+        }
+        CHECK(lowest >= 250);          // the core of the stroke is solid
+        CHECK(highest - lowest <= 2);  // and has no ripple along its length
+        // The edge must still be soft: alpha falls away from the centre line.
+        CHECK(result.at(110, 50).a > result.at(110, 62).a);
+        CHECK(result.at(110, 62).a > result.at(110, 69).a);
+        // Put the options back so later tests see the defaults.
+        brush->optionChanged(QStringLiteral("width"), 12);
+        brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("escape clears the selection", [] {
+        auto doc = std::make_unique<Document>(120, 90);
+        CanvasView view(std::move(doc));
+        view.resize(400, 300);
+        view.show();
+        QApplication::processEvents();
+        view.document()->selection().selectAll();
+        CHECK(view.document()->selection().isActive());
+
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&view, &escape);
+        CHECK(!view.document()->selection().isActive());
+        // And it is undoable, rather than quietly throwing the selection away.
+        CHECK(view.history()->canUndo());
+        view.history()->undo();
+        CHECK(view.document()->selection().isActive());
+    });
+
+    addTest("escape still cancels work in progress first", [] {
+        auto doc = std::make_unique<Document>(120, 90, Rgba(0, 0, 0, 0));
+        CanvasView view(std::move(doc));
+        view.resize(400, 300);
+        view.show();
+        QApplication::processEvents();
+        view.document()->selection().selectAll();
+
+        Tool* shapes = ToolRegistry::instance().byId(QStringLiteral("shapes"));
+        view.setTool(shapes);
+        ToolContext context = view.makeContext();
+        shapes->press(context, makeEvent(QPointF(20, 20)));
+        ToolEvent move = makeEvent(QPointF(80, 70));
+        move.button = Qt::NoButton;
+        shapes->move(context, move);
+        CHECK(shapes->isBusy());
+
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&view, &escape);
+        // The shape is abandoned, but the selection survives this first press.
+        CHECK(!shapes->isBusy());
+        CHECK(view.document()->selection().isActive());
+        QApplication::sendEvent(&view, &escape);
+        CHECK(!view.document()->selection().isActive());
+    });
+
     // ------------------------------------------------------------ main window
     addTest("main window starts and holds a document", [] {
         MainWindow window;

@@ -613,13 +613,35 @@ void CanvasView::keyPressEvent(QKeyEvent* event)
         event->accept();
         return;
     }
-    if (tool_) {
-        ToolContext context = makeContext();
-        if (event->key() == Qt::Key_Escape) {
-            tool_->cancel(context);
+    // Escape and Enter work in layers: they first finish or abandon whatever
+    // the tool has in progress, and only once there is nothing in progress do
+    // they act on the selection. Escape used to stop at the first layer, so it
+    // appeared to do nothing at all whenever a selection was simply sitting
+    // there.
+    if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Return
+        || event->key() == Qt::Key_Enter) {
+        const bool abandon = event->key() == Qt::Key_Escape;
+        if (tool_ && tool_->isBusy()) {
+            ToolContext context = makeContext();
+            if (abandon)
+                tool_->cancel(context);
+            else
+                tool_->commit(context);
             event->accept();
             return;
         }
+        if (doc_->selection().isActive()) {
+            recordSelectionEdit(*doc_, *history_, QStringLiteral("Deselect"),
+                                [this] { doc_->selection().clear(); });
+            viewport()->update();
+            emit documentChanged();
+            event->accept();
+            return;
+        }
+    }
+
+    if (tool_) {
+        ToolContext context = makeContext();
         if (tool_->keyPress(context, event)) {
             event->accept();
             return;
