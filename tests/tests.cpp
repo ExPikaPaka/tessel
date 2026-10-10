@@ -19,6 +19,7 @@
 #include <QTransform>
 
 #include "core/Blend.h"
+#include "core/Parallel.h"
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/Image.h"
@@ -143,6 +144,42 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
 
     // ------------------------------------------------------------ blending
+    addTest("a parallel pass visits every row, batch after batch", [] {
+        // The pool keeps its workers between calls, so one batch has to be
+        // completely over before the next is set up. A worker still inside the
+        // previous batch would take an index from the new one while holding a
+        // pointer to the old batch's lambda, which by then is a destroyed
+        // stack object: a crash, and a row of the new batch left undone.
+        // This does not reproduce that race on demand, it was found by running
+        // the whole interface suite in a loop; what it does is hold the pool
+        // to the invariant that broke, over thousands of back to back passes
+        // cut as finely as the pool allows.
+        bool everyRowOnce = true;
+        bool rangesDisjoint = true;
+        for (int round = 0; round < 3000 && everyRowOnce; ++round) {
+            const int rows = 1 + (round % 97);
+            std::vector<int> seen(size_t(rows), 0);
+            parallelFor(0, rows, [&](int lo, int hi) {
+                if (lo < 0 || hi > rows || lo >= hi)
+                    rangesDisjoint = false;
+                for (int y = lo; y < hi; ++y)
+                    ++seen[size_t(y)];
+                // A little work in each chunk, so the workers are really in
+                // the pass when the caller comes out of it.
+                volatile double sink = 0.0;
+                for (int i = 0; i < 400; ++i)
+                    sink += double(i) * 0.5;
+                (void)sink;
+            }, 1);
+            for (int y = 0; y < rows; ++y) {
+                if (seen[size_t(y)] != 1)
+                    everyRowOnce = false;
+            }
+        }
+        CHECK(everyRowOnce);
+        CHECK(rangesDisjoint);
+    });
+
     addTest("blend modes", [] {
         const Rgba base(200, 100, 50, 255);
         const Rgba top(50, 50, 50, 255);

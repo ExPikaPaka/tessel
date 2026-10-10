@@ -59,13 +59,19 @@ public:
         }
         wake_.notify_all();
 
-        // Help out, then wait for whatever the workers have not finished.
-        drain();
-        std::unique_lock<std::mutex> lock(doneMutex_);
-        done_.wait(lock, [this] {
-            return remaining_.load(std::memory_order_acquire) == 0;
+        // Help out, then wait for the batch to be over.
+        drain(&job);
+        // Waiting for the chunks to be finished is not enough. A worker that
+        // has just run the last chunk is still inside drain(), and if the next
+        // batch were set up at that moment it would take an index from the new
+        // batch while still holding a pointer to this batch's job, which by
+        // then is a destroyed stack object. That is a jump into freed memory,
+        // and it also leaves a chunk of the new batch unrun. So the batch is
+        // not over until every worker has left drain().
+        std::unique_lock<std::mutex> lock(mutex_);
+        idle_.wait(lock, [this] {
+            return remaining_.load(std::memory_order_acquire) == 0 && inDrain_ == 0;
         });
-        std::lock_guard<std::mutex> lock2(mutex_);
         job_ = nullptr;
     }
 
@@ -94,9 +100,10 @@ private:
         }
     }
 
-    void drain()
+    // The job is passed in rather than read from the member, so that a thread
+    // can only ever run the batch it was woken for.
+    void drain(const std::function<void(int)>* job)
     {
-        const std::function<void(int)>* job = job_;
         if (!job)
             return;
         while (true) {
@@ -105,8 +112,8 @@ private:
                 break;
             (*job)(index);
             if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                std::lock_guard<std::mutex> lock(doneMutex_);
-                done_.notify_all();
+                std::lock_guard<std::mutex> lock(mutex_);
+                idle_.notify_all();
             }
         }
     }
@@ -120,8 +127,19 @@ private:
             if (stopping_)
                 return;
             seen = generation_;
+            // Taken under the lock, with the count of who is working, so that
+            // run() can tell when the last of us is out again.
+            const std::function<void(int)>* job = job_;
+            ++inDrain_;
             lock.unlock();
-            drain();
+
+            drain(job);
+
+            lock.lock();
+            const bool last = (--inDrain_ == 0);
+            lock.unlock();
+            if (last)
+                idle_.notify_all();
         }
     }
 
@@ -137,9 +155,9 @@ private:
     std::atomic<int> next_{0};
     std::atomic<int> remaining_{0};
     int total_ = 0;
+    int inDrain_ = 0;
 
-    std::mutex doneMutex_;
-    std::condition_variable done_;
+    std::condition_variable idle_;
 };
 
 } // namespace detail
