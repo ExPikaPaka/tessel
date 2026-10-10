@@ -20,12 +20,16 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBrowser>
 #include <QThread>
 #include <QTimer>
 
 #include "core/ImageOps.h"
+#include "effects/EffectPlugin.h"
+#include "effects/EffectPluginHost.h"
 #include "core/Io.h"
 #include "core/Palette.h"
 #include "tools/Tool.h"
@@ -68,6 +72,58 @@ void addTest(const char* name, std::function<void()> fn)
 bool nearly(double a, double b, double tolerance = 1e-6)
 {
     return std::abs(a - b) <= tolerance;
+}
+
+// Stands in for a loaded plugin. The window cannot tell the difference: it
+// reads the registry and the load report, not the libraries.
+class GuiFakePlugin : public EffectPlugin {
+public:
+    int interfaceVersion() const override { return kEffectPluginVersion; }
+    QString name() const override { return QStringLiteral("Gui Fake Plugin"); }
+    QString version() const override { return QStringLiteral("1.0"); }
+
+    void registerEffects(EffectRegistry& registry) override
+    {
+        fx::add(registry, "gui_fake_effect", "Gui Fake Effect", "Gui Plugin",
+                {ParamSpec::intParam(QStringLiteral("amount"), QStringLiteral("Amount"),
+                                     0, 255, 10)},
+                [](const EffectContext& context, const ParamValues& values) {
+                    const int amount = values.intValue(QStringLiteral("amount"), 10);
+                    return fx::mapPixels(context, [amount](Rgba c, int, int) {
+                        return Rgba(uint8_t(amount), c.g, c.b, c.a);
+                    });
+                });
+    }
+};
+
+// About the Plugins is modal, so its text has to be collected from a timer
+// inside its own nested event loop, the same way the selection dialogs are.
+void collectPluginsDialog(const std::shared_ptr<QString>& into)
+{
+    auto* timer = new QTimer(qApp);
+    auto attempts = std::make_shared<int>(0);
+    timer->setInterval(5);
+    QObject::connect(timer, &QTimer::timeout, timer, [timer, into, attempts] {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* dialog = qobject_cast<QDialog*>(widget);
+            if (!dialog || !dialog->isVisible()
+                || dialog->objectName() != QStringLiteral("pluginsDialog"))
+                continue;
+            if (auto* text = dialog->findChild<QTextBrowser*>(
+                    QStringLiteral("pluginsText")))
+                *into = text->toPlainText();
+            dialog->accept();
+            timer->stop();
+            timer->deleteLater();
+            return;
+        }
+        if (++*attempts > 200) {
+            timer->stop();
+            timer->deleteLater();
+            QApplication::exit(1);
+        }
+    });
+    timer->start();
 }
 
 ToolEvent makeEvent(QPointF pos, Qt::MouseButton button = Qt::LeftButton,
@@ -1859,6 +1915,96 @@ int main(int argc, char** argv)
         canvas.setDisplayedWidth(10.16); // four inches
         CHECK(canvas.newWidth() == 1200 && canvas.newHeight() == 600);
         CHECK(nearly(canvas.newResolution(), 300.0));
+    });
+
+    // ------------------------------------------------------------ plugins
+    addTest("plugin effects reach the Effects menu", [] {
+        plugins::LoadReport& report = plugins::report();
+        const plugins::LoadReport saved = report;
+
+        // One plugin that registered an effect, and one file that did not
+        // load, which together are everything the window has to report.
+        GuiFakePlugin plugin;
+        CHECK(plugins::acceptPlugin(&plugin, QStringLiteral("/plugins/gui_fake.so"),
+                                    EffectRegistry::instance(), report));
+        report.directories.append(QStringLiteral("/plugins"));
+        report.failed.push_back({QStringLiteral("/plugins/wrong.so"),
+                                 QStringLiteral("built for another version")});
+
+        MainWindow window;
+        window.newDocument(32, 24, Rgba(255, 255, 255, 255));
+
+        // The declared category becomes a submenu of its own, after the built
+        // in ones, holding the effect with the ellipsis that says it has a
+        // generated dialog.
+        QMenu* submenu = nullptr;
+        for (QMenu* candidate : window.findChildren<QMenu*>()) {
+            if (candidate->title() == QStringLiteral("Gui Plugin"))
+                submenu = candidate;
+        }
+        CHECK(submenu != nullptr);
+        QAction* effectAction = nullptr;
+        if (submenu) {
+            for (QAction* candidate : submenu->actions()) {
+                if (candidate->text() == QStringLiteral("Gui Fake Effect..."))
+                    effectAction = candidate;
+            }
+        }
+        CHECK(effectAction != nullptr);
+
+        // It applies like any other effect, through the same dialog path.
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Effect* effect = EffectRegistry::instance().byId(
+            QStringLiteral("gui_fake_effect"));
+        CHECK(effect != nullptr);
+        if (effect) {
+            EffectDialog::applyDirect(effect, view->document(), view->history(),
+                                      ParamValues::defaults(effect->params()),
+                                      Rgba(0, 0, 0, 255), Rgba(255, 255, 255, 255));
+            CHECK(view->document()->activeLayer()->image.at(4, 4).r == 10);
+        }
+
+#ifdef TESSEL_EXAMPLE_PLUGIN_FILE
+        // The example plugin was built, so the window loaded it for real from
+        // the plugins directory beside this binary before it made its menus.
+        bool exampleLoaded = false;
+        for (const plugins::PluginInfo& info : report.loaded) {
+            if (info.name == QStringLiteral("Scanlines Example"))
+                exampleLoaded = true;
+        }
+        CHECK(exampleLoaded);
+        CHECK(EffectRegistry::instance().byId(QStringLiteral("example_scanlines"))
+              != nullptr);
+        bool exampleSubmenu = false;
+        for (QMenu* candidate : window.findChildren<QMenu*>()) {
+            if (candidate->title() == QStringLiteral("Examples"))
+                exampleSubmenu = true;
+        }
+        CHECK(exampleSubmenu);
+#endif
+
+        // A failure is visible without opening anything: the status bar says so
+        // once the event loop turns.
+        QCoreApplication::processEvents();
+        CHECK(window.statusBar()->currentMessage().contains(
+            QStringLiteral("failed to load")));
+
+        // And it is still readable afterwards, in the dialog that also says
+        // where plugins go.
+        QAction* about = window.findChild<QAction*>(QStringLiteral("aboutplugins"));
+        CHECK(about != nullptr);
+        auto text = std::make_shared<QString>();
+        collectPluginsDialog(text);
+        if (about)
+            about->trigger();
+        CHECK(text->contains(QStringLiteral("Gui Fake Plugin")));
+        CHECK(text->contains(QStringLiteral("Gui Fake Effect")));
+        CHECK(text->contains(QStringLiteral("wrong.so")));
+        CHECK(text->contains(QStringLiteral("built for another version")));
+        CHECK(text->contains(QStringLiteral("/plugins")));
+
+        // The report is process wide, so leave it as it was found.
+        report = saved;
     });
 
     // ------------------------------------------------------------ run

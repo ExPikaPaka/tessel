@@ -36,6 +36,8 @@
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QTextBrowser>
+#include <QTimer>
 #include <QToolBar>
 #include <QAbstractButton>
 #include <QDockWidget>
@@ -43,6 +45,7 @@
 #include <QVBoxLayout>
 
 #include "core/Io.h"
+#include "effects/EffectPluginHost.h"
 #include "tessel_version.h"
 #include "ui/CurveWidget.h"
 #include "ui/Dialogs.h"
@@ -70,11 +73,51 @@ const QStringList& effectCategoryOrder()
     return order;
 }
 
+// The Effects submenus: the built in categories in their fixed order, then any
+// category a plugin declared that is not one of them, so a plugin either joins
+// an existing submenu or gets one of its own at the end.
+QStringList effectMenuCategories()
+{
+    QStringList order = effectCategoryOrder();
+    for (const QString& category : EffectRegistry::instance().categories()) {
+        if (category == QStringLiteral("Adjustments") || order.contains(category))
+            continue;
+        order.append(category);
+    }
+    return order;
+}
+
+// Effects > About the Plugins. The text comes from the loader so that a plugin
+// which failed has somewhere to be read about, rather than only flashing past
+// in the status bar.
+void showPluginsDialog(QWidget* parent)
+{
+    QDialog dialog(parent);
+    dialog.setObjectName(QStringLiteral("pluginsDialog"));
+    dialog.setWindowTitle(QStringLiteral("About the Plugins"));
+    dialog.setWindowIcon(icons::get(QStringLiteral("effect"), 22));
+    auto* root = new QVBoxLayout(&dialog);
+    auto* text = new QTextBrowser(&dialog);
+    text->setObjectName(QStringLiteral("pluginsText"));
+    text->setOpenExternalLinks(false);
+    text->setHtml(plugins::report().html());
+    text->setMinimumSize(520, 320);
+    root->addWidget(text);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    root->addWidget(buttons);
+    dialog.exec();
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     registerBuiltinEffects();
+    // Plugins come straight after, so everything below builds its menus from a
+    // registry that is already complete.
+    plugins::loadAll();
     registerBuiltinTools();
 
     setWindowIcon(icons::appIcon());
@@ -618,7 +661,7 @@ void MainWindow::createMenus()
     effects->addAction(repeatAction_);
     addAction(repeatAction_);
     effects->addSeparator();
-    for (const QString& category : effectCategoryOrder()) {
+    for (const QString& category : effectMenuCategories()) {
         const std::vector<Effect*> list = EffectRegistry::instance().inCategory(category);
         if (list.empty())
             continue;
@@ -636,6 +679,23 @@ void MainWindow::createMenus()
             submenu->addAction(action);
             addAction(action);
         }
+    }
+    effects->addSeparator();
+    auto* pluginsAction = new QAction(QStringLiteral("About the Plugins..."), this);
+    pluginsAction->setObjectName(QStringLiteral("aboutplugins"));
+    connect(pluginsAction, &QAction::triggered, this,
+            [this] { showPluginsDialog(this); });
+    effects->addAction(pluginsAction);
+    addAction(pluginsAction);
+
+    // A plugin that did not load has to be noticeable without opening that
+    // dialog first. The status bar is built after the menus, so the message
+    // waits for the event loop rather than creating it early here.
+    const QString pluginSummary = plugins::report().summary();
+    if (!pluginSummary.isEmpty()) {
+        QTimer::singleShot(0, this, [this, pluginSummary] {
+            statusBar()->showMessage(pluginSummary, 15000);
+        });
     }
 
     // The four panel toggles, settings and help sit as icons at the right hand

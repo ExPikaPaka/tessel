@@ -55,6 +55,8 @@ add_library(tessel_core STATIC
   src/core/Palette.cpp
   src/core/Units.cpp
   src/effects/Effect.cpp
+  src/effects/EffectPluginHost.cpp
+  src/effects/BuiltinEffects.cpp
   src/effects/Adjustments.cpp
   src/effects/Blurs.cpp
   src/effects/ColorAndObject.cpp
@@ -65,6 +67,10 @@ add_library(tessel_core STATIC
   src/effects/Photo.cpp
 )
 target_include_directories(tessel_core PUBLIC src)
+# Effect plugins are shared libraries that link this archive for fx::add and
+# the parameter specs, which only works if its objects are position
+# independent.
+set_target_properties(tessel_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(tessel_core PUBLIC Qt6::Core Qt6::Gui ZLIB::ZLIB Threads::Threads)
 target_compile_options(tessel_core PRIVATE ${TESSEL_WARNING_FLAGS})
 
@@ -121,17 +127,53 @@ if(TESSEL_BUILD_SCREENSHOT_TOOL)
   target_link_libraries(tessel_screenshots PRIVATE tessel_ui)
 endif()
 
+# ----------------------------------------------------------------- example plugin
+# A worked example of the plugin interface in src/effects/EffectPlugin.h. Off by
+# default because it is a sample rather than a part of the program; when it is
+# on it is written straight into the plugins directory beside the executable,
+# which is one of the directories the host scans at startup.
+option(TESSEL_BUILD_EXAMPLE_PLUGIN "Build the example effect plugin" OFF)
+if(TESSEL_BUILD_EXAMPLE_PLUGIN)
+  qt_add_plugin(tessel_example_plugin SHARED CLASS_NAME ScanlinesPlugin)
+  target_sources(tessel_example_plugin PRIVATE
+    plugins/example/ExamplePlugin.h
+    plugins/example/ExamplePlugin.cpp
+  )
+  target_link_libraries(tessel_example_plugin PRIVATE tessel_core)
+  target_compile_options(tessel_example_plugin PRIVATE ${TESSEL_WARNING_FLAGS})
+  set_target_properties(tessel_example_plugin PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+  )
+endif()
+
 # ----------------------------------------------------------------- tests
 enable_testing()
 add_executable(tessel_tests tests/tests.cpp)
 target_link_libraries(tessel_tests PRIVATE tessel_core)
 add_test(NAME core COMMAND tessel_tests)
 
+# With the example plugin built, the core suite loads that very library through
+# QPluginLoader instead of only exercising the loader's seams.
+if(TESSEL_BUILD_EXAMPLE_PLUGIN)
+  add_dependencies(tessel_tests tessel_example_plugin)
+  target_compile_definitions(tessel_tests PRIVATE
+    TESSEL_EXAMPLE_PLUGIN_FILE="$<TARGET_FILE:tessel_example_plugin>")
+endif()
+
 # Qt Test is only used for its key and mouse injection, which is the one way
 # to drive real keyboard shortcuts through the shortcut map.
 qt_add_executable(tessel_gui_tests tests/gui_tests.cpp)
 target_link_libraries(tessel_gui_tests PRIVATE tessel_ui Qt6::Test)
 add_test(NAME gui COMMAND tessel_gui_tests)
+
+# Same again for the interface suite, which then checks that the window really
+# did load the library and put its effect in the Effects menu.
+if(TESSEL_BUILD_EXAMPLE_PLUGIN)
+  add_dependencies(tessel_gui_tests tessel_example_plugin)
+  target_compile_definitions(tessel_gui_tests PRIVATE
+    TESSEL_EXAMPLE_PLUGIN_FILE="$<TARGET_FILE:tessel_example_plugin>")
+endif()
 set_tests_properties(gui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # ----------------------------------------------------------------- install

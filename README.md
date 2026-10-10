@@ -102,7 +102,8 @@ histogram behind the controls.
 * Stylize: Edge Detect, Emboss, Relief, Outline
 
 Every effect dialog is generated from the effect's parameter list and previews
-live on the canvas; Ctrl+F repeats the last one with the same settings.
+live on the canvas; Ctrl+F repeats the last one with the same settings. The list
+is not fixed: see Plugins below.
 
 ### Layers
 
@@ -131,6 +132,44 @@ Paint.NET's own `.pdn` files cannot be read, because the format is an
 undocumented serialisation of .NET objects. Tessel says so plainly when one is
 opened and suggests exporting `.ora` or `.png` from Paint.NET instead.
 
+## Plugins
+
+Effects can be written outside the program and loaded at startup, the way
+Paint.NET takes plugin DLLs. A plugin is a shared library holding one class, and
+the effects inside it are declared exactly the way the built in ones are: a
+lambda and a list of parameters. Whatever loads appears in the Effects menu under
+the submenu it asked for, with the same generated dialog and the same live
+preview.
+
+Tessel reads a `plugins` directory in each of these places at startup, in this
+order:
+
+* the per user application data directory, which on Linux is
+  `~/.local/share/Tessel/Tessel/plugins`
+* the system wide ones, such as `/usr/share/Tessel/Tessel/plugins`
+* `plugins` beside the executable, which is what makes `build/plugins` work in a
+  build tree
+
+The program prints the list it actually used, under Effects > About the Plugins.
+That dialog also names every plugin that loaded, the effects each one brought,
+and every file that was refused together with the reason; a failure is announced
+in the status bar at startup as well. A plugin built against a different version
+of the interface is refused by name rather than loaded, because the two sides
+pass C++ objects to each other.
+
+The whole contract is one documented header, `src/effects/EffectPlugin.h`: derive
+a class from QObject and `tessel::EffectPlugin`, say what the plugin is called,
+and add effects to the registry you are handed. `plugins/example` is a working
+plugin with three parameters, built by this project behind an option that is off
+by default:
+
+    cmake -S . -B build -G Ninja -DTESSEL_BUILD_EXAMPLE_PLUGIN=ON
+    cmake --build build
+    ./build/tessel          # Effects > Examples > Scanlines
+
+[docs/plugins.html](docs/plugins.html) walks through writing and installing one,
+with the example's source quoted in full.
+
 ## Keyboard
 
 Press F1 inside the program for the full list. The tool letters are S for the
@@ -148,7 +187,9 @@ working while a non Latin keyboard layout is active.
                   Selection, History, zip and file formats. No GUI dependency,
                   which is why the core tests run headless.
     src/effects   the effect registry and the effects themselves, each one a
-                  lambda plus a parameter list
+                  lambda plus a parameter list, plus the plugin interface and
+                  the loader that reads the plugins directories
+    plugins       the example effect plugin
     src/tools     the Tool interface, the shared stroke engine and all 19 tools
     src/ui        the window, canvas view, docks, colour panel and dialogs
     tests         the two test suites

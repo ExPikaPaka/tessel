@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugins - Tessel</title>
+<meta name="description" content="How to write, build and install a Tessel effect plugin: the plugin interface, the directories that are scanned at startup, and a worked example with its source.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span>Tessel</a>
+    <nav class="site-nav" aria-label="Documentation">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="guide.html">Guide</a></li>
+        <li><a href="plugins.html" aria-current="page">Plugins</a></li>
+        <li><a href="shortcuts.html">Shortcuts</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel">Source</a></li>
+        <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap">
+
+  <h1>Writing an effect plugin</h1>
+  <p class="lede">An effect does not have to be built into Tessel. A plugin is a shared
+    library holding one class, and the effects inside it are declared exactly the way the
+    forty built in ones are: a lambda and a list of parameters. Tessel reads the plugin
+    directories at startup, and whatever loads appears in the Effects menu under the
+    submenu it asked for, with the same generated dialog and the same live preview.</p>
+
+  <nav class="toc" aria-labelledby="toc-heading">
+    <h2 id="toc-heading">On this page</h2>
+    <ul>
+      <li><a href="#where">Where plugins live</a></li>
+      <li><a href="#interface">The interface</a></li>
+      <li><a href="#example">The example, in full</a></li>
+      <li><a href="#building">Building one</a></li>
+      <li><a href="#rules">What an effect body may do</a></li>
+      <li><a href="#trouble">When one does not load</a></li>
+    </ul>
+  </nav>
+
+  <section id="where">
+    <h2>Where plugins live</h2>
+    <p>Tessel scans a <code>plugins</code> directory in each of these places, in this order,
+      and loads every shared library it finds there. Nothing is scanned later: a plugin
+      dropped in while the program is running appears the next time it starts.</p>
+    <ul>
+      <li>the per user application data directory, which on Linux is
+        <code>~/.local/share/Tessel/Tessel/plugins</code></li>
+      <li>the system wide ones, such as <code>/usr/share/Tessel/Tessel/plugins</code></li>
+      <li><code>plugins</code> beside the executable, which is what makes
+        <code>build/plugins</code> work in a build tree</li>
+    </ul>
+    <p>The exact list is not worth memorising, because the program prints it: open
+      <strong>Effects &gt; About the Plugins</strong>. That dialog is the answer to both
+      "where does this go" and "why did mine not load", and it lists every plugin that
+      loaded, the effects each one brought, and every file that was refused with the reason
+      it was refused.</p>
+    <p>Anything in those directories that is not a shared library is ignored without
+      complaint, so a licence file or a readme can sit next to the plugin.</p>
+  </section>
+
+  <section id="interface">
+    <h2>The interface</h2>
+    <p>The whole contract is <code>src/effects/EffectPlugin.h</code>. Include it, derive one
+      class from <code>QObject</code> and <code>tessel::EffectPlugin</code>, and implement
+      three things:</p>
+    <dl class="defs">
+      <dt><code>TESSEL_DECLARE_EFFECT_PLUGIN()</code></dt>
+      <dd>A macro that records which version of the interface the plugin was compiled
+        against. The host refuses a plugin built against any other version, because
+        everything crossing the library boundary (<code>Effect</code>,
+        <code>ParamSpec</code>, <code>EffectContext</code>, <code>Image</code>) is a C++
+        object whose layout has to match on both sides. Rebuilding against the current
+        source is the fix.</dd>
+      <dt><code>QString name() const</code></dt>
+      <dd>The name of the plugin, shown in About the Plugins. There are optional
+        <code>version()</code> and <code>author()</code> beside it.</dd>
+      <dt><code>void registerEffects(tessel::EffectRegistry&amp;)</code></dt>
+      <dd>Called once at startup, after the built in effects are in place. Add effects with
+        <code>fx::add(registry, id, name, category, params, body)</code>, which is the same
+        one liner the built in modules use. The registry is handed over rather than looked
+        up, so a plugin never touches the host's singleton.</dd>
+    </dl>
+    <p>The class also needs the two Qt macros: <code>Q_PLUGIN_METADATA(IID
+      TesselEffectPluginIid)</code>, which is what makes the library a Qt plugin at all,
+      and <code>Q_INTERFACES(tessel::EffectPlugin)</code>, which is what lets Tessel cast
+      the loaded object to the interface. Leave either of them out and the library is
+      refused as not being a Tessel effect plugin.</p>
+    <p>Two details decide where the effect turns up. The <strong>id</strong> has to be unique
+      across the whole program, so give it a prefix of your own; an id that is already taken
+      is ignored. The <strong>category</strong> is the Effects submenu: an existing name such
+      as <code>Blurs</code> or <code>Stylize</code> joins that submenu, a new name gets a
+      submenu of its own after the built in ones, and <code>Adjustments</code> puts the
+      effect in the Adjustments menu instead.</p>
+  </section>
+
+  <section id="example">
+    <h2>The example, in full</h2>
+    <p><code>plugins/example</code> in the repository is a working plugin with nothing left
+      out. It adds one effect, Scanlines, with three parameters, which is enough to see the
+      generated dialog and the live preview at work. Build it with
+      <code>-DTESSEL_BUILD_EXAMPLE_PLUGIN=ON</code> and it is written into
+      <code>build/plugins</code>, where a <code>./build/tessel</code> finds it.</p>
+    <h3>ExamplePlugin.h</h3>
+<pre><code>// An effect plugin, complete, in two files. Build it with
+// -DTESSEL_BUILD_EXAMPLE_PLUGIN=ON and it lands in build/plugins, which is one
+// of the directories Tessel reads at startup.
+#pragma once
+
+#include "effects/EffectPlugin.h"
+
+namespace tessel_example {
+
+class ScanlinesPlugin : public QObject, public tessel::EffectPlugin {
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID TesselEffectPluginIid)
+    Q_INTERFACES(tessel::EffectPlugin)
+
+public:
+    TESSEL_DECLARE_EFFECT_PLUGIN()
+
+    QString name() const override { return QStringLiteral("Scanlines Example"); }
+    QString version() const override { return QStringLiteral("1.0"); }
+    QString author() const override { return QStringLiteral("The Tessel authors"); }
+
+    void registerEffects(tessel::EffectRegistry&amp; registry) override;
+};
+
+} // namespace tessel_example</code></pre>
+    <h3>ExamplePlugin.cpp</h3>
+<pre><code>#include "ExamplePlugin.h"
+
+#include &lt;algorithm&gt;
+
+#include "core/Blend.h"
+
+namespace tessel_example {
+
+using namespace tessel;
+
+void ScanlinesPlugin::registerEffects(EffectRegistry&amp; registry)
+{
+    // The same one liner the built in effects use. The three parameters are
+    // what the dialog is built from, in this order, and the body below runs on
+    // every preview as the user drags them.
+    fx::add(registry, "example_scanlines", "Scanlines", "Examples",
+            {
+                ParamSpec::intParam("spacing", "Line spacing", 2, 64, 4, " px"),
+                ParamSpec::doubleParam("strength", "Strength", 0.0, 1.0, 0.6, 0.05, 2),
+                ParamSpec::colorParam("tint", "Line colour", Rgba(0, 0, 0, 255)),
+            },
+            [](const EffectContext&amp; context, const ParamValues&amp; values) {
+                const int spacing = std::max(2, values.intValue("spacing", 4));
+                const Rgba tint = values.colorValue("tint", Rgba(0, 0, 0, 255));
+                // The tint's own alpha scales the strength, so a half
+                // transparent colour draws a fainter line without touching the
+                // slider.
+                const float weight = float(values.doubleValue("strength", 0.6))
+                    * float(tint.a) / 255.0f;
+
+                // mapPixels copies the source, rewrites the region and feeds
+                // the progress channel, which is what makes a slow effect
+                // cancellable from the dialog.
+                return fx::mapPixels(context, [&amp;](Rgba c, int, int y) {
+                    if (y % spacing != 0)
+                        return c;
+                    const float keep = 1.0f - weight;
+                    return Rgba(toByte((c.r * keep + tint.r * weight) / 255.0f),
+                                toByte((c.g * keep + tint.g * weight) / 255.0f),
+                                toByte((c.b * keep + tint.b * weight) / 255.0f), c.a);
+                });
+            });
+}
+
+} // namespace tessel_example</code></pre>
+    <p>That is the entire plugin. The three <code>ParamSpec</code> entries become two
+      sliders, each with a number box beside it, and a colour button, in that order, and the
+      dialog previews the effect on the canvas as they are dragged. The other kinds are
+      <code>boolParam</code>, <code>choiceParam</code>, <code>angleParam</code> and
+      <code>offsetParam</code>; an effect with no parameters at all is applied straight away
+      with no dialog.</p>
+  </section>
+
+  <section id="building">
+    <h2>Building one</h2>
+    <p>Out of tree, a plugin needs the Tessel headers to compile and the core archive to
+      link, because <code>fx::add</code> and the parameter specs live there:</p>
+<pre><code>cmake_minimum_required(VERSION 3.21)
+project(ScanlinesPlugin LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui)
+qt_standard_project_setup()
+
+qt_add_plugin(scanlines SHARED CLASS_NAME ScanlinesPlugin)
+target_sources(scanlines PRIVATE ExamplePlugin.h ExamplePlugin.cpp)
+# The Tessel source tree, for the headers, and its core archive, for fx::add
+# and the parameter specs.
+target_include_directories(scanlines PRIVATE /path/to/tessel/src)
+target_link_libraries(scanlines PRIVATE /path/to/tessel/build/libtessel_core.a
+                                        Qt6::Core Qt6::Gui)</code></pre>
+    <p>Copy the resulting library into one of the directories above and restart Tessel. The
+      plugin must be built with the same compiler and the same Qt as the Tessel it is loaded
+      into: it shares C++ objects with the program, not a C interface.</p>
+  </section>
+
+  <section id="rules">
+    <h2>What an effect body may do</h2>
+    <p>The body is a plain function of its inputs, and the preview relies on that:</p>
+    <ul>
+      <li>It runs on a worker thread, possibly many times a second while the dialog is open,
+        so it must not touch the interface or any shared state of its own.</li>
+      <li>It must be deterministic for a given context and parameter set. A random effect
+        takes its seed from <code>context.seed</code>, which is why the previews do not
+        flicker.</li>
+      <li>It returns a full size image, and leaves the pixels outside
+        <code>context.region</code> as they were: the caller mixes the result back through
+        the selection mask. <code>fx::mapPixels</code> does both for you.</li>
+      <li>It should report progress through <code>context.progress</code> and give up when
+        that channel says it was cancelled, which <code>fx::forEachRow</code> and
+        <code>fx::mapPixels</code> already do. An effect that ignores it still works, it just
+        cannot be stopped early.</li>
+    </ul>
+    <p>Everything an effect is allowed to look at is in <code>EffectContext</code>: the source
+      image, the selection mask, the region, the two palette colours, the seed and the
+      document.</p>
+  </section>
+
+  <section id="trouble">
+    <h2>When one does not load</h2>
+    <p>A plugin that fails is never silent and never fatal. The status bar says so for a
+      few seconds at startup, and <strong>Effects &gt; About the Plugins</strong> keeps the
+      reason for as long as the session lasts. The reasons are short and there are not many
+      of them:</p>
+    <dl class="defs">
+      <dt>the library could not be opened</dt>
+      <dd>Qt's own message, which usually names a dependency that is missing or a Qt version
+        that does not match.</dd>
+      <dt>a Qt plugin, but not a Tessel effect plugin</dt>
+      <dd>The id in <code>Q_PLUGIN_METADATA</code> is not
+        <code>org.tessel.EffectPlugin</code>, or <code>Q_INTERFACES</code> was left out.</dd>
+      <dt>built against effect plugin interface version N</dt>
+      <dd>The plugin was compiled against a different <code>EffectPlugin.h</code>. Rebuild
+        it against this version of Tessel.</dd>
+    </dl>
+    <p>A plugin that loaded stays loaded for as long as the program runs, because the effects
+      it registered are code inside its library. One that was refused is unloaded again
+      immediately, having registered nothing.</p>
+  </section>
+
+  <p><a href="guide.html">Back to the guide</a></p>
+
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Tessel 1.0.0, a layered raster image editor for Linux. Qt is used under the LGPL.</p>
+    <ul>
+      <li><a href="index.html">Overview</a></li>
+      <li><a href="guide.html">Guide</a></li>
+      <li><a href="plugins.html">Plugins</a></li>
+      <li><a href="shortcuts.html">Shortcuts</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel">Repository</a></li>
+      <li><a href="https://github.com/ExPikaPaka/tessel/releases/latest">Latest release</a></li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>
