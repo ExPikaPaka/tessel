@@ -214,6 +214,82 @@ std::unique_ptr<Document> readFlat(const QString& path, QString* error)
     return doc;
 }
 
+// Editable text travels in document.json beside the layer it sits on, as one
+// extra key per layer. The glyphs are already in the layer PNG, so a reader
+// that knows nothing about text items still sees the picture exactly as it was
+// saved, and a manifest written before items existed simply has no key.
+QJsonObject textItemToJson(const TextItem& item)
+{
+    QJsonObject out;
+    QJsonArray lines;
+    for (const QString& line : item.lines)
+        lines.append(line);
+    out[QStringLiteral("lines")] = lines;
+    out[QStringLiteral("x")] = item.x;
+    out[QStringLiteral("y")] = item.y;
+    out[QStringLiteral("family")] = item.family;
+    out[QStringLiteral("size")] = item.pointSize;
+    out[QStringLiteral("bold")] = item.bold;
+    out[QStringLiteral("italic")] = item.italic;
+    out[QStringLiteral("underline")] = item.underline;
+    out[QStringLiteral("align")] = item.align;
+    out[QStringLiteral("color")] = item.color.toQColor().name(QColor::HexArgb);
+    out[QStringLiteral("opacity")] = item.opacity;
+    out[QStringLiteral("antialias")] = item.antialias;
+    out[QStringLiteral("blendMode")] = blendModeName(item.mode);
+    out[QStringLiteral("box")] = QJsonArray{item.box.x, item.box.y, item.box.w,
+                                            item.box.h};
+    // A fingerprint does not fit in a signed 32 bit int, so it travels as a
+    // double, which holds every uint32 exactly.
+    out[QStringLiteral("fingerprint")] = double(item.fingerprint);
+    out[QStringLiteral("backdrop")] =
+        QString::fromLatin1(encodePng(item.backdrop).toBase64());
+    return out;
+}
+
+// Anything missing or inconsistent drops the item, which only means the text
+// is read back as the plain pixels it already is.
+std::optional<TextItem> textItemFromJson(const QJsonObject& entry, int layerUid)
+{
+    const QJsonArray box = entry.value(QStringLiteral("box")).toArray();
+    if (box.size() != 4)
+        return std::nullopt;
+    TextItem item;
+    item.layerUid = layerUid;
+    const QJsonArray lines = entry.value(QStringLiteral("lines")).toArray();
+    for (const QJsonValue& line : lines)
+        item.lines.append(line.toString());
+    if (item.lines.isEmpty())
+        return std::nullopt;
+    item.x = entry.value(QStringLiteral("x")).toDouble();
+    item.y = entry.value(QStringLiteral("y")).toDouble();
+    item.family = entry.value(QStringLiteral("family")).toString();
+    item.pointSize = entry.value(QStringLiteral("size")).toDouble(24.0);
+    item.bold = entry.value(QStringLiteral("bold")).toBool();
+    item.italic = entry.value(QStringLiteral("italic")).toBool();
+    item.underline = entry.value(QStringLiteral("underline")).toBool();
+    item.align = std::clamp(entry.value(QStringLiteral("align")).toInt(), 0, 2);
+    item.color = Rgba::fromQColor(
+        QColor(entry.value(QStringLiteral("color")).toString()));
+    item.opacity = std::clamp(entry.value(QStringLiteral("opacity")).toDouble(1.0),
+                              0.0, 1.0);
+    item.antialias = entry.value(QStringLiteral("antialias")).toBool(true);
+    item.mode = blendModeFromName(entry.value(QStringLiteral("blendMode")).toString());
+    item.box = Rect(box.at(0).toInt(), box.at(1).toInt(), box.at(2).toInt(),
+                    box.at(3).toInt());
+    item.fingerprint =
+        uint32_t(entry.value(QStringLiteral("fingerprint")).toDouble());
+    item.backdrop = decodeImageBytes(
+        QByteArray::fromBase64(
+            entry.value(QStringLiteral("backdrop")).toString().toLatin1()),
+        "PNG");
+    if (item.box.isEmpty() || item.fingerprint == 0
+        || item.backdrop.width() != item.box.w
+        || item.backdrop.height() != item.box.h)
+        return std::nullopt;
+    return item;
+}
+
 std::unique_ptr<Document> readTessel(const QString& path, QString* error)
 {
     ZipReader zip(path);
@@ -264,7 +340,14 @@ std::unique_ptr<Document> readTessel(const QString& path, QString* error)
             std::clamp(entry.value(QStringLiteral("opacity")).toInt(255), 0, 255));
         layer->mode = blendModeFromName(
             entry.value(QStringLiteral("blendMode")).toString());
-        doc->addLayer(std::move(layer), index++);
+        const Layer* added = doc->addLayer(std::move(layer), index++);
+        const QJsonArray items =
+            added ? entry.value(QStringLiteral("textItems")).toArray() : QJsonArray();
+        for (const QJsonValue& itemValue : items) {
+            if (std::optional<TextItem> item =
+                    textItemFromJson(itemValue.toObject(), added->uid()))
+                doc->textItems().push_back(std::move(*item));
+        }
     }
     if (doc->layerCount() == 0) {
         if (error)
@@ -448,6 +531,15 @@ bool writeTessel(const Document& doc, const QString& path, QString* error)
             entry[QStringLiteral("visible")] = layer->visible;
             entry[QStringLiteral("opacity")] = int(layer->opacity);
             entry[QStringLiteral("blendMode")] = blendModeName(layer->mode);
+            // Only text that is still live is worth keeping: an item whose
+            // pixels have been painted over is already plain pixels.
+            QJsonArray textArray;
+            for (const TextItem& item : doc.textItems()) {
+                if (item.layerUid == layer->uid() && textItemLive(doc, item))
+                    textArray.append(textItemToJson(item));
+            }
+            if (!textArray.isEmpty())
+                entry[QStringLiteral("textItems")] = textArray;
             layerArray.append(entry);
             zip.add(src, encodePng(layer->image));
         }

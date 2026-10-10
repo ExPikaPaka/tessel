@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
@@ -950,6 +951,180 @@ int main(int argc, char** argv)
             if (loaded)
                 CHECK_NEAR(loaded->resolution(), units::kDefaultResolution, 1e-9);
         }
+    });
+
+    // ------------------------------------------------------------ text items
+    // Stands in for the text tool, which lives in the interface library: lay
+    // "glyphs" into a layer and keep what was under them, the way a committed
+    // piece of text does.
+    auto layTextItem = [](Document& doc, const Rect& box) {
+        Layer* layer = doc.activeLayer();
+        TextItem item;
+        item.layerUid = layer->uid();
+        item.lines = QStringList{QStringLiteral("Hello"), QStringLiteral("world")};
+        item.x = box.x;
+        item.y = box.y;
+        item.family = QStringLiteral("Sans Serif");
+        item.pointSize = 18.0;
+        item.italic = true;
+        item.align = 2;
+        item.color = Rgba(10, 20, 30, 255);
+        item.opacity = 0.75;
+        item.antialias = false;
+        item.mode = BlendMode::Multiply;
+        item.box = box;
+        item.backdrop = layer->image.cropped(box);
+        for (int x = box.x + 1; x < box.right() - 1; ++x)
+            layer->image.setAt(x, box.y + 2, Rgba(10, 20, 30, 255));
+        item.fingerprint = textFingerprint(layer->image, box);
+        doc.invalidate();
+        return item;
+    };
+
+    addTest("text items go stale when their pixels change", [&layTextItem] {
+        Document doc(60, 40);
+        const Rect box(5, 5, 20, 10);
+        const TextItem item = layTextItem(doc, box);
+        CHECK(item.fingerprint != 0);
+        CHECK(textItemLive(doc, item));
+
+        // An edit outside the box leaves the item alone.
+        const Rgba keep = doc.layerAt(0)->image.at(40, 30);
+        doc.layerAt(0)->image.setAt(40, 30, Rgba(1, 2, 3, 255));
+        CHECK(textItemLive(doc, item));
+        doc.layerAt(0)->image.setAt(40, 30, keep);
+
+        // One pixel inside it is enough to drop the item, and putting that
+        // pixel back (an undo) makes the item live again.
+        const Rgba under = doc.layerAt(0)->image.at(box.x + 3, box.y + 7);
+        doc.layerAt(0)->image.setAt(box.x + 3, box.y + 7, Rgba(9, 9, 9, 255));
+        CHECK(!textItemLive(doc, item));
+        doc.layerAt(0)->image.setAt(box.x + 3, box.y + 7, under);
+        CHECK(textItemLive(doc, item));
+
+        // A box that hangs off the layer has no fingerprint at all.
+        CHECK(textFingerprint(doc.layerAt(0)->image, Rect(55, 35, 20, 20)) == 0);
+        CHECK(textFingerprint(doc.layerAt(0)->image, Rect()) == 0);
+        TextItem off = item;
+        off.box = Rect(55, 35, 20, 20);
+        CHECK(!textItemLive(doc, off));
+
+        // An item naming a layer that is gone is stale, whatever the pixels.
+        TextItem orphan = item;
+        orphan.layerUid = item.layerUid + 1000;
+        CHECK(!textItemLive(doc, orphan));
+    });
+
+    addTest("text items survive the native round trip", [&layTextItem] {
+        QTemporaryDir dir;
+        Document doc(60, 40);
+        doc.addEmptyLayer();
+        doc.setActiveIndex(1);
+        ops::fillRegion(doc.activeLayer()->image, Rect(0, 0, 60, 40),
+                        Rgba(200, 200, 200, 255));
+        const Rect box(5, 5, 20, 10);
+        const TextItem item = layTextItem(doc, box);
+        doc.textItems().push_back(item);
+        const Image pixels = doc.activeLayer()->image;
+
+        const QString path = dir.filePath(QStringLiteral("text.tessel"));
+        QString error;
+        CHECK(io::saveDocument(doc, path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (!loaded)
+            return;
+        // The pixels in the layer are exactly what they were, so a reader that
+        // knows nothing about text items sees the same picture.
+        CHECK(samePixels(loaded->layerAt(1)->image, pixels));
+        CHECK(loaded->textItems().size() == 1);
+        if (loaded->textItems().empty())
+            return;
+        const TextItem& back = loaded->textItems().front();
+        CHECK(back.layerUid == loaded->layerAt(1)->uid());
+        CHECK(back.lines == item.lines);
+        CHECK_NEAR(back.x, item.x, 1e-9);
+        CHECK_NEAR(back.y, item.y, 1e-9);
+        CHECK(back.family == item.family);
+        CHECK_NEAR(back.pointSize, item.pointSize, 1e-9);
+        CHECK(back.bold == item.bold && back.italic == item.italic);
+        CHECK(back.underline == item.underline);
+        CHECK(back.align == item.align);
+        CHECK(back.color == item.color);
+        CHECK_NEAR(back.opacity, item.opacity, 1e-6);
+        CHECK(back.antialias == item.antialias);
+        CHECK(back.mode == item.mode);
+        CHECK(back.box.x == box.x && back.box.y == box.y);
+        CHECK(back.box.w == box.w && back.box.h == box.h);
+        CHECK(back.fingerprint == item.fingerprint);
+        CHECK(samePixels(back.backdrop, item.backdrop));
+        // Which is the point of all of it: the text is still editable.
+        CHECK(textItemLive(*loaded, back));
+
+        // The items ride beside their own layer in the manifest.
+        ZipReader zip(path);
+        CHECK(zip.isValid());
+        const QJsonObject root =
+            QJsonDocument::fromJson(zip.read(QStringLiteral("document.json"))).object();
+        const QJsonArray layers = root.value(QStringLiteral("layers")).toArray();
+        CHECK(layers.size() == 2);
+        CHECK(!layers.at(0).toObject().contains(QStringLiteral("textItems")));
+        CHECK(layers.at(1).toObject().value(QStringLiteral("textItems")).toArray().size()
+              == 1);
+    });
+
+    addTest("a manifest with no text items still opens", [&layTextItem] {
+        QTemporaryDir dir;
+        Document doc(60, 40);
+        const Rect box(5, 5, 20, 10);
+        doc.textItems().push_back(layTextItem(doc, box));
+        const QString source = dir.filePath(QStringLiteral("text.tessel"));
+        QString error;
+        CHECK(io::saveDocument(doc, source, &error));
+
+        // An older file simply has no key, and the picture must be unaffected.
+        const QString legacy = dir.filePath(QStringLiteral("legacy.tessel"));
+        ZipReader reader(source);
+        CHECK(reader.isValid());
+        ZipWriter writer(legacy);
+        CHECK(writer.isOpen());
+        for (const QString& name : reader.names()) {
+            QByteArray data = reader.read(name);
+            if (name == QStringLiteral("document.json")) {
+                QJsonObject root = QJsonDocument::fromJson(data).object();
+                QJsonArray layers = root.value(QStringLiteral("layers")).toArray();
+                QJsonObject entry = layers.at(0).toObject();
+                entry.remove(QStringLiteral("textItems"));
+                layers.replace(0, entry);
+                root[QStringLiteral("layers")] = layers;
+                data = QJsonDocument(root).toJson();
+            }
+            writer.add(name, data, name != QStringLiteral("mimetype"));
+        }
+        CHECK(writer.close());
+        auto loaded = io::openDocument(legacy, &error);
+        CHECK(loaded != nullptr);
+        if (!loaded)
+            return;
+        CHECK(loaded->textItems().empty());
+        CHECK(samePixels(loaded->layerAt(0)->image, doc.layerAt(0)->image));
+    });
+
+    addTest("stale text items are not saved", [&layTextItem] {
+        QTemporaryDir dir;
+        Document doc(60, 40);
+        const Rect box(5, 5, 20, 10);
+        doc.textItems().push_back(layTextItem(doc, box));
+        // Paint over the text: it is plain pixels now and must not come back
+        // as something editable after a round trip.
+        doc.layerAt(0)->image.setAt(box.x + 2, box.y + 2, Rgba(7, 7, 7, 255));
+        const QString path = dir.filePath(QStringLiteral("stale.tessel"));
+        QString error;
+        CHECK(io::saveDocument(doc, path, &error));
+        auto loaded = io::openDocument(path, &error);
+        CHECK(loaded != nullptr);
+        if (loaded)
+            CHECK(loaded->textItems().empty());
     });
 
     // ------------------------------------------------------------ effects

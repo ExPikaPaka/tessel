@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <QString>
+#include <QStringList>
 
 #include "core/Blend.h"
 #include "core/Image.h"
@@ -61,6 +62,43 @@ enum class Anchor {
     TopLeft, Top, TopRight,
     Left, Center, Right,
     BottomLeft, Bottom, BottomRight
+};
+
+// A piece of text that the text tool rendered into a layer and kept whole, so
+// it can be picked up later and have its words, font, colour or position
+// changed.
+//
+// When a piece of text stops being editable: an item is live only while the
+// pixels of `box` on the layer it names are still exactly the ones the text
+// tool wrote there. `fingerprint` is a hash of that rectangle taken right
+// after the render, and `backdrop` is what the rectangle held before the
+// glyphs went in, which is what lets the words be rendered again in place.
+// Anything that changes those pixels (a stroke across the box, a fill, an
+// effect, a crop, a canvas resize, a merge) makes the hash disagree and the
+// item is dropped: the glyphs stay behind as ordinary pixels and the status
+// bar says so. Edits elsewhere on the layer, or on another layer, leave the
+// item alone, and so does undoing them, because the pixels come back as they
+// were. Undoing the commit that made the item is a change like any other, so
+// the item goes with it. The text tool draws a dashed box around every item
+// that is still live, so what is on screen says what can be picked up.
+struct TextItem {
+    int layerUid = 0;
+    QStringList lines;
+    double x = 0.0;          // top left corner, in document coordinates
+    double y = 0.0;
+    QString family;
+    double pointSize = 24.0;
+    bool bold = false;
+    bool italic = false;
+    bool underline = false;
+    int align = 0;           // 0 left, 1 centre, 2 right
+    Rgba color{0, 0, 0, 255};
+    double opacity = 1.0;
+    bool antialias = true;
+    BlendMode mode = BlendMode::Normal;
+    Rect box;                // the rectangle the render covered, and is hashed
+    Image backdrop;          // `box` as it was before the glyphs were drawn
+    uint32_t fingerprint = 0;
 };
 
 class Document {
@@ -133,6 +171,12 @@ public:
     void setModified(bool modified) { modified_ = modified; }
     int nextLayerSerial() { return ++layerSerial_; }
 
+    // ---------------------------------------------------------- text items
+    // Text that can still be edited, see TextItem. The text tool owns the
+    // policy; the document only carries the items so they can be saved.
+    const std::vector<TextItem>& textItems() const { return textItems_; }
+    std::vector<TextItem>& textItems() { return textItems_; }
+
 private:
     void assignUid(Layer* layer);
 
@@ -152,9 +196,17 @@ private:
     mutable bool compositeValid_ = false;
     int previewUid_ = -1;
     const Image* previewImage_ = nullptr;
+    std::vector<TextItem> textItems_;
 };
 
 QPoint anchorOffset(Anchor anchor, int oldW, int oldH, int newW, int newH);
 const char* anchorName(Anchor anchor);
+
+// Hash of one rectangle of a layer, used to tell whether a TextItem is still
+// live. Zero for an empty rectangle or one that hangs off the image, and zero
+// never counts as a match.
+uint32_t textFingerprint(const Image& image, const Rect& box);
+// True while the item's layer is still there and its pixels are untouched.
+bool textItemLive(const Document& doc, const TextItem& item);
 
 } // namespace tessel
