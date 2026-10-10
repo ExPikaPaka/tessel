@@ -2,6 +2,7 @@
 // formats. Run with ctest or by invoking the binary directly.
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <vector>
 
@@ -53,6 +54,32 @@ void addTest(const char* name, std::function<void()> fn)
 }
 
 Image solid(int w, int h, Rgba color) { return Image(w, h, color); }
+
+// Byte for byte comparison, which is what the effect tests need.
+bool samePixels(const Image& a, const Image& b)
+{
+    if (a.width() != b.width() || a.height() != b.height())
+        return false;
+    return std::memcmp(a.data(), b.data(), a.byteCount()) == 0;
+}
+
+// A deterministic non flat image, so an effect that does nothing is visible.
+Image gradient(int w, int h)
+{
+    Image image(w, h);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            image.setAt(x, y, Rgba(uint8_t((x * 7) & 0xff), uint8_t((y * 11) & 0xff),
+                                   uint8_t(((x ^ y) * 5) & 0xff), 255));
+        }
+    }
+    return image;
+}
+
+// The effects that carry the cooperative progress channel.
+const char* const kProgressEffects[] = {"surface_blur", "median",   "oil_painting",
+                                        "reduce_noise", "crystalize", "julia",
+                                        "mandelbrot"};
 
 } // namespace
 
@@ -924,6 +951,59 @@ int main(int argc, char** argv)
         CHECK(out.at(10, 10).r == 55);          // inside the region
         CHECK(out.at(0, 0).r == 200);           // untouched outside
         CHECK(out.at(31, 31).r == 200);
+    });
+
+    addTest("the progress channel does not change the pixels", [] {
+        registerBuiltinEffects();
+        const Image source = gradient(48, 40);
+        for (const char* id : kProgressEffects) {
+            Effect* effect = EffectRegistry::instance().byId(QString::fromLatin1(id));
+            check(effect != nullptr, id, __LINE__);
+            if (!effect)
+                continue;
+            const ParamValues values = ParamValues::defaults(effect->params());
+            EffectContext plain;
+            plain.source = &source;
+            plain.region = source.rect();
+            const Image expected = effect->apply(plain, values);
+
+            EffectProgress progress;
+            EffectContext watched = plain;
+            watched.progress = &progress;
+            const Image actual = effect->apply(watched, values);
+            check(samePixels(expected, actual), id, __LINE__);
+            // Every row was reported, so the bar reaches the end.
+            check(progress.fraction() > 0.99, id, __LINE__);
+            check(!progress.isCancelled(), id, __LINE__);
+        }
+    });
+
+    addTest("a cancelled effect gives up without writing", [] {
+        registerBuiltinEffects();
+        const Image source = gradient(96, 96);
+        for (const char* id : kProgressEffects) {
+            Effect* effect = EffectRegistry::instance().byId(QString::fromLatin1(id));
+            if (!effect)
+                continue;
+            const ParamValues values = ParamValues::defaults(effect->params());
+            EffectProgress progress;
+            progress.cancel();
+            EffectContext context;
+            context.source = &source;
+            context.region = source.rect();
+            context.progress = &progress;
+            const Image out = effect->apply(context, values);
+            // Not one row was touched, so the output is still the copy of the
+            // source that the effect started from.
+            check(samePixels(out, source), id, __LINE__);
+
+            // Sanity check that the same effect does change the image when it
+            // is left alone, otherwise the comparison above proves nothing.
+            EffectContext plain;
+            plain.source = &source;
+            plain.region = source.rect();
+            check(!samePixels(effect->apply(plain, values), source), id, __LINE__);
+        }
     });
 
     addTest("effect parameter defaults", [] {

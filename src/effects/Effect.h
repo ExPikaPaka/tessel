@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -63,8 +65,41 @@ public:
 
     static ParamValues defaults(const std::vector<ParamSpec>& specs);
 
+    // Used to decide whether an already computed result still matches the
+    // controls, so pressing OK does not recompute what is on screen.
+    bool operator==(const ParamValues& other) const { return values_ == other.values_; }
+    bool operator!=(const ParamValues& other) const { return !(*this == other); }
+
 private:
     QHash<QString, QVariant> values_;
+};
+
+// Cooperative progress and cancellation channel.
+//
+// The owner lives on the thread that started the effect; the effect polls the
+// channel from its own worker threads, so every member is atomic and `report`
+// is safe to call from several threads at once. An effect that ignores the
+// channel still runs correctly, it just cannot be stopped early.
+class EffectProgress {
+public:
+    void report(double fraction) const
+    {
+        const double clamped = std::clamp(fraction, 0.0, 1.0);
+        permille_.store(unsigned(clamped * 1000.0 + 0.5), std::memory_order_relaxed);
+    }
+    double fraction() const
+    {
+        return double(permille_.load(std::memory_order_relaxed)) / 1000.0;
+    }
+
+    bool isCancelled() const { return cancelled_.load(std::memory_order_relaxed); }
+    void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
+
+private:
+    // Written from worker threads while the owner reads it, hence mutable:
+    // reporting progress is logically const for the effect.
+    mutable std::atomic<unsigned> permille_{0};
+    std::atomic<bool> cancelled_{false};
 };
 
 // Everything an effect is allowed to look at.
@@ -76,6 +111,10 @@ struct EffectContext {
     Rgba secondary{255, 255, 255, 255};
     unsigned seed = 12345;
     const Document* document = nullptr;
+    // Optional. When present the effect should feed it and give up early once
+    // it reports a cancellation; a partially written result is then thrown
+    // away by the caller.
+    const EffectProgress* progress = nullptr;
 };
 
 class Effect {
@@ -169,6 +208,43 @@ void add(EffectRegistry& registry, const char* id, const char* name,
          const char* category, std::vector<ParamSpec> specs,
          LambdaEffect::Fn fn, const char* shortcut = nullptr);
 
+// Runs `body(y)` for every row in [begin, end) across the thread pool, feeding
+// the context's progress channel and stopping early once it reports a
+// cancellation. Returns false if the work was abandoned part way through, in
+// which case the output buffer holds a mixture of finished and untouched rows.
+//
+// Row order inside a range is irrelevant because the rows are independent, so
+// a run that is not cancelled produces exactly the same pixels as a plain
+// parallelFor would.
+template <class Body>
+bool forEachRow(const EffectContext& context, int begin, int end, Body&& body)
+{
+    const int total = end - begin;
+    if (total <= 0)
+        return true;
+    const EffectProgress* progress = context.progress;
+    if (!progress) {
+        parallelFor(begin, end, [&](int y0, int y1) {
+            for (int y = y0; y < y1; ++y)
+                body(y);
+        });
+        return true;
+    }
+    std::atomic<int> done{0};
+    parallelFor(begin, end, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            if (progress->isCancelled())
+                return;
+            body(y);
+            const int finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
+            // Reporting on every row would be pure overhead on small images.
+            if ((finished & 0xf) == 0 || finished == total)
+                progress->report(double(finished) / double(total));
+        }
+    });
+    return !progress->isCancelled();
+}
+
 // Copies the source, then rewrites every pixel inside the region.
 template <class F>
 Image mapPixels(const EffectContext& context, F&& fn)
@@ -177,13 +253,11 @@ Image mapPixels(const EffectContext& context, F&& fn)
     const Rect area = context.region.intersected(out.rect());
     if (area.isEmpty())
         return out;
-    parallelFor(area.y, area.bottom(), [&](int y0, int y1) {
-        for (int y = y0; y < y1; ++y) {
-            const Rgba* src = context.source->row(y);
-            Rgba* dst = out.row(y);
-            for (int x = area.x; x < area.right(); ++x)
-                dst[x] = fn(src[x], x, y);
-        }
+    forEachRow(context, area.y, area.bottom(), [&](int y) {
+        const Rgba* src = context.source->row(y);
+        Rgba* dst = out.row(y);
+        for (int x = area.x; x < area.right(); ++x)
+            dst[x] = fn(src[x], x, y);
     });
     return out;
 }

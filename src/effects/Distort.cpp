@@ -278,27 +278,25 @@ void registerDistortions(EffectRegistry& registry)
                 };
                 Image out = src;
                 const Rect area = context.region.intersected(src.rect());
-                parallelFor(area.y, area.bottom(), [&](int y0, int y1) {
-                    for (int y = y0; y < y1; ++y) {
-                        Rgba* dst = out.row(y);
-                        for (int x = area.x; x < area.right(); ++x) {
-                            const int gx = x / cell, gy = y / cell;
-                            double best = 1.0e30;
-                            int bestX = x, bestY = y;
-                            for (int dy = -1; dy <= 1; ++dy) {
-                                for (int dx = -1; dx <= 1; ++dx) {
-                                    double px = 0, py = 0;
-                                    cellCenter(gx + dx, gy + dy, px, py);
-                                    const double d = (px - x) * (px - x) + (py - y) * (py - y);
-                                    if (d < best) {
-                                        best = d;
-                                        bestX = int(std::lround(px));
-                                        bestY = int(std::lround(py));
-                                    }
+                fx::forEachRow(context, area.y, area.bottom(), [&](int y) {
+                    Rgba* dst = out.row(y);
+                    for (int x = area.x; x < area.right(); ++x) {
+                        const int gx = x / cell, gy = y / cell;
+                        double best = 1.0e30;
+                        int bestX = x, bestY = y;
+                        for (int dy = -1; dy <= 1; ++dy) {
+                            for (int dx = -1; dx <= 1; ++dx) {
+                                double px = 0, py = 0;
+                                cellCenter(gx + dx, gy + dy, px, py);
+                                const double d = (px - x) * (px - x) + (py - y) * (py - y);
+                                if (d < best) {
+                                    best = d;
+                                    bestX = int(std::lround(px));
+                                    bestY = int(std::lround(py));
                                 }
                             }
-                            dst[x] = src.atClamped(bestX, bestY);
                         }
+                        dst[x] = src.atClamped(bestX, bestY);
                     }
                 });
                 return out;

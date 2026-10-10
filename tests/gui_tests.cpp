@@ -2,6 +2,7 @@
 // through their public API with the offscreen Qt platform plugin.
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -10,15 +11,17 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
-#include <QComboBox>
-#include <QDoubleSpinBox>
-#include <QLabel>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QTimer>
 
 #include "core/ImageOps.h"
@@ -29,7 +32,7 @@
 #include "ui/ColorPanel.h"
 #include "ui/Dialogs.h"
 #include "ui/Docks.h"
-#include "ui/Dialogs.h"
+#include "ui/CurveWidget.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
 #include "ui/MainWindow.h"
@@ -144,6 +147,65 @@ size_t nonTransparentPixels(const Image& image)
             ++count;
     }
     return count;
+}
+
+bool samePixels(const Image& a, const Image& b)
+{
+    if (a.width() != b.width() || a.height() != b.height())
+        return false;
+    return std::memcmp(a.data(), b.data(), a.byteCount()) == 0;
+}
+
+void paintGradient(Image& image)
+{
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            image.setAt(x, y, Rgba(uint8_t((x * 7) & 0xff), uint8_t((y * 11) & 0xff),
+                                   uint8_t(((x ^ y) * 5) & 0xff), 255));
+        }
+    }
+}
+
+const Rgba kPrimary(200, 40, 40, 255);
+const Rgba kSecondary(255, 255, 255, 255);
+
+// Exactly what the old single threaded commit produced: the effect's own
+// output mixed into the source through the clip mask.
+Image directApply(Effect* effect, const Image& source, const ParamValues& values,
+                  const Mask* clip, const Rect& region)
+{
+    EffectContext context;
+    context.source = &source;
+    context.clip = clip;
+    context.region = region;
+    context.primary = kPrimary;
+    context.secondary = kSecondary;
+    const Image result = effect->apply(context, values);
+    Image out = source;
+    ops::mixThroughMask(out, result, clip, region);
+    return out;
+}
+
+std::unique_ptr<Document> gradientDocument(int width, int height)
+{
+    auto doc = std::make_unique<Document>(width, height);
+    paintGradient(doc->activeLayer()->image);
+    doc->invalidate();
+    return doc;
+}
+
+// Spins the event loop until `ready` holds, so the tests never sleep blindly.
+bool spinUntil(const std::function<bool()>& ready, int timeoutMs = 30000)
+{
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < timeoutMs) {
+        if (ready())
+            return true;
+        QApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    return ready();
 }
 
 } // namespace
@@ -448,6 +510,196 @@ int main(int argc, char** argv)
                           == Rgba(30, 40, 30, 255),
                       effect->id().toLocal8Bit().constData(), __LINE__);
             }
+        }
+    });
+
+    addTest("threaded effect results match the direct call", [] {
+        // The slow effects, which are the ones that now carry a progress
+        // channel, plus two that ignore it and must still work.
+        const char* ids[] = {"surface_blur", "median",     "oil_painting",
+                             "crystalize",   "reduce_noise", "mandelbrot",
+                             "gaussian_blur", "emboss"};
+        for (const char* id : ids) {
+            Effect* effect = EffectRegistry::instance().byId(QString::fromLatin1(id));
+            check(effect != nullptr, id, __LINE__);
+            if (!effect)
+                continue;
+            const ParamValues values = ParamValues::defaults(effect->params());
+
+            // The commit path, which is what the parameterless adjustments
+            // and "repeat last effect" go through.
+            auto doc = gradientDocument(72, 56);
+            const Image expected = directApply(effect, doc->activeLayer()->image, values,
+                                               nullptr, doc->rect());
+            History history(doc.get());
+            EffectDialog::applyDirect(effect, doc.get(), &history, values, kPrimary,
+                                      kSecondary);
+            check(samePixels(doc->activeLayer()->image, expected), id, __LINE__);
+            check(history.count() == 1, id, __LINE__);
+
+            // The preview path, which settles at full resolution and is then
+            // reused by the commit.
+            auto other = gradientDocument(72, 56);
+            History otherHistory(other.get());
+            EffectSession session(effect, other.get(), &otherHistory, kPrimary,
+                                  kSecondary);
+            session.requestPreview(values);
+            check(session.waitUntilIdle(), id, __LINE__);
+            check(samePixels(session.previewImage(), expected), id, __LINE__);
+            check(session.commit(values), id, __LINE__);
+            check(samePixels(other->activeLayer()->image, expected), id, __LINE__);
+            check(otherHistory.count() == 1, id, __LINE__);
+        }
+    });
+
+    addTest("threaded effects honour the selection mask", [] {
+        auto doc = gradientDocument(64, 64);
+        Mask mask(64, 64);
+        for (int y = 12; y < 40; ++y)
+            for (int x = 8; x < 50; ++x)
+                mask.setAt(x, y, y < 20 ? 0.5f : 1.0f);
+        doc->selection().setMask(mask);
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("median"));
+        const ParamValues values = ParamValues::defaults(effect->params());
+        const Image expected = directApply(effect, doc->activeLayer()->image, values,
+                                           doc->selection().clipMask(),
+                                           doc->selection().bounds());
+        EffectSession session(effect, doc.get(), &history, kPrimary, kSecondary);
+        session.requestPreview(values);
+        CHECK(session.waitUntilIdle());
+        CHECK(samePixels(session.previewImage(), expected));
+        CHECK(session.commit(values));
+        CHECK(samePixels(doc->activeLayer()->image, expected));
+    });
+
+    addTest("large previews draft first and refine to full resolution", [] {
+        auto doc = gradientDocument(192, 144);
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("crystalize"));
+        const ParamValues values = ParamValues::defaults(effect->params());
+        EffectSession session(effect, doc.get(), &history, kPrimary, kSecondary);
+        // Far below the real budget, so this small test image takes the same
+        // route a 20 megapixel one does.
+        session.setDraftPixelBudget(2000);
+        int drafts = 0;
+        int fulls = 0;
+        QObject::connect(&session, &EffectSession::previewUpdated, &session,
+                         [&](bool full) { full ? ++fulls : ++drafts; });
+        session.requestPreview(values);
+        CHECK(session.waitUntilIdle());
+        CHECK(drafts >= 1);
+        CHECK(fulls >= 1);
+        // Whatever the drafts looked like, the settled preview and the commit
+        // are full resolution.
+        const Image expected = directApply(effect, session.source(), values, nullptr,
+                                           doc->rect());
+        CHECK(samePixels(session.previewImage(), expected));
+        CHECK(session.commit(values));
+        CHECK(samePixels(doc->activeLayer()->image, expected));
+    });
+
+    addTest("cancelling an effect leaves the image and history alone", [] {
+        auto doc = gradientDocument(320, 256);
+        const Image before = doc->activeLayer()->image;
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("surface_blur"));
+        ParamValues values = ParamValues::defaults(effect->params());
+        values.set(QStringLiteral("radius"), 12);
+
+        EffectSession session(effect, doc.get(), &history, kPrimary, kSecondary);
+        session.requestPreview(values);
+        // Wait for the worker to pick the job up, then stop it.
+        CHECK(spinUntil([&] { return session.isBusy(); }));
+        session.cancel();
+        CHECK(!session.isBusy());
+        session.clearPreview();
+        session.restoreSource();
+        CHECK(samePixels(doc->activeLayer()->image, before));
+        CHECK(!doc->hasPreview());
+        CHECK(history.count() == 0);
+        CHECK(!history.canUndo());
+    });
+
+    addTest("rejecting the dialog records nothing", [] {
+        auto doc = gradientDocument(256, 192);
+        const Image before = doc->activeLayer()->image;
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("median"));
+        auto* dialog = new EffectDialog(effect, doc.get(), &history, kPrimary, kSecondary);
+        dialog->session().setDraftPixelBudget(4000);
+        CHECK(spinUntil([&] { return dialog->session().isBusy(); }));
+        dialog->reject();
+        CHECK(samePixels(doc->activeLayer()->image, before));
+        CHECK(!doc->hasPreview());
+        CHECK(history.count() == 0);
+        delete dialog;
+        CHECK(samePixels(doc->activeLayer()->image, before));
+    });
+
+    addTest("rapid parameter changes settle on the final value", [] {
+        auto doc = gradientDocument(120, 96);
+        History history(doc.get());
+        Effect* effect = EffectRegistry::instance().byId(QStringLiteral("median"));
+        EffectDialog dialog(effect, doc.get(), &history, kPrimary, kSecondary);
+        dialog.session().setDraftPixelBudget(3000);
+        ParamValues values = ParamValues::defaults(effect->params());
+        for (int step = 0; step < 60; ++step) {
+            values.set(QStringLiteral("radius"), (step % 7) + 1);
+            values.set(QStringLiteral("percentile"), 20 + (step % 5) * 15);
+            dialog.setValues(values);
+            // Barely any pause: this is the stampede the old debounce queued.
+            QApplication::processEvents(QEventLoop::AllEvents, 1);
+        }
+        CHECK(dialog.session().waitUntilIdle());
+        const Image expected = directApply(effect, dialog.session().source(),
+                                           dialog.values(), nullptr, doc->rect());
+        CHECK(samePixels(dialog.session().previewImage(), expected));
+        dialog.accept();
+        CHECK(samePixels(doc->activeLayer()->image, expected));
+        CHECK(history.count() == 1);
+        history.undo();
+        CHECK(nonTransparentPixels(doc->activeLayer()->image) > 0);
+    });
+
+    addTest("the curves and levels dialogs share the threaded preview", [] {
+        Effect* levels = EffectRegistry::instance().byId(QStringLiteral("levels"));
+        Effect* curves = EffectRegistry::instance().byId(QStringLiteral("curves"));
+        CHECK(levels != nullptr);
+        CHECK(curves != nullptr);
+
+        auto doc = gradientDocument(128, 96);
+        const Image before = doc->activeLayer()->image;
+        History history(doc.get());
+        {
+            LevelsDialog dialog(levels, doc.get(), &history, kPrimary, kSecondary);
+            // The defaults are the identity, so the input black point is
+            // moved to get something worth committing.
+            const QList<QSpinBox*> spins = dialog.findChildren<QSpinBox*>();
+            CHECK(spins.size() >= 4);
+            if (!spins.isEmpty())
+                spins.first()->setValue(40);
+            const Image expected = directApply(levels, before, dialog.values(), nullptr,
+                                               doc->rect());
+            CHECK(dialog.session().waitUntilIdle());
+            CHECK(samePixels(dialog.session().previewImage(), expected));
+            CHECK(doc->hasPreview());
+            dialog.accept();
+            CHECK(samePixels(doc->activeLayer()->image, expected));
+            CHECK(history.count() == 1);
+        }
+        history.undo();
+
+        auto second = gradientDocument(128, 96);
+        History curveHistory(second.get());
+        {
+            CurvesDialog dialog(curves, second.get(), &curveHistory, kPrimary, kSecondary);
+            CHECK(dialog.session().waitUntilIdle());
+            CHECK(second->hasPreview());
+            dialog.reject();
+            CHECK(samePixels(second->activeLayer()->image, before));
+            CHECK(!second->hasPreview());
+            CHECK(curveHistory.count() == 0);
         }
     });
 

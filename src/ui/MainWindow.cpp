@@ -1414,7 +1414,7 @@ void MainWindow::applyEffect(Effect* effect)
     }
     if (effect->params().empty()) {
         const ParamValues values;
-        EffectDialog::applyDirect(effect, doc, history, values, primary, secondary);
+        EffectDialog::applyDirect(effect, doc, history, values, primary, secondary, this);
         finish(effect, values);
         return;
     }
@@ -1438,7 +1438,8 @@ void MainWindow::repeatLastEffect()
         return;
     view->commitPendingTool();
     EffectDialog::applyDirect(lastEffect_, view->document(), view->history(),
-                              lastEffectValues_, colors_->primary(), colors_->secondary());
+                              lastEffectValues_, colors_->primary(), colors_->secondary(),
+                              this);
     view->refresh();
     updateEverything();
 }

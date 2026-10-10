@@ -1,10 +1,15 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <thread>
 
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QHash>
+#include <QObject>
 #include <QTimer>
 
 #include "core/Document.h"
@@ -15,11 +20,146 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
+class QLabel;
+class QProgressBar;
 class QPushButton;
 class QSlider;
 class QSpinBox;
 
 namespace tessel {
+
+// One effect computation handed to a worker thread. The job owns everything
+// the worker writes, so the result can be dropped without touching the
+// document when the job turns out to be stale.
+struct EffectJob {
+    ParamValues values;
+    EffectProgress progress;
+    bool draft = false;
+    Image result;
+    // Set with a release store once `result` is final, read with an acquire
+    // load before the GUI thread touches it. Joining the worker already
+    // orders the two, but Qt's own locks are opaque to race detectors and
+    // this spells the handoff out.
+    std::atomic<bool> done{false};
+};
+
+// Preview, progress, cancellation and commit plumbing for every effect
+// dialog: the generated EffectDialog as well as the hand built Curves and
+// Levels dialogs, which used to carry their own copy of this logic.
+//
+// Effects run on a worker thread against snapshots taken when the session is
+// created, so the document is only ever read and written from the GUI thread.
+// At most one job runs at a time, and a new request supersedes the running one
+// instead of queueing behind it, which is what keeps a dragged slider from
+// piling up full resolution recomputes.
+class EffectSession : public QObject {
+    Q_OBJECT
+
+public:
+    EffectSession(Effect* effect, Document* doc, History* history, Rgba primary,
+                  Rgba secondary, QObject* parent = nullptr);
+    ~EffectSession() override;
+
+    void setRepaintCallback(std::function<void()> callback)
+    {
+        repaint_ = std::move(callback);
+    }
+
+    // Asks for a preview of `values`. A reduced resolution pass lands almost
+    // at once, a full resolution one follows when the controls stop moving.
+    void requestPreview(const ParamValues& values);
+    void clearPreview();
+    // Stops whatever is running and forgets what was owed.
+    void cancel();
+    bool isBusy() const { return running_ != nullptr; }
+
+    // Full resolution apply, recorded in the history. Reuses the settled
+    // preview when it already matches `values`, otherwise computes on a worker
+    // thread; `uiParent` opts into a cancellable progress dialog. Returns
+    // false when nothing was recorded, including when the user stopped it.
+    bool commit(const ParamValues& values, QWidget* uiParent = nullptr);
+    void restoreSource();
+
+    const Image& source() const { return source_; }
+    const Image& previewImage() const { return preview_; }
+    Rect region() const { return region_; }
+    const Mask* clip() const { return hasClip_ ? &clip_ : nullptr; }
+
+    // Regions larger than this are previewed at reduced resolution first.
+    void setDraftPixelBudget(size_t pixels) { draftBudget_ = pixels; }
+
+    // Spins the event loop until nothing is running or owed. Used by the
+    // tests, which have no user to wait for.
+    bool waitUntilIdle(int timeoutMs = 30000);
+
+signals:
+    void progressChanged(double fraction);
+    void busyChanged(bool busy);
+    // True once the preview on screen is the full resolution result.
+    void previewUpdated(bool fullResolution);
+
+private:
+    void onDraftTick();
+    void onRefineTick();
+    void queueJob(bool draft);
+    void supersede();
+    void pump();
+    void jobFinished(std::shared_ptr<EffectJob> job);
+    void deliver(EffectJob& job);
+    void joinWorker();
+    void cancelAndWait();
+    bool computeBlocking(const ParamValues& values, QWidget* uiParent, Image& out);
+    // Runs on the worker thread. Reads only the snapshots below.
+    Image compute(EffectJob& job);
+    bool wantsDraft() const;
+    Rect draftRegion() const;
+    QString iconName() const;
+
+    Effect* effect_;
+    Document* doc_;
+    History* history_;
+    Rgba primary_;
+    Rgba secondary_;
+
+    // Snapshots. Nothing may write to these once a job has been started,
+    // which is what lets the worker read them without any locking.
+    Image source_;
+    Mask clip_;
+    bool hasClip_ = false;
+    Rect region_;
+    Image draftSource_; // built by the first draft job, reused afterwards
+
+    Image preview_;     // the buffer the document points at
+    Image fullResult_;  // last settled full resolution preview
+    ParamValues fullValues_;
+    bool haveFull_ = false;
+
+    ParamValues wanted_;
+    bool hasNext_ = false;
+    bool nextDraft_ = false;
+    std::shared_ptr<EffectJob> running_;
+    // One worker at a time, owned here so the session can always join it
+    // before anything the worker reads goes away. A plain std::thread rather
+    // than a pool: the effects fan out over scanlines internally, so a pool
+    // would only add a queue in front of a single long task.
+    std::thread worker_;
+
+    QTimer draftTimer_;
+    QTimer refineTimer_;
+    QTimer pollTimer_;
+    QElapsedTimer jobClock_;
+    // How long the last full resolution pass took, so a cheap effect stops
+    // paying for the reduced pass it does not need. Negative until measured.
+    double lastFullMs_ = -1.0;
+
+    std::function<void()> repaint_;
+    // Half a megapixel keeps even the slowest effect's draft under about a
+    // tenth of a second on a 20 megapixel canvas, which is what makes a drag
+    // feel like it is following the slider.
+    size_t draftBudget_ = size_t(1) << 19;
+    bool previewActive_ = false;
+    bool blocking_ = false;
+};
 
 // Builds a dialog from an effect's parameter list, shows a live preview on the
 // canvas, and writes the result into the layer when accepted.
@@ -34,14 +174,18 @@ public:
     void setRepaintCallback(std::function<void()> callback)
     {
         repaint_ = std::move(callback);
+        session_.setRepaintCallback(repaint_);
     }
     const ParamValues& values() const { return values_; }
     void setValues(const ParamValues& values);
+    EffectSession& session() { return session_; }
 
     // Applies an effect with the given values with no dialog at all, which is
-    // what the parameterless adjustments and "repeat last effect" use.
+    // what the parameterless adjustments and "repeat last effect" use. Pass a
+    // parent widget to get a progress dialog for the slow ones.
     static bool applyDirect(Effect* effect, Document* doc, History* history,
-                            const ParamValues& values, Rgba primary, Rgba secondary);
+                            const ParamValues& values, Rgba primary, Rgba secondary,
+                            QWidget* uiParent = nullptr);
 
 protected:
     void done(int result) override;
@@ -50,25 +194,19 @@ private:
     void buildControls();
     void addParamRow(QFormLayout* form, const ParamSpec& spec);
     void schedulePreview();
-    void updatePreview();
-    void applyToLayer();
-    void clearPreview();
-    EffectContext makeContext(const Image& source) const;
-    static Rect regionFor(const Document& doc);
 
     Effect* effect_;
     Document* doc_;
-    History* history_;
-    Rgba primary_;
-    Rgba secondary_;
     ParamValues values_;
     ParamValues defaults_;
-    Image source_;
-    Image preview_;
-    QTimer debounce_;
+    EffectSession session_;
     std::function<void()> repaint_;
     QHash<QString, QWidget*> editors_;
-    bool previewActive_ = false;
+    QProgressBar* progress_ = nullptr;
+    // Holds the bar back until a pass is slow enough to be worth reporting,
+    // so a quick draft does not make the dialog flicker.
+    QTimer progressDelay_;
+    bool finishing_ = false;
 };
 
 } // namespace tessel
