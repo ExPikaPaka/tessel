@@ -123,6 +123,12 @@ private:
     // stack rerun that entry alone.
     mutable std::vector<Image> fxCache_;
     mutable std::vector<uint64_t> fxKeys_;
+    // The layer's whole canvas contribution, with its stack and its mask
+    // already in it, for the layers the tile compositor may not build a piece
+    // at a time, see Document::wholeRasterOf.
+    mutable Image whole_;
+    mutable uint64_t wholeKey_ = 0;
+    mutable bool wholeValid_ = false;
     void setUid(int uid) { uid_ = uid; }
     void dropEffectCache() const;
 };
@@ -299,7 +305,62 @@ public:
     // into the pixels they write.
     Image flattenChildren(const Layer& parent, int count = -1) const;
     void invalidate();
-    void invalidateLayer(Layer* layer);
+    // Only `area`, in document coordinates, has to be composited again. An
+    // empty rectangle means the whole canvas, the way a tool's repaint does.
+    void invalidateRect(const Rect& area);
+    void invalidateLayer(Layer* layer, const Rect& area = Rect());
+
+    // ---------------------------------------------------------- tiles
+    // The cached composite is tracked by a grid of fixed tiles. A change to a
+    // layer dirties the tiles its rectangle touches and the next composite
+    // rebuilds only those, so editing a corner of a large document costs what
+    // the corner costs.
+    //
+    // 64 is where the two costs meet. A brush dab costs the area of the tiles
+    // it lands on, so painting wants the tile small, while the setup every
+    // tile pays for itself (walking the layer tree, and a tile sized buffer
+    // for every group and every masked layer) wants it large. On a 4000 by
+    // 3000 document with eight layers, three of them masked and two of them
+    // inside a masked group, a 40 pixel dab and a full rebuild cost:
+    //
+    //      tile    dab        full rebuild
+    //      32      0.14 ms    70 ms
+    //      64      0.26 ms    65 ms
+    //      128     0.40 ms    65 ms
+    //      256     0.83 ms    68 ms
+    //
+    // The rebuild stops improving below 128 and turns back up at 32, where the
+    // per tile setup starts to outweigh the pixels, so 64 is the smallest tile
+    // that costs a full rebuild nothing. It also keeps a tile's temporaries at
+    // 16 KB each, so the ones a dozen layers need still sit in L2.
+    //
+    // Effects are the exception, and they are kept out of the tiles entirely.
+    // A blur, a distortion or a glow reads neighbouring pixels, so a tile
+    // computed from its own backdrop alone gives a different answer either
+    // side of every tile border. A layer carrying an enabled stack, and a
+    // level holding an adjustment layer, are therefore built once at canvas
+    // size and cached on the layer, and the tiles window into that one
+    // result; see needsWholeCanvas and wholeRasterOf. A document with such an
+    // effect in it also pays the whole grid for a change anywhere, because
+    // the rectangle an edit reports says nothing about how far the effect
+    // carried it. A document without one, which is the common case, is
+    // untouched by any of that.
+    static constexpr int kTileSize = 64;
+    int tileColumns() const;
+    int tileRows() const;
+    int tileCount() const { return tileColumns() * tileRows(); }
+    // The tile grid position of one document rectangle, as a tile index range.
+    Rect tilesFor(const Rect& area) const;
+    // How many tiles the last call to composite() had to rebuild, and how many
+    // are waiting for the next one. Both are there for the tests and the
+    // benchmarks; nothing in the program steers by them.
+    int tilesRebuilt() const { return tilesRebuilt_; }
+    int dirtyTileCount() const;
+    // What the tile cache costs: one canvas sized raster, which is the size of
+    // one more layer, plus a byte per tile. The canvas sized results an effect
+    // is built into are not part of it; those are one raster per layer that
+    // runs an effect, and they are the price of a seam free one.
+    size_t tileCacheBytes() const;
 
     // A temporary stand in image for one layer, so effect dialogs can show a
     // live preview without modifying the document.
@@ -339,10 +400,32 @@ public:
 private:
     void assignUids(Layer* layer);
     void markStructureChanged();
-    // The pixels one layer contributes, without its own opacity and mode.
-    // Rasters that have to be built for the call are parked in `owned`, which
-    // is a deque so that the pointers handed out stay valid.
-    const Image* rasterOf(const Layer& layer, std::deque<Image>& owned) const;
+    // The pixels one layer contributes to `area`, without its own opacity and
+    // mode. The raster handed back either covers the whole canvas, and then
+    // the offsets are zero, or exactly the part of `area` the layer reaches,
+    // and then they say where its top left pixel sits. Rasters that have to be
+    // built for the call are parked in `owned`, which is a deque so that the
+    // pointers handed out stay valid.
+    const Image* rasterOf(const Layer& layer, const Rect& area,
+                          std::deque<Image>& owned, int* ox, int* oy,
+                          bool parallel) const;
+    // The whole canvas contribution of a layer the tiles may not build a piece
+    // at a time, cached on the layer so that every tile windows into the one
+    // result. An effect reads neighbouring pixels, so a tile computed from its
+    // own backdrop alone disagrees with its neighbours along the seam between
+    // them; building the level once at canvas size is what keeps the seams out.
+    const Image* wholeRasterOf(const Layer& layer) const;
+    // True when `layer` has to go through wholeRasterOf: it carries an enabled
+    // effect of its own, or it is a group holding an adjustment layer that
+    // would act on what lies below it.
+    static bool needsWholeCanvas(const Layer& layer);
+    // Builds every whole canvas result the tiles are about to read. The caches
+    // are filled lazily and shared between the tiles, so they have to be in
+    // place before the tiles go out to the pool.
+    void warmWholeRasters(const Layer& parent) const;
+    // True when some layer in the document carries an enabled effect, which is
+    // what decides whether the rectangle an edit reports is worth anything.
+    bool anyActiveEffects() const;
     // Applies a layer's effect stack to `base`, which `baseKey` identifies:
     // the layer's own pixels for a stack, the backdrop for an adjustment
     // layer. The result is cached per entry on the layer, so only the entries
@@ -352,8 +435,20 @@ private:
                               uint64_t baseKey) const;
     // The identity of the pixels a layer starts from, before its own stack.
     uint64_t sourceKey(const Layer& layer) const;
+    // The identity of the raster rasterOf hands back: the source, the layer's
+    // own stack and its mask, but not its opacity or its blend mode, which the
+    // parent applies afterwards.
+    uint64_t rasterKey(const Layer& layer) const;
     // The identity of what a layer contributes to its parent, stack included.
     uint64_t contributionKey(const Layer& layer) const;
+    // Composites one tile, or one band of one tile, into the cached raster.
+    void buildTile(const Rect& region) const;
+    Rect tileRect(int index) const;
+    // Sizes the dirty grid to the canvas, dirtying all of it when the canvas
+    // has changed shape under it.
+    void ensureTileGrid() const;
+    void dirtyAllTiles() const;
+    void markTiles(const Rect& area);
     const std::vector<Layer*>& flat() const;
     // Every raster the document owns: layer pixels and mask pixels, but not
     // the empty images of groups.
@@ -383,9 +478,19 @@ private:
     mutable std::vector<Layer*> flat_;
     mutable bool flatValid_ = false;
     mutable Image composite_;
-    mutable bool compositeValid_ = false;
+    // One byte per tile of composite_, row major over tileColumns().
+    mutable std::vector<uint8_t> tileDirty_;
+    // The box the dirty tiles fall in, in tile coordinates, so that finding
+    // them again costs the box and not the grid.
+    mutable Rect dirtyBox_;
+    mutable int gridColumns_ = 0;
+    mutable int tilesRebuilt_ = 0;
     int previewUid_ = -1;
     const Image* previewImage_ = nullptr;
+    // Bumped every time a preview is put in place or taken away. It stands for
+    // the contents of the preview buffer in a cache key, because the dialogs
+    // refill one buffer rather than handing over a new one.
+    uint32_t previewSerial_ = 0;
     std::vector<TextItem> textItems_;
 };
 

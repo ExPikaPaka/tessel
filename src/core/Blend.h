@@ -118,9 +118,21 @@ struct CompositeLayer {
     uint8_t opacity = 255;
     BlendMode mode = BlendMode::Normal;
     bool visible = true;
+    // Where the image's top left pixel sits in the coordinates the region is
+    // given in. A raster that covers the whole canvas leaves this at the
+    // origin; one built for a single tile carries that tile's corner, so the
+    // tiled compositor can hand out windows instead of canvas sized copies.
+    int ox = 0;
+    int oy = 0;
 };
 
 Image compositeLayers(const std::vector<CompositeLayer>& layers, int width, int height);
-void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out, const Rect& region);
+// Flattens `region` into `out`, whose own top left pixel sits at (outOx, outOy)
+// of the same coordinate space. `parallel` splits the region by scanlines; the
+// tile compositor turns it off because it already runs one tile per worker and
+// the thread pool does not nest.
+void compositeRegion(const std::vector<CompositeLayer>& layers, Image& out,
+                     const Rect& region, int outOx = 0, int outOy = 0,
+                     bool parallel = true);
 
 } // namespace tessel

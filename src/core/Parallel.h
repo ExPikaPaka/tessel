@@ -185,4 +185,23 @@ void parallelFor(int begin, int end, F&& f, int minRowsPerThread = 24)
     detail::ThreadPool::instance().run(chunks, job);
 }
 
+// Calls f(index) for every index in [0, count) across the pool. The unit of
+// work is one item rather than a band of rows, which is what compositing a
+// list of tiles wants: a tile carries setup of its own, so handing out tiles
+// balances the work and costs the pool one wake up instead of one per tile.
+// Like parallelFor, this must not be called from inside either of them.
+template <class F>
+void parallelForEach(int count, F&& f)
+{
+    if (count <= 0)
+        return;
+    if (count == 1 || hardwareThreads() == 1) {
+        for (int i = 0; i < count; ++i)
+            f(i);
+        return;
+    }
+    const std::function<void(int)> job = [&](int index) { f(index); };
+    detail::ThreadPool::instance().run(count, job);
+}
+
 } // namespace tessel
