@@ -17,6 +17,8 @@
 #include "ui/CurveWidget.h"
 #include "ui/Dialogs.h"
 #include "ui/EffectDialog.h"
+#include "tools/Tool.h"
+#include "ui/Docks.h"
 #include "ui/Icons.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
@@ -99,6 +101,80 @@ void buildSampleArtwork(Document& doc)
     doc.setModified(false);
 }
 
+
+// Grabs one widget with a little breathing room around it, so panel closeups do
+// not look cropped to the pixel.
+void shotWidget(QWidget* widget, const QString& path)
+{
+    if (!widget)
+        return;
+    widget->grab().save(path);
+    qInfo("wrote %s", qPrintable(path));
+}
+
+// Lays several effect results out in a labelled grid, which says more about
+// what the program can do than any single screenshot.
+QImage buildEffectsGallery(const Image& subject)
+{
+    struct Entry {
+        const char* id;
+        const char* label;
+    };
+    const Entry entries[] = {
+        {"", "Original"},          {"oil_painting", "Oil Painting"},
+        {"pencil_sketch", "Pencil Sketch"}, {"gaussian_blur", "Gaussian Blur"},
+        {"motion_blur", "Motion Blur"},     {"twist", "Twist"},
+        {"bulge", "Bulge"},                 {"crystalize", "Crystalize"},
+        {"emboss", "Emboss"},               {"edge_detect", "Edge Detect"},
+        {"quantize", "Quantize"},           {"vignette", "Vignette"},
+    };
+    constexpr int kColumns = 4;
+    const int cell = 210;
+    const int labelHeight = 22;
+    const int rows = (int(std::size(entries)) + kColumns - 1) / kColumns;
+
+    QImage sheet(kColumns * cell, rows * (cell + labelHeight),
+                 QImage::Format_ARGB32_Premultiplied);
+    sheet.fill(theme::windowColor());
+    QPainter painter(&sheet);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QFont font = painter.font();
+    font.setPointSizeF(9.0);
+    painter.setFont(font);
+
+    for (int i = 0; i < int(std::size(entries)); ++i) {
+        const int column = i % kColumns;
+        const int row = i / kColumns;
+        const QRect box(column * cell, row * (cell + labelHeight), cell, cell);
+
+        Image result = subject;
+        if (entries[i].id[0] != '\0') {
+            Effect* effect = EffectRegistry::instance().byId(
+                QString::fromLatin1(entries[i].id));
+            if (effect) {
+                EffectContext context;
+                context.source = &subject;
+                context.region = subject.rect();
+                context.primary = Rgba(255, 214, 92, 255);
+                context.secondary = Rgba(40, 60, 120, 255);
+                result = effect->apply(context, ParamValues::defaults(effect->params()));
+            }
+        }
+        const QImage shown = result.toQImage().scaled(box.size(), Qt::KeepAspectRatio,
+                                                      Qt::SmoothTransformation);
+        painter.drawImage(box.x() + (box.width() - shown.width()) / 2,
+                          box.y() + (box.height() - shown.height()) / 2, shown);
+        painter.setPen(theme::gridColor());
+        painter.drawRect(box.adjusted(0, 0, -1, -1));
+        painter.setPen(theme::textColor());
+        painter.drawText(QRect(box.x(), box.bottom(), box.width(), labelHeight),
+                         Qt::AlignCenter, QString::fromLatin1(entries[i].label));
+    }
+    painter.end();
+    return sheet;
+}
+
 void save(QWidget* widget, const QString& path)
 {
     widget->grab().save(path);
@@ -178,6 +254,94 @@ int main(int argc, char** argv)
             app.processEvents();
             shot(&effect, QStringLiteral("dialog-effect"));
             effect.reject();
+
+            // Panel closeups.
+            const QString dir = outDir + QLatin1Char('/');
+            shotWidget(window->findChild<ToolsPalette*>(), dir + "panel-tools.png");
+            shotWidget(window->findChild<ColorPanel*>(), dir + "panel-colors.png");
+            shotWidget(window->findChild<LayersPanel*>(), dir + "panel-layers.png");
+            shotWidget(window->findChild<HistoryPanel*>(), dir + "panel-history.png");
+
+            // The tool options bar changes completely per tool, so show three.
+            auto* options = window->findChild<ToolOptionsBar*>();
+            const char* optionTools[] = {"brush", "gradient", "shapes", "text"};
+            for (const char* id : optionTools) {
+                Tool* tool = ToolRegistry::instance().byId(QString::fromLatin1(id));
+                if (!tool || !options)
+                    continue;
+                options->startTool(tool);
+                options->setToolList(ToolsPalette::toolOrder(), tool->id());
+                app.processEvents();
+                shotWidget(options, dir + QStringLiteral("options-%1.png")
+                                             .arg(QString::fromLatin1(id)));
+            }
+
+            // The canvas on its own, with the selection showing.
+            shotWidget(view->viewport(), dir + "canvas-selection.png");
+
+            // The rotate and zoom gizmo, mid transform.
+            if (Tool* gizmo = ToolRegistry::instance().byId(QStringLiteral("transform"))) {
+                doc->selection().clear();
+                view->setTool(gizmo);
+                gizmo->optionChanged(QStringLiteral("angle"), 18.0);
+                gizmo->optionChanged(QStringLiteral("zoom"), 0.78);
+                ToolContext gizmoContext = view->makeContext();
+                gizmo->press(gizmoContext, ToolEvent{});
+                gizmo->release(gizmoContext, ToolEvent{});
+                view->refresh();
+                app.processEvents();
+                shotWidget(view->viewport(), dir + "gizmo.png");
+                gizmo->cancel(gizmoContext);
+                view->setTool(ToolRegistry::instance().byId(QStringLiteral("brush")));
+            }
+
+            // A gallery of what the effects do to one subject.
+            buildEffectsGallery(doc->composite()).save(dir + "effects-gallery.png");
+            qInfo("wrote %s", qPrintable(dir + "effects-gallery.png"));
+
+            // Frames for the animated demo: a stroke appearing, then an effect.
+            QDir().mkpath(outDir + QStringLiteral("/demo"));
+            Layer* canvasLayer = doc->layerAt(doc->layerCount() - 1);
+            const Image clean = canvasLayer->image;
+            const std::vector<QPointF> path = {
+                {120, 430}, {240, 250}, {380, 400}, {520, 210}, {680, 360}, {820, 200}};
+            for (int frame = 0; frame < 14; ++frame) {
+                if (frame < 10) {
+                    const double progress = (frame + 1) / 10.0;
+                    std::vector<QPointF> partial;
+                    const double total = (path.size() - 1) * progress;
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        if (double(i) <= total)
+                            partial.push_back(path[i]);
+                    }
+                    if (partial.size() < 2)
+                        partial = {path[0], path[0]};
+                    canvasLayer->image = clean;
+                    Mask stroke = ops::strokeMask(doc->width(), doc->height(), partial,
+                                                  30.0, 0.55);
+                    ops::colorOver(canvasLayer->image, stroke, Rgba(120, 220, 255, 255),
+                                   BlendMode::Normal, canvasLayer->image.rect());
+                } else {
+                    // Then ripple an effect in over the last few frames.
+                    Effect* twist = EffectRegistry::instance().byId(QStringLiteral("twist"));
+                    EffectContext context;
+                    context.source = &canvasLayer->image;
+                    context.region = canvasLayer->image.rect();
+                    ParamValues values = ParamValues::defaults(twist->params());
+                    values.set(QStringLiteral("amount"), (frame - 9) * 22.0);
+                    canvasLayer->image = twist->apply(context, values);
+                }
+                doc->invalidate();
+                view->refresh();
+                view->notifyDocumentChanged();
+                app.processEvents();
+                window->grab().save(outDir
+                                    + QStringLiteral("/demo/frame%1.png")
+                                          .arg(frame, 2, 10, QLatin1Char('0')));
+            }
+            canvasLayer->image = clean;
+            doc->invalidate();
+            qInfo("wrote demo frames");
         }
         // Deliberately not closed: closing asks about unsaved changes, and in
         // a headless run there is nobody to answer the prompt. Letting the
