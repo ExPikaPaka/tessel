@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include "core/Document.h"
+#include "core/Units.h"
 #include "effects/Effect.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
@@ -102,6 +103,8 @@ private:
     void setLayerVisible(int index, bool visible);
     void goToLayer(int index);
     void showSettings();
+    // The unit the rulers, the status bar and the resize dialogs measure in.
+    void setMeasurementUnit(Unit unit);
     void structuralEdit(const QString& name, const QString& icon,
                         const std::function<void()>& action);
 
@@ -144,6 +147,7 @@ private:
     int untitledCounter_ = 1;
     int defaultWidth_ = 800;
     int defaultHeight_ = 600;
+    Unit unit_ = Unit::Pixels;
 };
 
 } // namespace tessel

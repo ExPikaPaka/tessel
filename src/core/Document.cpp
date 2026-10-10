@@ -1,8 +1,11 @@
 #include "core/Document.h"
 
+#include <cmath>
+
 #include <QFileInfo>
 
 #include "core/ImageOps.h"
+#include "core/Units.h"
 
 namespace tessel {
 
@@ -55,6 +58,15 @@ Document::Document(int width, int height, Rgba background)
     assignUid(layer.get());
     layers_.push_back(std::move(layer));
     activeIndex_ = 0;
+}
+
+void Document::setResolution(double resolution)
+{
+    const double next = units::sanitize(resolution);
+    if (std::abs(next - resolution_) < 1e-9)
+        return;
+    resolution_ = next;
+    modified_ = true;
 }
 
 void Document::assignUid(Layer* layer)
@@ -359,6 +371,7 @@ DocumentState Document::snapshot() const
     DocumentState state;
     state.width = width_;
     state.height = height_;
+    state.resolution = resolution_;
     state.active = activeIndex_;
     state.layers.reserve(layers_.size());
     for (const auto& layer : layers_) {
@@ -376,6 +389,7 @@ void Document::restore(const DocumentState& state)
 {
     width_ = state.width;
     height_ = state.height;
+    resolution_ = units::sanitize(state.resolution);
     layers_.clear();
     layers_.reserve(state.layers.size());
     for (const DocumentState::LayerState& ls : state.layers) {

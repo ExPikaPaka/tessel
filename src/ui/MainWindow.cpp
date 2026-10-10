@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -290,6 +291,23 @@ void MainWindow::createActions()
     actions_.insert(QStringLiteral("rulers"), rulers);
     addAction(rulers);
 
+    // One checkable action per measurable unit, in an exclusive group.
+    auto* unitGroup = new QActionGroup(this);
+    unitGroup->setExclusive(true);
+    unitGroup->setObjectName(QStringLiteral("unitgroup"));
+    for (Unit candidate : {Unit::Pixels, Unit::Inches, Unit::Centimetres}) {
+        auto* action = new QAction(units::unitName(candidate), this);
+        action->setCheckable(true);
+        action->setChecked(candidate == unit_);
+        const QString key = QStringLiteral("unit-") + units::unitId(candidate);
+        action->setObjectName(key);
+        unitGroup->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [this, candidate] { setMeasurementUnit(candidate); });
+        actions_.insert(key, action);
+        addAction(action);
+    }
+
     auto* selectionOutline = new QAction(QStringLiteral("Selection &Outline"), this);
     selectionOutline->setCheckable(true);
     selectionOutline->setChecked(true);
@@ -505,6 +523,10 @@ void MainWindow::createMenus()
     add(view, QStringLiteral("grid"));
     add(view, QStringLiteral("rulers"));
     add(view, QStringLiteral("selectionoutline"));
+    QMenu* unitsMenu = view->addMenu(QStringLiteral("&Units"));
+    unitsMenu->setObjectName(QStringLiteral("unitsmenu"));
+    for (Unit candidate : {Unit::Pixels, Unit::Inches, Unit::Centimetres})
+        add(unitsMenu, QStringLiteral("unit-") + units::unitId(candidate));
     view->addSeparator();
     add(view, QStringLiteral("fullscreen"));
 
@@ -798,6 +820,7 @@ void MainWindow::createStatusBar()
     positionLabel_ = new QLabel(this);
     selectionLabel_ = new QLabel(this);
     sizeLabel_ = new QLabel(this);
+    sizeLabel_->setObjectName(QStringLiteral("imagesize"));
     hintLabel_->setMinimumWidth(260);
     positionLabel_->setMinimumWidth(104);
     selectionLabel_->setMinimumWidth(130);
@@ -935,6 +958,7 @@ void MainWindow::addView(CanvasView* view)
     view->setSecondaryColor(colors_->secondary());
     view->setShowGrid(actions_.value(QStringLiteral("grid"))->isChecked());
     view->setShowRulers(actions_.value(QStringLiteral("rulers"))->isChecked());
+    view->setRulerUnit(unit_);
     view->setShowSelection(
         actions_.value(QStringLiteral("selectionoutline"))->isChecked());
 
@@ -1207,7 +1231,10 @@ void MainWindow::updateStatusBar()
     } else {
         selectionLabel_->setText(QStringLiteral("No selection"));
     }
-    sizeLabel_->setText(QStringLiteral("%1 x %2").arg(doc->width()).arg(doc->height()));
+    sizeLabel_->setText(
+        units::describeSize(doc->width(), doc->height(), doc->resolution(), unit_));
+    sizeLabel_->setToolTip(
+        units::describePrintSize(doc->width(), doc->height(), doc->resolution(), unit_));
 }
 
 void MainWindow::updateActionStates()
@@ -1586,15 +1613,25 @@ void MainWindow::resizeImage()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    ResizeDialog dialog(QStringLiteral("Resize Image"), doc->width(), doc->height(), false,
-                        this);
+    ResizeDialog dialog(QStringLiteral("Resize Image"), doc->width(), doc->height(),
+                        doc->resolution(), unit_, false, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const int width = dialog.newWidth();
     const int height = dialog.newHeight();
+    const double resolution = dialog.newResolution();
     const bool smooth = dialog.smoothResampling();
+    // With resampling off the pixels are left alone: only the print size, that
+    // is the resolution, changes.
+    const bool resample = dialog.resamples()
+        && (width != doc->width() || height != doc->height());
+    if (!resample && std::abs(resolution - doc->resolution()) < 1e-9)
+        return;
     structuralEdit(QStringLiteral("Resize Image"), QStringLiteral("resize"),
-                   [doc, width, height, smooth] {
+                   [doc, width, height, resolution, smooth, resample] {
+                       doc->setResolution(resolution);
+                       if (!resample)
+                           return;
                        if (smooth) {
                            doc->resizeCanvas(width, height, Anchor::Center, true);
                        } else {
@@ -1615,8 +1652,8 @@ void MainWindow::changeCanvasSize()
     Document* doc = currentDocument();
     if (!doc)
         return;
-    ResizeDialog dialog(QStringLiteral("Canvas Size"), doc->width(), doc->height(), true,
-                        this);
+    ResizeDialog dialog(QStringLiteral("Canvas Size"), doc->width(), doc->height(),
+                        doc->resolution(), unit_, true, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const int width = dialog.newWidth();
@@ -1628,6 +1665,16 @@ void MainWindow::changeCanvasSize()
                    });
     if (CanvasView* view = currentView())
         view->zoomToFit();
+}
+
+void MainWindow::setMeasurementUnit(Unit unit)
+{
+    unit_ = unit;
+    if (QAction* action = actions_.value(QStringLiteral("unit-") + units::unitId(unit)))
+        action->setChecked(true);
+    for (int i = 0; i < stack_->count(); ++i)
+        viewAt(i)->setRulerUnit(unit);
+    updateStatusBar();
 }
 
 void MainWindow::flattenImage()
@@ -1988,6 +2035,8 @@ void MainWindow::restoreSettings()
         grid->setChecked(settings.value(QStringLiteral("pixelGrid"), false).toBool());
     if (QAction* rulers = actions_.value(QStringLiteral("rulers")))
         rulers->setChecked(settings.value(QStringLiteral("rulers"), false).toBool());
+    setMeasurementUnit(units::unitFromId(
+        settings.value(QStringLiteral("unit"), units::unitId(Unit::Pixels)).toString()));
 }
 
 void MainWindow::storeSettings()
@@ -2000,6 +2049,7 @@ void MainWindow::storeSettings()
                       actions_.value(QStringLiteral("grid"))->isChecked());
     settings.setValue(QStringLiteral("rulers"),
                       actions_.value(QStringLiteral("rulers"))->isChecked());
+    settings.setValue(QStringLiteral("unit"), units::unitId(unit_));
 }
 
 // ----------------------------------------------------------------- events

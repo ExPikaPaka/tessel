@@ -350,6 +350,15 @@ void CanvasView::setShowRulers(bool show)
     viewport()->update();
 }
 
+void CanvasView::setRulerUnit(Unit unit)
+{
+    if (rulerUnit_ == unit)
+        return;
+    rulerUnit_ = unit;
+    if (showRulers_)
+        viewport()->update();
+}
+
 // ----------------------------------------------------------------- painting
 
 void CanvasView::paintEvent(QPaintEvent*)
@@ -462,33 +471,65 @@ void CanvasView::drawRulers(QPainter& painter)
     painter.drawLine(0, kRulerSize, port.width(), kRulerSize);
     painter.drawLine(kRulerSize, 0, kRulerSize, port.height());
 
-    // Pick a tick spacing that stays readable at any zoom.
-    double spacing = 10.0;
-    while (spacing * zoom_ < 48.0)
-        spacing *= (std::abs(spacing - 10.0) < 1e-9 || std::abs(spacing - 100.0) < 1e-9)
-            ? 5.0 : 2.0;
+    // The spacing is chosen in the ruler unit, so inches step in halves and
+    // quarters rather than in round pixel counts.
+    const double dpi = doc_->resolution();
+    const units::RulerTicks ticks = units::rulerTicks(rulerUnit_, dpi, zoom_);
+    const double minor = ticks.major / std::max(1, ticks.minorPerMajor);
     QFont font = painter.font();
     font.setPointSizeF(7.0);
     painter.setFont(font);
     painter.setPen(theme::textColor());
-    for (double x = 0; x <= doc_->width(); x += spacing) {
-        const double at = origin.x() + x * zoom_;
-        if (at < kRulerSize || at > port.width())
-            continue;
-        painter.drawLine(QPointF(at, kRulerSize - 5), QPointF(at, kRulerSize));
-        painter.drawText(QPointF(at + 2, kRulerSize - 7), QString::number(int(x)));
+
+    // Walks only the ticks that can land in the viewport: zoomed into a large
+    // document there are far more of them than there are pixels to show. The
+    // position is recomputed from the index rather than accumulated, so no
+    // rounding error creeps along the ruler.
+    const auto forEachTick = [&](double step, double extent, double originPos,
+                                 double limit, const auto& draw) {
+        const double screenStep = step * zoom_;
+        if (!(screenStep > 0.0))
+            return;
+        double index = std::max(0.0, std::floor((kRulerSize - originPos) / screenStep));
+        for (; index * step <= extent + 0.5; ++index) {
+            const double at = originPos + index * screenStep;
+            if (at > limit)
+                return;
+            if (at >= kRulerSize)
+                draw(index * step, at);
+        }
+    };
+
+    if (ticks.minorPerMajor > 1) {
+        forEachTick(minor, doc_->width(), origin.x(), port.width(),
+                    [&](double, double at) {
+                        painter.drawLine(QPointF(at, kRulerSize - 3),
+                                         QPointF(at, kRulerSize));
+                    });
+        forEachTick(minor, doc_->height(), origin.y(), port.height(),
+                    [&](double, double at) {
+                        painter.drawLine(QPointF(kRulerSize - 3, at),
+                                         QPointF(kRulerSize, at));
+                    });
     }
-    for (double y = 0; y <= doc_->height(); y += spacing) {
-        const double at = origin.y() + y * zoom_;
-        if (at < kRulerSize || at > port.height())
-            continue;
-        painter.drawLine(QPointF(kRulerSize - 5, at), QPointF(kRulerSize, at));
-        painter.save();
-        painter.translate(QPointF(kRulerSize - 7, at - 2));
-        painter.rotate(-90);
-        painter.drawText(QPointF(0, 0), QString::number(int(y)));
-        painter.restore();
-    }
+    forEachTick(ticks.major, doc_->width(), origin.x(), port.width(),
+                [&](double value, double at) {
+                    painter.drawLine(QPointF(at, kRulerSize - 7),
+                                     QPointF(at, kRulerSize));
+                    painter.drawText(QPointF(at + 2, kRulerSize - 8),
+                                     units::rulerLabel(value, rulerUnit_, dpi));
+                });
+    forEachTick(ticks.major, doc_->height(), origin.y(), port.height(),
+                [&](double value, double at) {
+                    painter.drawLine(QPointF(kRulerSize - 7, at),
+                                     QPointF(kRulerSize, at));
+                    painter.save();
+                    painter.translate(QPointF(kRulerSize - 8, at - 2));
+                    painter.rotate(-90);
+                    painter.drawText(QPointF(0, 0),
+                                     units::rulerLabel(value, rulerUnit_, dpi));
+                    painter.restore();
+                });
     // Cursor markers.
     painter.setPen(QPen(theme::accentColor(), 1));
     const QPointF cursor = viewFromDoc(QPointF(lastPixel_.x(), lastPixel_.y()));

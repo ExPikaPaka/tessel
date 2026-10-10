@@ -1,5 +1,6 @@
 // Headless interface tests: the real widgets, tools and dialogs are driven
 // through their public API with the offscreen Qt platform plugin.
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
@@ -7,7 +8,10 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QTemporaryDir>
 
 #include "core/ImageOps.h"
@@ -15,6 +19,7 @@
 #include "tools/Tool.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
+#include "ui/Dialogs.h"
 #include "ui/Docks.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
@@ -44,6 +49,11 @@ std::vector<std::pair<const char*, std::function<void()>>> tests;
 void addTest(const char* name, std::function<void()> fn)
 {
     tests.emplace_back(name, std::move(fn));
+}
+
+bool nearly(double a, double b, double tolerance = 1e-6)
+{
+    return std::abs(a - b) <= tolerance;
 }
 
 ToolEvent makeEvent(QPointF pos, Qt::MouseButton button = Qt::LeftButton,
@@ -672,6 +682,141 @@ int main(int argc, char** argv)
         QAction* close = window.findChild<QAction*>(QStringLiteral("close"));
         close->trigger();
         CHECK(window.findChildren<CanvasView*>().size() >= 2);
+    });
+
+    addTest("view menu units drive the status bar", [] {
+        MainWindow window;
+        window.newDocument(192, 96, Rgba(255, 255, 255, 255));
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        view->document()->setResolution(96.0);
+
+        QAction* pixels = window.findChild<QAction*>(QStringLiteral("unit-pixels"));
+        QAction* inches = window.findChild<QAction*>(QStringLiteral("unit-inches"));
+        QAction* centimetres =
+            window.findChild<QAction*>(QStringLiteral("unit-centimetres"));
+        CHECK(pixels != nullptr);
+        CHECK(inches != nullptr);
+        CHECK(centimetres != nullptr);
+        CHECK(pixels->isCheckable() && inches->isCheckable());
+        QLabel* size = window.findChild<QLabel*>(QStringLiteral("imagesize"));
+        CHECK(size != nullptr);
+        if (!pixels || !inches || !centimetres || !size)
+            return;
+
+        // Start from centimetres so every later switch is a real change,
+        // whatever unit the stored settings left behind.
+        centimetres->trigger();
+        const QString inCentimetres = size->text();
+        CHECK(inCentimetres == QStringLiteral("5.08 x 2.54 cm"));
+        CHECK(view->rulerUnit() == Unit::Centimetres);
+
+        inches->trigger();
+        const QString inInches = size->text();
+        CHECK(inInches != inCentimetres);
+        CHECK(inInches == QStringLiteral("2 x 1 in"));
+        CHECK(view->rulerUnit() == Unit::Inches);
+        CHECK(inches->isChecked() && !centimetres->isChecked());
+
+        pixels->trigger();
+        CHECK(size->text() == QStringLiteral("192 x 96 px"));
+        CHECK(size->text() != inInches);
+        CHECK(view->rulerUnit() == Unit::Pixels);
+
+        // A denser document prints smaller, and the status bar says so.
+        inches->trigger();
+        view->document()->setResolution(192.0);
+        view->notifyDocumentChanged();
+        CHECK(size->text() == QStringLiteral("1 x 0.5 in"));
+
+        // Views opened later start in the chosen unit.
+        window.newDocument(100, 100, Rgba(255, 255, 255, 255));
+        CHECK(window.findChildren<CanvasView*>().last()->rulerUnit() == Unit::Inches);
+    });
+
+    addTest("resize dialog converts between units", [] {
+        // 600 x 300 pixels at 300 ppi is a 2 x 1 inch print.
+        ResizeDialog dialog(QStringLiteral("Resize Image"), 600, 300, 300.0,
+                            Unit::Pixels, false);
+        CHECK(dialog.unit() == Unit::Pixels);
+        CHECK(dialog.newWidth() == 600 && dialog.newHeight() == 300);
+        CHECK(nearly(dialog.displayedWidth(), 600.0));
+        CHECK(dialog.findChild<QComboBox*>(QStringLiteral("units")) != nullptr);
+        CHECK(dialog.findChild<QDoubleSpinBox*>(QStringLiteral("resolution")) != nullptr);
+
+        // Switching units only relabels the same image.
+        dialog.setUnit(Unit::Inches);
+        CHECK(dialog.newWidth() == 600 && dialog.newHeight() == 300);
+        CHECK(nearly(dialog.displayedWidth(), 2.0, 1e-3));
+        CHECK(nearly(dialog.displayedHeight(), 1.0, 1e-3));
+        CHECK(dialog.printSizeText().contains(QStringLiteral("2 x 1 in at 300 ppi")));
+
+        dialog.setUnit(Unit::Centimetres);
+        CHECK(dialog.newWidth() == 600 && dialog.newHeight() == 300);
+        CHECK(nearly(dialog.displayedWidth(), 5.08, 0.01));
+        CHECK(nearly(dialog.displayedHeight(), 2.54, 0.01));
+
+        dialog.setUnit(Unit::Percent);
+        CHECK(dialog.newWidth() == 600 && dialog.newHeight() == 300);
+        CHECK(nearly(dialog.displayedWidth(), 100.0, 0.01));
+
+        dialog.setUnit(Unit::Pixels);
+        CHECK(dialog.newWidth() == 600 && dialog.newHeight() == 300);
+        CHECK(nearly(dialog.displayedWidth(), 600.0));
+        CHECK(nearly(dialog.newResolution(), 300.0));
+
+        // Only typing a new size changes the pixels, and the aspect ratio is
+        // kept by default.
+        dialog.setUnit(Unit::Inches);
+        dialog.setDisplayedWidth(4.0);
+        CHECK(dialog.newWidth() == 1200);
+        CHECK(dialog.newHeight() == 600);
+        CHECK(dialog.printSizeText().contains(QStringLiteral("4 x 2 in at 300 ppi")));
+
+        // Percent measures against the size the dialog opened with.
+        dialog.setUnit(Unit::Percent);
+        CHECK(nearly(dialog.displayedWidth(), 200.0, 0.01));
+        dialog.setDisplayedWidth(50.0);
+        CHECK(dialog.newWidth() == 300 && dialog.newHeight() == 150);
+    });
+
+    addTest("resize dialog resample switch", [] {
+        // Resampling off: a new resolution changes the print size only.
+        ResizeDialog plain(QStringLiteral("Resize Image"), 600, 300, 300.0,
+                           Unit::Inches, false);
+        CHECK(plain.resamples());
+        plain.setResample(false);
+        CHECK(!plain.resamples());
+        CHECK(plain.newWidth() == 600 && plain.newHeight() == 300);
+        plain.setResolution(150.0);
+        CHECK(plain.newWidth() == 600 && plain.newHeight() == 300);
+        CHECK(nearly(plain.newResolution(), 150.0));
+        CHECK(nearly(plain.displayedWidth(), 4.0, 1e-3));
+        CHECK(plain.printSizeText().contains(QStringLiteral("4 x 2 in at 150 ppi")));
+        // Asking for a printed size instead moves the resolution.
+        plain.setDisplayedWidth(2.0);
+        CHECK(plain.newWidth() == 600 && plain.newHeight() == 300);
+        CHECK(nearly(plain.newResolution(), 300.0, 1e-3));
+
+        // Resampling on: the same change keeps the print size and resamples.
+        ResizeDialog resampled(QStringLiteral("Resize Image"), 600, 300, 300.0,
+                               Unit::Inches, false);
+        resampled.setResolution(150.0);
+        CHECK(resampled.newWidth() == 300 && resampled.newHeight() == 150);
+        CHECK(nearly(resampled.newResolution(), 150.0));
+        CHECK(nearly(resampled.displayedWidth(), 2.0, 1e-3));
+
+        // Canvas Size offers the units but no resolution: padding a canvas
+        // cannot change how densely it prints.
+        ResizeDialog canvas(QStringLiteral("Canvas Size"), 600, 300, 300.0,
+                            Unit::Inches, true);
+        CHECK(canvas.findChild<QComboBox*>(QStringLiteral("units")) != nullptr);
+        CHECK(canvas.findChild<QDoubleSpinBox*>(QStringLiteral("resolution")) == nullptr);
+        CHECK(canvas.resamples());
+        canvas.setUnit(Unit::Centimetres);
+        CHECK(canvas.newWidth() == 600 && canvas.newHeight() == 300);
+        canvas.setDisplayedWidth(10.16); // four inches
+        CHECK(canvas.newWidth() == 1200 && canvas.newHeight() == 600);
+        CHECK(nearly(canvas.newResolution(), 300.0));
     });
 
     // ------------------------------------------------------------ run

@@ -9,6 +9,7 @@
 
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/Units.h"
 #include "tools/Tool.h"
 
 namespace tessel {
@@ -46,6 +47,10 @@ public:
     bool showSelection() const { return showSelection_; }
     void setShowRulers(bool show);
     bool showRulers() const { return showRulers_; }
+    // The unit the rulers are marked in; the document resolution turns it into
+    // pixels.
+    void setRulerUnit(Unit unit);
+    Unit rulerUnit() const { return rulerUnit_; }
 
     // Builds the context that menu commands use to touch the document.
     ToolContext makeContext();
@@ -104,6 +109,7 @@ private:
     bool showGrid_ = false;
     bool showSelection_ = true;
     bool showRulers_ = false;
+    Unit rulerUnit_ = Unit::Pixels;
     bool panning_ = false;
     bool spaceHeld_ = false;
     QPoint panAnchor_;

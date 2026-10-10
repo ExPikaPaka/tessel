@@ -7,6 +7,8 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include "core/Blend.h"
@@ -16,6 +18,7 @@
 #include "core/ImageOps.h"
 #include "core/Io.h"
 #include "core/Selection.h"
+#include "core/Units.h"
 #include "core/Zip.h"
 #include "effects/Effect.h"
 
@@ -553,6 +556,202 @@ int main(int argc, char** argv)
         error.clear();
         CHECK(io::openDocument(QStringLiteral("/tmp/does-not-exist.pdn"), &error) == nullptr);
         CHECK(!error.isEmpty());
+    });
+
+    // ------------------------------------------------------------ units
+    addTest("unit conversions round trip", [] {
+        for (double dpi : {72.0, 96.0, 150.0, 300.0, 600.0}) {
+            for (int pixels : {1, 37, 800, 1234, 6000}) {
+                const double inches = units::fromPixels(pixels, Unit::Inches, dpi);
+                const double centimetres =
+                    units::fromPixels(pixels, Unit::Centimetres, dpi);
+                CHECK_NEAR(centimetres, inches * units::kCentimetresPerInch, 1e-9);
+                CHECK_NEAR(units::toPixels(inches, Unit::Inches, dpi), pixels, 1e-9);
+                CHECK_NEAR(units::toPixels(centimetres, Unit::Centimetres, dpi),
+                           pixels, 1e-9);
+                // pixels -> inches -> centimetres -> pixels
+                const double backAgain = units::toPixels(
+                    units::fromPixels(units::toPixels(inches, Unit::Inches, dpi),
+                                      Unit::Centimetres, dpi),
+                    Unit::Centimetres, dpi);
+                CHECK_NEAR(backAgain, pixels, 1e-9);
+            }
+            // One inch is exactly the resolution in pixels.
+            CHECK_NEAR(units::fromPixels(dpi, Unit::Inches, dpi), 1.0, 1e-12);
+            CHECK_NEAR(units::resolutionFromDotsPerMetre(units::dotsPerMetre(dpi)),
+                       dpi, 1e-9);
+        }
+        // Percent measures against the reference pixel count it is handed.
+        CHECK_NEAR(units::fromPixels(400, Unit::Percent, 96.0, 800), 50.0, 1e-9);
+        CHECK_NEAR(units::toPixels(50.0, Unit::Percent, 96.0, 800), 400.0, 1e-9);
+        // Pixels pass straight through whatever the resolution.
+        CHECK_NEAR(units::toPixels(42.0, Unit::Pixels, 300.0), 42.0, 1e-12);
+        CHECK_NEAR(units::fromPixels(42.0, Unit::Pixels, 300.0), 42.0, 1e-12);
+        // Nonsense resolutions fall back to the default rather than producing
+        // infinite print sizes.
+        CHECK_NEAR(units::sanitize(300.0), 300.0, 1e-12);
+        CHECK_NEAR(units::sanitize(0.0), units::kDefaultResolution, 1e-12);
+        CHECK_NEAR(units::sanitize(-5.0), units::kDefaultResolution, 1e-12);
+        CHECK_NEAR(units::sanitize(1.0e9), units::kDefaultResolution, 1e-12);
+        CHECK_NEAR(units::sanitize(std::nan("")), units::kDefaultResolution, 1e-12);
+        // The settings keys survive a round trip of their own.
+        for (Unit unit : {Unit::Pixels, Unit::Inches, Unit::Centimetres, Unit::Percent})
+            CHECK(units::unitFromId(units::unitId(unit)) == unit);
+        CHECK(units::unitFromId(QStringLiteral("centimeters")) == Unit::Centimetres);
+        CHECK(units::unitFromId(QStringLiteral("nonsense")) == Unit::Pixels);
+        CHECK(units::measurableNames().size() == 3);
+        // Readouts drop the trailing zeros a fixed precision would leave.
+        CHECK(units::describeSize(2550, 3300, 300.0, Unit::Inches)
+              == QStringLiteral("8.5 x 11 in"));
+        CHECK(units::describeSize(2550, 3300, 300.0, Unit::Centimetres)
+              == QStringLiteral("21.59 x 27.94 cm"));
+        CHECK(units::describeSize(96, 48, 96.0, Unit::Pixels)
+              == QStringLiteral("96 x 48 px"));
+        // Percent cannot label a size, so it borrows pixels.
+        CHECK(units::describeSize(96, 48, 96.0, Unit::Percent)
+              == QStringLiteral("96 x 48 px"));
+        CHECK(units::describePrintSize(2550, 3300, 300.0, Unit::Pixels)
+              == QStringLiteral("8.5 x 11 in at 300 ppi"));
+    });
+
+    addTest("ruler tick spacing", [] {
+        // Pixels climb the 1 / 5 / 10 ladder until the labels fit.
+        CHECK_NEAR(units::rulerTicks(Unit::Pixels, 96.0, 1.0).major, 100.0, 1e-9);
+        CHECK_NEAR(units::rulerTicks(Unit::Pixels, 96.0, 8.0).major, 10.0, 1e-9);
+        CHECK_NEAR(units::rulerTicks(Unit::Pixels, 96.0, 0.1).major, 1000.0, 1e-9);
+        // Inches step in inches, not in round pixel counts.
+        const units::RulerTicks inch = units::rulerTicks(Unit::Inches, 96.0, 1.0);
+        CHECK_NEAR(inch.major, 96.0, 1e-9);
+        CHECK(inch.minorPerMajor == 4);
+        // Zoomed in, a quarter inch is wide enough to label.
+        CHECK_NEAR(units::rulerTicks(Unit::Inches, 96.0, 4.0).major, 24.0, 1e-9);
+        // At 300 dpi an inch is 300 pixels, so half an inch already labels
+        // comfortably even at half zoom.
+        CHECK_NEAR(units::rulerTicks(Unit::Inches, 300.0, 0.5).major, 150.0, 1e-9);
+        CHECK_NEAR(units::rulerTicks(Unit::Inches, 300.0, 0.1).major, 600.0, 1e-9);
+        // Centimetres step in whole or half centimetres.
+        const units::RulerTicks cm = units::rulerTicks(Unit::Centimetres, 96.0, 1.0);
+        CHECK_NEAR(cm.major, units::toPixels(2.0, Unit::Centimetres, 96.0), 1e-9);
+        CHECK_NEAR(units::rulerTicks(Unit::Centimetres, 96.0, 4.0).major,
+                   units::toPixels(0.5, Unit::Centimetres, 96.0), 1e-9);
+        // A degenerate zoom must not hang or divide by zero.
+        CHECK(units::rulerTicks(Unit::Inches, 96.0, 0.0).major > 0.0);
+        CHECK(units::rulerTicks(Unit::Pixels, 96.0, -1.0).major > 0.0);
+        // Labels read in the chosen unit.
+        CHECK(units::rulerLabel(300.0, Unit::Pixels, 96.0) == QStringLiteral("300"));
+        CHECK(units::rulerLabel(96.0, Unit::Inches, 96.0) == QStringLiteral("1"));
+        CHECK(units::rulerLabel(48.0, Unit::Inches, 96.0) == QStringLiteral("0.5"));
+        CHECK(units::rulerLabel(units::toPixels(2.0, Unit::Centimetres, 96.0),
+                                Unit::Centimetres, 96.0) == QStringLiteral("2"));
+    });
+
+    addTest("resolution survives document operations", [] {
+        Document doc(40, 30);
+        CHECK_NEAR(doc.resolution(), units::kDefaultResolution, 1e-12);
+        doc.setResolution(240.0);
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+        const DocumentState saved = doc.snapshot();
+        CHECK_NEAR(saved.resolution, 240.0, 1e-12);
+
+        doc.resizeCanvas(80, 60, Anchor::Center, true);
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+        doc.cropTo(Rect(5, 5, 20, 20));
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+        doc.rotate90(1);
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+        doc.flip(true);
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+
+        // Snapshot and restore stay in step, so a resolution change undoes.
+        doc.setResolution(72.0);
+        CHECK_NEAR(doc.snapshot().resolution, 72.0, 1e-12);
+        doc.restore(saved);
+        CHECK_NEAR(doc.resolution(), 240.0, 1e-12);
+        CHECK(doc.width() == 40 && doc.height() == 30);
+        // A state carrying no resolution restores the default.
+        DocumentState bare = doc.snapshot();
+        bare.resolution = 0.0;
+        doc.restore(bare);
+        CHECK_NEAR(doc.resolution(), units::kDefaultResolution, 1e-12);
+        // Out of range values never reach the document.
+        doc.setResolution(-10.0);
+        CHECK_NEAR(doc.resolution(), units::kDefaultResolution, 1e-12);
+    });
+
+    addTest("resolution survives file round trips", [] {
+        QTemporaryDir dir;
+        Document doc(32, 24);
+        doc.setResolution(300.0);
+        ops::fillRegion(doc.layerAt(0)->image, Rect(0, 0, 32, 24),
+                        Rgba(40, 50, 60, 255));
+        doc.invalidate();
+
+        // The layered containers store it exactly; PNG and JPEG store it as a
+        // whole number of dots per metre, so allow the rounding.
+        for (const char* extension : {"tessel", "ora", "png", "jpg", "tiff"}) {
+            const QString path = dir.filePath(QStringLiteral("res.%1").arg(extension));
+            if (!io::canWrite(path))
+                continue;
+            QString error;
+            CHECK(io::saveDocument(doc, path, &error, 95));
+            auto loaded = io::openDocument(path, &error);
+            CHECK(loaded != nullptr);
+            if (!loaded)
+                continue;
+            CHECK_NEAR(loaded->resolution(), 300.0, 0.01);
+        }
+
+        // A .tessel manifest written before resolutions existed must open at
+        // the default rather than at zero.
+        {
+            const QString source = dir.filePath(QStringLiteral("res.tessel"));
+            const QString legacy = dir.filePath(QStringLiteral("legacy.tessel"));
+            ZipReader reader(source);
+            CHECK(reader.isValid());
+            ZipWriter writer(legacy);
+            CHECK(writer.isOpen());
+            for (const QString& name : reader.names()) {
+                QByteArray data = reader.read(name);
+                if (name == QStringLiteral("document.json")) {
+                    QJsonObject root = QJsonDocument::fromJson(data).object();
+                    root.remove(QStringLiteral("resolution"));
+                    data = QJsonDocument(root).toJson();
+                }
+                writer.add(name, data, name != QStringLiteral("mimetype"));
+            }
+            CHECK(writer.close());
+            QString error;
+            auto loaded = io::openDocument(legacy, &error);
+            CHECK(loaded != nullptr);
+            if (loaded)
+                CHECK_NEAR(loaded->resolution(), units::kDefaultResolution, 1e-9);
+        }
+
+        // The same for an OpenRaster image whose image element has no xres.
+        {
+            const QString source = dir.filePath(QStringLiteral("res.ora"));
+            const QString legacy = dir.filePath(QStringLiteral("legacy.ora"));
+            ZipReader reader(source);
+            CHECK(reader.isValid());
+            CHECK(reader.read(QStringLiteral("stack.xml"))
+                      .contains(QByteArray("xres=\"300\"")));
+            ZipWriter writer(legacy);
+            CHECK(writer.isOpen());
+            for (const QString& name : reader.names()) {
+                QByteArray data = reader.read(name);
+                if (name == QStringLiteral("stack.xml")) {
+                    data.replace(QByteArray(" xres=\"300\""), QByteArray());
+                    data.replace(QByteArray(" yres=\"300\""), QByteArray());
+                }
+                writer.add(name, data, name != QStringLiteral("mimetype"));
+            }
+            CHECK(writer.close());
+            QString error;
+            auto loaded = io::openDocument(legacy, &error);
+            CHECK(loaded != nullptr);
+            if (loaded)
+                CHECK_NEAR(loaded->resolution(), units::kDefaultResolution, 1e-9);
+        }
     });
 
     // ------------------------------------------------------------ effects
