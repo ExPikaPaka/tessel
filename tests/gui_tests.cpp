@@ -7,11 +7,15 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
+#include <QFile>
 #include <QKeyEvent>
+#include <QPushButton>
 #include <QTemporaryDir>
 
 #include "core/ImageOps.h"
 #include "core/Io.h"
+#include "core/Palette.h"
 #include "tools/Tool.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
@@ -672,6 +676,182 @@ int main(int argc, char** argv)
         QAction* close = window.findChild<QAction*>(QStringLiteral("close"));
         close->trigger();
         CHECK(window.findChildren<CanvasView*>().size() >= 2);
+    });
+
+    // ------------------------------------------------------------ palettes
+    addTest("recent colours follow the chosen colours", [] {
+        ColorPanel panel;
+        panel.clearRecentColors();
+        CHECK(panel.recentColors().isEmpty());
+
+        panel.setPrimary(Rgba(10, 20, 30, 255));
+        CHECK(panel.recentColors().size() == 1);
+        CHECK(panel.recentColors().front() == Rgba(10, 20, 30, 255));
+
+        // The secondary colour counts as used too, and the newest comes first.
+        panel.setSecondary(Rgba(40, 50, 60, 255));
+        CHECK(panel.recentColors().size() == 2);
+        CHECK(panel.recentColors().front() == Rgba(40, 50, 60, 255));
+        CHECK(panel.recentColors().back() == Rgba(10, 20, 30, 255));
+
+        // Using a colour again moves it to the front instead of repeating it.
+        panel.setPrimary(Rgba(10, 20, 30, 255));
+        CHECK(panel.recentColors().size() == 2);
+        CHECK(panel.recentColors().front() == Rgba(10, 20, 30, 255));
+
+        // Alpha is part of the identity, so this is a different entry.
+        panel.setPrimary(Rgba(10, 20, 30, 128));
+        CHECK(panel.recentColors().size() == 3);
+
+        // The row is a widget of its own, next to the palette grid.
+        CHECK(panel.findChildren<PaletteGrid*>().size() == 2);
+    });
+
+    addTest("recent colours cap and stay unique", [] {
+        ColorPanel panel;
+        panel.clearRecentColors();
+        const int limit = ColorPanel::kRecentLimit;
+        CHECK(limit >= 16);
+        for (int i = 0; i < limit * 2; ++i)
+            panel.setPrimary(Rgba(uint8_t(i), 7, 9, 255));
+        CHECK(panel.recentColors().size() == limit);
+        CHECK(panel.recentColors().front() == Rgba(uint8_t(limit * 2 - 1), 7, 9, 255));
+        CHECK(panel.recentColors().back() == Rgba(uint8_t(limit), 7, 9, 255));
+
+        // Repeating one colour many times never lengthens the list.
+        for (int i = 0; i < 50; ++i)
+            panel.setPrimary(Rgba(3, 3, 3, 255));
+        CHECK(panel.recentColors().size() == limit);
+        const QVector<Rgba> recent = panel.recentColors();
+        for (int i = 0; i < recent.size(); ++i) {
+            for (int j = i + 1; j < recent.size(); ++j)
+                CHECK(recent[i] != recent[j]);
+        }
+
+        // Swapping and resetting go through the same route.
+        panel.clearRecentColors();
+        panel.setPrimary(Rgba(1, 1, 1, 255));
+        panel.setSecondary(Rgba(2, 2, 2, 255));
+        panel.swapColors();
+        CHECK(panel.recentColors().size() == 2);
+        CHECK(panel.recentColors().front() == panel.primary());
+        panel.resetColors();
+        CHECK(panel.recentColors().front() == Rgba(0, 0, 0, 255));
+        CHECK(panel.recentColors().contains(Rgba(255, 255, 255, 255)));
+    });
+
+    addTest("recent colours cover the picker tool", [] {
+        MainWindow window;
+        window.newDocument(16, 16, Rgba(7, 77, 177, 255));
+        ColorPanel* colors = window.findChild<ColorPanel*>();
+        CHECK(colors != nullptr);
+        if (!colors)
+            return;
+        colors->clearRecentColors();
+        CanvasView* view = window.findChildren<CanvasView*>().last();
+        Tool* picker = ToolRegistry::instance().byId(QStringLiteral("picker"));
+        CHECK(picker != nullptr);
+        view->setTool(picker);
+        ToolContext context = view->makeContext();
+        picker->press(context, makeEvent(QPointF(8, 8)));
+        CHECK(colors->recentColors().front() == Rgba(7, 77, 177, 255));
+    });
+
+    addTest("palette buttons load, save and reset", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        ColorPanel panel;
+        QPushButton* load = panel.findChild<QPushButton*>(QStringLiteral("paletteLoad"));
+        QPushButton* save = panel.findChild<QPushButton*>(QStringLiteral("paletteSave"));
+        QPushButton* reset = panel.findChild<QPushButton*>(QStringLiteral("paletteReset"));
+        QPushButton* pick = panel.findChild<QPushButton*>(QStringLiteral("screenPick"));
+        CHECK(load != nullptr);
+        CHECK(save != nullptr);
+        CHECK(reset != nullptr);
+        CHECK(pick != nullptr);
+        if (!load || !save || !reset)
+            return;
+        CHECK(load->isEnabled());
+        CHECK(save->isEnabled());
+        CHECK(reset->isEnabled());
+        CHECK(panel.paletteColors() == PaletteGrid::defaultPalette());
+
+        // Saving writes what the grid holds, in either format.
+        const QString gplPath = dir.filePath(QStringLiteral("panel.gpl"));
+        QString error = QStringLiteral("unset");
+        CHECK(panel.savePaletteFile(gplPath, &error));
+        CHECK(error.isEmpty());
+        CHECK(Palette::load(gplPath, &error).colors() == PaletteGrid::defaultPalette());
+
+        // Loading replaces the grid.
+        const QString threePath = dir.filePath(QStringLiteral("three.txt"));
+        QFile three(threePath);
+        CHECK(three.open(QIODevice::WriteOnly));
+        three.write("# three colours\n#FF0000\n#00FF00\n#0000FF\n");
+        three.close();
+        CHECK(panel.loadPaletteFile(threePath, &error));
+        CHECK(error.isEmpty());
+        CHECK(panel.paletteColors().size() == 3);
+        CHECK(panel.paletteColors()[0] == Rgba(255, 0, 0, 255));
+        CHECK(panel.paletteColors()[2] == Rgba(0, 0, 255, 255));
+
+        // Saving again writes the loaded palette, not the built in one.
+        const QString again = dir.filePath(QStringLiteral("again.gpl"));
+        CHECK(panel.savePaletteFile(again, &error));
+        CHECK(Palette::load(again, &error).size() == 3);
+
+        // A palette entry still sets the colour it was clicked for.
+        PaletteGrid* grid = panel.findChildren<PaletteGrid*>().last();
+        CHECK(grid != nullptr);
+        emit grid->colorChosen(Rgba(255, 0, 0, 255), true);
+        CHECK(panel.primary() == Rgba(255, 0, 0, 255));
+
+        // A file with nothing usable in it is refused and the grid is kept.
+        const QString junkPath = dir.filePath(QStringLiteral("junk.gpl"));
+        QFile junk(junkPath);
+        CHECK(junk.open(QIODevice::WriteOnly));
+        junk.write("not a palette\nnor this line\n");
+        junk.close();
+        error.clear();
+        CHECK(!panel.loadPaletteFile(junkPath, &error));
+        CHECK(!error.isEmpty());
+        CHECK(panel.paletteColors().size() == 3);
+
+        // The reset button restores the built in palette.
+        reset->click();
+        CHECK(panel.paletteColors() == PaletteGrid::defaultPalette());
+    });
+
+    addTest("screen picking degrades gracefully", [] {
+        // The offscreen platform hands back no screen content, which is the
+        // same situation as a Wayland compositor refusing a capture.
+        CHECK(!ColorPanel::isUsableGrab(QImage()));
+        QImage black(40, 30, QImage::Format_RGB32);
+        black.fill(Qt::black);
+        CHECK(!ColorPanel::isUsableGrab(black));
+        QImage content = black;
+        content.setPixelColor(21, 11, QColor(3, 4, 5));
+        CHECK(ColorPanel::isUsableGrab(content));
+
+        ColorPanel panel;
+        panel.clearRecentColors();
+        const Rgba before = panel.primary();
+        QString error = QStringLiteral("unset");
+        if (panel.beginScreenPick(&error)) {
+            // A platform that does allow the grab: nothing is picked until the
+            // user clicks, and the overlay goes away again.
+            CHECK(error.isEmpty());
+            CHECK(panel.screenPickActive());
+            panel.cancelScreenPick();
+            CHECK(!panel.screenPickActive());
+        } else {
+            // The failure is reported rather than silently picking black.
+            CHECK(!error.isEmpty());
+            CHECK(!panel.screenPickActive());
+            CHECK(panel.primary() == before);
+            CHECK(panel.recentColors().isEmpty());
+        }
+        QApplication::processEvents();
     });
 
     // ------------------------------------------------------------ run

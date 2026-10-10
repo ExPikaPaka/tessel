@@ -7,6 +7,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include "core/Blend.h"
@@ -15,6 +16,7 @@
 #include "core/Image.h"
 #include "core/ImageOps.h"
 #include "core/Io.h"
+#include "core/Palette.h"
 #include "core/Selection.h"
 #include "core/Zip.h"
 #include "effects/Effect.h"
@@ -626,6 +628,218 @@ int main(int argc, char** argv)
         CHECK(values.pointValue(QStringLiteral("o")) == QPointF(0.5, -0.5));
         CHECK(values.choiceValue(QStringLiteral("ch")) == 1);
         CHECK(values.intValue(QStringLiteral("absent"), 42) == 42);
+    });
+
+    // ------------------------------------------------------------ palettes
+    addTest("palette gpl round trip", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        QVector<Rgba> colors;
+        for (int i = 0; i < 24; ++i) {
+            colors.append(Rgba(uint8_t(i * 7), uint8_t(255 - i * 3), uint8_t(i * 11),
+                               255));
+        }
+        Palette palette(colors, QStringLiteral("Round trip"));
+        palette.setColumns(8);
+
+        const QString path = dir.filePath(QStringLiteral("round.gpl"));
+        QString error = QStringLiteral("unset");
+        CHECK(palette.save(path, &error));
+        CHECK(error.isEmpty());
+        const Palette back = Palette::load(path, &error);
+        CHECK(error.isEmpty());
+        CHECK(back.size() == palette.size());
+        CHECK(back.colors() == colors);
+        CHECK(back.name() == QStringLiteral("Round trip"));
+        CHECK(back.columns() == 8);
+
+        // Written by hand the way GIMP writes it, tabs and all.
+        const Palette parsed = Palette::parseGpl(QStringLiteral(
+            "GIMP Palette\nName: Hand made\nColumns: 4\n#\n"
+            "  0   0   0\tBlack\n255 255 255\tWhite\n 18  52  86\tSome blue\n"));
+        CHECK(parsed.size() == 3);
+        CHECK(parsed.name() == QStringLiteral("Hand made"));
+        CHECK(parsed.columns() == 4);
+        CHECK(parsed.colors()[0] == Rgba(0, 0, 0, 255));
+        CHECK(parsed.colors()[1] == Rgba(255, 255, 255, 255));
+        CHECK(parsed.colors()[2] == Rgba(18, 52, 86, 255));
+
+        // The format carries no alpha, so translucency is dropped on the way
+        // out rather than corrupting the file.
+        const QString alphaPath = dir.filePath(QStringLiteral("alpha.gpl"));
+        CHECK(Palette(QVector<Rgba>{Rgba(10, 20, 30, 64)}).save(alphaPath, &error));
+        const Palette alphaBack = Palette::load(alphaPath, &error);
+        CHECK(alphaBack.size() == 1);
+        CHECK(alphaBack.colors()[0] == Rgba(10, 20, 30, 255));
+
+        // A GIMP palette saved under another extension is still recognised.
+        const QString oddPath = dir.filePath(QStringLiteral("odd.txt"));
+        QFile odd(oddPath);
+        CHECK(odd.open(QIODevice::WriteOnly));
+        odd.write(palette.toGpl().toUtf8());
+        odd.close();
+        CHECK(Palette::load(oddPath, &error).colors() == colors);
+    });
+
+    addTest("palette hex round trip", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        const QVector<Rgba> colors{Rgba(255, 0, 0, 255), Rgba(0, 255, 0, 128),
+                                   Rgba(1, 2, 3, 0)};
+        Palette palette(colors, QStringLiteral("Hexes"));
+        const QString text = palette.toHex();
+        CHECK(text.contains(QStringLiteral("#FF0000\n")));
+        CHECK(text.contains(QStringLiteral("#00FF0080\n")));
+        CHECK(text.contains(QStringLiteral("#01020300\n")));
+
+        const Palette back = Palette::parseHex(text);
+        CHECK(back.colors() == colors);
+        CHECK(back.name() == QStringLiteral("Hexes"));
+
+        const QString path = dir.filePath(QStringLiteral("list.txt"));
+        QString error = QStringLiteral("unset");
+        CHECK(palette.save(path, &error));
+        CHECK(error.isEmpty());
+        const Palette fromFile = Palette::load(path, &error);
+        CHECK(error.isEmpty());
+        CHECK(fromFile.colors() == colors);
+
+        // Blank lines and comments are skipped, the hash is optional, and a
+        // comment is told from a colour by what follows the hash.
+        const Palette mixed = Palette::parseHex(QStringLiteral(
+            "# a comment\n\n   \n#112233\n\t#445566  \nffaabb\n"
+            "# Name: Mixed\n#not a colour\n"));
+        CHECK(mixed.size() == 3);
+        CHECK(mixed.name() == QStringLiteral("Mixed"));
+        CHECK(mixed.colors()[0] == Rgba(0x11, 0x22, 0x33, 255));
+        CHECK(mixed.colors()[1] == Rgba(0x44, 0x55, 0x66, 255));
+        CHECK(mixed.colors()[2] == Rgba(0xff, 0xaa, 0xbb, 255));
+
+        // Case does not matter and CRLF files read the same.
+        const Palette crlf = Palette::parseHex(QStringLiteral("#AbCdEf\r\n#123456\r\n"));
+        CHECK(crlf.size() == 2);
+        CHECK(crlf.colors()[0] == Rgba(0xab, 0xcd, 0xef, 255));
+
+        Rgba single;
+        CHECK(Palette::parseHexColor(QStringLiteral("  #0a0B0c  "), single));
+        CHECK(single == Rgba(10, 11, 12, 255));
+        CHECK(Palette::parseHexColor(QStringLiteral("0a0b0c40"), single));
+        CHECK(single == Rgba(10, 11, 12, 0x40));
+        CHECK(Palette::toHexString(Rgba(10, 11, 12, 255)) == QStringLiteral("#0A0B0C"));
+        CHECK(Palette::toHexString(Rgba(10, 11, 12, 1)) == QStringLiteral("#0A0B0C01"));
+    });
+
+    addTest("palette parsing survives malformed input", [] {
+        // Nothing here may crash, hang or report colours that are not there.
+        const char* junk[] = {
+            "",
+            "\n\n\n\r\r\n",
+            "GIMP Palette",
+            "GIMP Palette\nName:\nColumns: nonsense\nColumns: -9000\n",
+            "#", "###", "# comment only\n", "Name: only\n",
+            "0 0\n", "oops 1 2 3\n", "1 2\t\n",
+            "99999999999999999999 0 0\n",
+            "\x01\x02\x03 binary \xff\xfe",
+            "#12345\n#1234567\n#123456789\n#GGHHII\n#\n##\n",
+            "0,0,0\n255,255,255\n",
+        };
+        for (const char* text : junk) {
+            const QString input = QString::fromUtf8(text);
+            CHECK(Palette::parseGpl(input).isEmpty());
+            CHECK(Palette::parseHex(input).isEmpty());
+        }
+
+        // A bad line costs only itself.
+        const Palette partial = Palette::parseGpl(QStringLiteral(
+            "GIMP Palette\nnot a colour at all\n255 255 255 White\n"
+            "4294967296 0 0\n0 0 0\n"));
+        CHECK(partial.size() == 2);
+        CHECK(partial.colors()[0] == Rgba(255, 255, 255, 255));
+        CHECK(partial.colors()[1] == Rgba(0, 0, 0, 255));
+
+        // Out of range channels are clamped, since the entry is clearly meant
+        // to be a colour.
+        const Palette clamped = Palette::parseGpl(QStringLiteral("300 -10 20 Bad\n"));
+        CHECK(clamped.size() == 1);
+        CHECK(clamped.colors()[0] == Rgba(255, 0, 20, 255));
+
+        // Embedded nul bytes and a very long line are just skipped.
+        QString nulled = QStringLiteral("#112233\n");
+        nulled.append(QChar(QChar::Null));
+        nulled.append(QStringLiteral("0 0 0\n"));
+        CHECK(Palette::parseHex(nulled).size() == 1);
+        CHECK(Palette::parseHex(QString(200000, QLatin1Char('x'))).isEmpty());
+
+        // Files that cannot be read, or hold nothing useful, report an error
+        // instead of an empty palette with no explanation.
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        QString error;
+        CHECK(Palette::load(dir.filePath(QStringLiteral("absent.gpl")), &error).isEmpty());
+        CHECK(!error.isEmpty());
+        error.clear();
+        CHECK(Palette::load(dir.path(), &error).isEmpty());      // a directory
+        CHECK(!error.isEmpty());
+        error.clear();
+        const QString emptyPath = dir.filePath(QStringLiteral("empty.gpl"));
+        QFile empty(emptyPath);
+        CHECK(empty.open(QIODevice::WriteOnly));
+        empty.close();
+        CHECK(Palette::load(emptyPath, &error).isEmpty());
+        CHECK(!error.isEmpty());
+        error.clear();
+        const QString binaryPath = dir.filePath(QStringLiteral("binary.txt"));
+        QFile binary(binaryPath);
+        CHECK(binary.open(QIODevice::WriteOnly));
+        QByteArray noise;
+        for (int i = 0; i < 4096; ++i)
+            noise.append(char(0x80 + (i % 0x7f)));   // not valid UTF-8, no digits
+        binary.write(noise);
+        binary.close();
+        CHECK(Palette::load(binaryPath, &error).isEmpty());
+        CHECK(!error.isEmpty());
+
+        // Saving where nothing can be written fails cleanly.
+        error.clear();
+        CHECK(!Palette(QVector<Rgba>{Rgba(1, 2, 3, 255)})
+                   .save(dir.filePath(QStringLiteral("no/such/dir/p.gpl")), &error));
+        CHECK(!error.isEmpty());
+    });
+
+    addTest("palettes with thousands of entries", [] {
+        QTemporaryDir dir;
+        CHECK(dir.isValid());
+        QVector<Rgba> colors;
+        for (int i = 0; i < 5000; ++i) {
+            colors.append(Rgba(uint8_t(i & 0xff), uint8_t((i >> 3) & 0xff),
+                               uint8_t((i >> 6) & 0xff), 255));
+        }
+        const Palette palette(colors, QStringLiteral("Big"));
+        QString error = QStringLiteral("unset");
+
+        const QString gplPath = dir.filePath(QStringLiteral("big.gpl"));
+        CHECK(palette.save(gplPath, &error));
+        const Palette fromGpl = Palette::load(gplPath, &error);
+        CHECK(error.isEmpty());
+        CHECK(fromGpl.size() == 5000);
+        CHECK(fromGpl.colors() == colors);
+
+        const QString hexPath = dir.filePath(QStringLiteral("big.txt"));
+        CHECK(palette.save(hexPath, &error));
+        const Palette fromHex = Palette::load(hexPath, &error);
+        CHECK(error.isEmpty());
+        CHECK(fromHex.size() == 5000);
+        CHECK(fromHex.colors() == colors);
+
+        // Beyond the cap the parser stops instead of growing without bound.
+        QString overflow;
+        for (int i = 0; i < Palette::kMaxColors + 32; ++i)
+            overflow += QStringLiteral("#010203\n");
+        CHECK(Palette::parseHex(overflow).size() == Palette::kMaxColors);
+        Palette capped;
+        for (int i = 0; i < Palette::kMaxColors + 32; ++i)
+            capped.append(Rgba(1, 2, 3, 255));
+        CHECK(capped.size() == Palette::kMaxColors);
     });
 
     // ------------------------------------------------------------ run

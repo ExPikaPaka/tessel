@@ -2,15 +2,24 @@
 
 #include <cmath>
 
+#include <QCursor>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGridLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScreen>
+#include <QSettings>
 #include <QSpinBox>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "core/ImageOps.h"
@@ -348,27 +357,56 @@ void PaletteGrid::setColors(const QVector<Rgba>& colors)
     update();
 }
 
+void PaletteGrid::setColumns(int columns)
+{
+    columns_ = std::max(1, columns);
+    updateGeometry();
+    update();
+}
+
+void PaletteGrid::setMinimumRows(int rows)
+{
+    minimumRows_ = std::max(0, rows);
+    updateGeometry();
+    update();
+}
+
 int PaletteGrid::cellSize() const
 {
     return std::max(10, std::min(18, width() / std::max(1, columns())));
 }
 
+int PaletteGrid::rowCount() const
+{
+    const int filled = (int(colors_.size()) + columns() - 1) / columns();
+    return std::max(minimumRows_, filled);
+}
+
 QSize PaletteGrid::sizeHint() const
 {
-    const int rows = (colors_.size() + columns() - 1) / columns();
-    return QSize(columns() * 14, rows * 14 + 2);
+    return QSize(columns() * 14, rowCount() * 14 + 2);
 }
 
 void PaletteGrid::paintEvent(QPaintEvent*)
 {
     QPainter painter(this);
     const int cell = cellSize();
-    for (int i = 0; i < colors_.size(); ++i) {
+    const int cells = std::max(int(colors_.size()), minimumRows_ * columns());
+    for (int i = 0; i < cells; ++i) {
         const int column = i % columns();
         const int row = i / columns();
         const QRect box(column * cell, row * cell, cell - 1, cell - 1);
         painter.setPen(QPen(theme::gridColor(), 1));
-        painter.setBrush(colors_[i].toQColor());
+        if (i < colors_.size()) {
+            if (colors_[i].a < 255) {
+                painter.setBrush(QBrush(icons::checkerPixmap(4)));
+                painter.drawRect(box);
+            }
+            painter.setBrush(colors_[i].toQColor());
+        } else {
+            // An empty slot in the recent row: outline only.
+            painter.setBrush(Qt::NoBrush);
+        }
         painter.drawRect(box);
     }
 }
@@ -390,6 +428,100 @@ void PaletteGrid::mousePressEvent(QMouseEvent* event)
     if (index < 0)
         return;
     emit colorChosen(colors_[index], event->button() != Qt::RightButton);
+}
+
+// ----------------------------------------------------------------- screen pick
+
+ScreenPickOverlay::ScreenPickOverlay(const QImage& grab, QRect bounds, QWidget* parent)
+    : QWidget(parent), grab_(grab), bounds_(bounds)
+{
+    // Frameless, always on top and bypassing the window manager where that is
+    // possible, so the frozen desktop image lines up with the real screen.
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
+                   | Qt::X11BypassWindowManagerHint);
+    setAttribute(Qt::WA_DeleteOnClose);
+    setWindowTitle(QStringLiteral("Pick a colour"));
+    setCursor(Qt::CrossCursor);
+    setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
+    if (!bounds_.isEmpty() && !grab_.isNull())
+        ratio_ = double(grab_.width()) / bounds_.width();
+    if (ratio_ <= 0.0)
+        ratio_ = 1.0;
+    setGeometry(bounds_);
+    cursor_ = QCursor::pos() - bounds_.topLeft();
+}
+
+Rgba ScreenPickOverlay::colorAt(QPointF pos) const
+{
+    if (grab_.isNull())
+        return Rgba(0, 0, 0, 255);
+    const int x = std::clamp(int(std::lround(pos.x() * ratio_)), 0, grab_.width() - 1);
+    const int y = std::clamp(int(std::lround(pos.y() * ratio_)), 0, grab_.height() - 1);
+    return Rgba::fromQColor(grab_.pixelColor(x, y));
+}
+
+void ScreenPickOverlay::paintEvent(QPaintEvent*)
+{
+    QPainter painter(this);
+    painter.drawImage(QRectF(0, 0, width(), height()), grab_, QRectF(grab_.rect()));
+
+    const Rgba color = colorAt(cursor_);
+    constexpr int kSpan = 11;        // grab pixels across the loupe
+    constexpr double kZoom = 9.0;
+    const double side = kSpan * kZoom;
+    QRectF box(cursor_.x() + 20, cursor_.y() + 20, side, side + 20);
+    if (box.right() > width())
+        box.moveLeft(cursor_.x() - 20 - box.width());
+    if (box.bottom() > height())
+        box.moveTop(cursor_.y() - 20 - box.height());
+
+    const QRectF source(std::lround(cursor_.x() * ratio_) - kSpan / 2.0,
+                        std::lround(cursor_.y() * ratio_) - kSpan / 2.0, kSpan, kSpan);
+    const QRectF zoom(box.left(), box.top(), side, side);
+    // Nearest neighbour, so the magnified pixels stay square and the centre
+    // one is unmistakably the colour that will be taken.
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    painter.drawImage(zoom, grab_, source);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(Qt::white, 2));
+    painter.drawRect(zoom);
+    // Outline the centre cell, which is the pixel a click takes.
+    const double centre = kZoom * (kSpan / 2);
+    painter.setPen(QPen(Qt::black, 1));
+    painter.drawRect(zoom.adjusted(centre, centre, -centre, -centre));
+
+    const QRectF label(box.left(), zoom.bottom(), side, 20);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 200));
+    painter.drawRect(label);
+    painter.setPen(Qt::white);
+    painter.drawText(label, Qt::AlignCenter, Palette::toHexString(color));
+}
+
+void ScreenPickOverlay::mouseMoveEvent(QMouseEvent* event)
+{
+    cursor_ = event->position();
+    update();
+}
+
+void ScreenPickOverlay::mousePressEvent(QMouseEvent* event)
+{
+    cursor_ = event->position();
+    if (event->button() == Qt::RightButton) {
+        emit cancelled();
+        return;
+    }
+    emit picked(colorAt(cursor_));
+}
+
+void ScreenPickOverlay::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Escape) {
+        emit cancelled();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }
 
 // ----------------------------------------------------------------- panel
@@ -423,10 +555,31 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     root->addLayout(valueRow);
     root->addLayout(alphaRow);
 
+    const auto makeSmallButton = [this](const QString& text, const QString& name,
+                                        const QString& tip) {
+        auto* button = new QPushButton(text, this);
+        button->setObjectName(name);
+        button->setFlat(true);
+        button->setToolTip(tip);
+        button->setMaximumHeight(22);
+        // Hug the text, so the row keeps the buttons small and grouped.
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        return button;
+    };
+
     moreButton_ = new QPushButton(QStringLiteral("More  >>"), this);
     moreButton_->setCheckable(true);
     moreButton_->setFlat(true);
-    root->addWidget(moreButton_, 0, Qt::AlignLeft);
+    pickButton_ = makeSmallButton(
+        QStringLiteral("Screen pick"), QStringLiteral("screenPick"),
+        QStringLiteral("Take a colour from anywhere on screen. Click to pick, "
+                       "Escape to cancel."));
+    auto* actionRow = new QHBoxLayout;
+    actionRow->setSpacing(4);
+    actionRow->addWidget(moreButton_);
+    actionRow->addStretch(1);
+    actionRow->addWidget(pickButton_);
+    root->addLayout(actionRow);
 
     details_ = new QWidget(this);
     auto* grid = new QGridLayout(details_);
@@ -469,6 +622,35 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     details_->setVisible(false);
     root->addWidget(details_);
 
+    auto* recentLabel = new QLabel(QStringLiteral("Recent"), this);
+    root->addWidget(recentLabel);
+    recentGrid_ = new PaletteGrid(this);
+    recentGrid_->setColors({});
+    recentGrid_->setColumns(kRecentLimit);
+    recentGrid_->setMinimumRows(1);
+    recentGrid_->setToolTip(QStringLiteral("Recently used colours. Click for the "
+                                           "primary colour, right click for the "
+                                           "secondary colour."));
+    root->addWidget(recentGrid_);
+
+    auto* paletteRow = new QHBoxLayout;
+    paletteRow->setSpacing(4);
+    paletteRow->addWidget(new QLabel(QStringLiteral("Palette"), this));
+    paletteRow->addStretch(1);
+    loadPaletteButton_ = makeSmallButton(
+        QStringLiteral("Load"), QStringLiteral("paletteLoad"),
+        QStringLiteral("Load a .gpl or hex palette."));
+    savePaletteButton_ = makeSmallButton(
+        QStringLiteral("Save"), QStringLiteral("paletteSave"),
+        QStringLiteral("Save the palette as .gpl or hex."));
+    resetPaletteButton_ = makeSmallButton(
+        QStringLiteral("Reset"), QStringLiteral("paletteReset"),
+        QStringLiteral("Restore the built in palette."));
+    paletteRow->addWidget(loadPaletteButton_);
+    paletteRow->addWidget(savePaletteButton_);
+    paletteRow->addWidget(resetPaletteButton_);
+    root->addLayout(paletteRow);
+
     palette_ = new PaletteGrid(this);
     root->addWidget(palette_);
     root->addStretch(1);
@@ -499,12 +681,56 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         current.a = toByte(float(position));
         applyActive(current);
     });
-    connect(palette_, &PaletteGrid::colorChosen, this, [this](Rgba color, bool primary) {
+    const auto chooseColor = [this](Rgba color, bool primary) {
         if (primary)
             setPrimary(color);
         else
             setSecondary(color);
+    };
+    connect(palette_, &PaletteGrid::colorChosen, this, chooseColor);
+    connect(recentGrid_, &PaletteGrid::colorChosen, this, chooseColor);
+
+    connect(loadPaletteButton_, &QPushButton::clicked, this, [this] {
+        QSettings settings;
+        const QString last = settings.value(QStringLiteral("paletteDir")).toString();
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Load palette"), last, Palette::openFilter());
+        if (path.isEmpty())
+            return;
+        settings.setValue(QStringLiteral("paletteDir"), QFileInfo(path).absolutePath());
+        QString error;
+        if (!loadPaletteFile(path, &error))
+            showPaletteError(QStringLiteral("Cannot load palette"), error);
     });
+    connect(savePaletteButton_, &QPushButton::clicked, this, [this] {
+        QSettings settings;
+        const QString last = settings.value(QStringLiteral("paletteDir")).toString();
+        QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save palette"), last, Palette::saveFilter());
+        if (path.isEmpty())
+            return;
+        // The dialog may return a bare name, and a palette with no extension
+        // would be read back as a hex list, so settle on .gpl by default.
+        if (QFileInfo(path).suffix().isEmpty())
+            path += QStringLiteral(".gpl");
+        settings.setValue(QStringLiteral("paletteDir"), QFileInfo(path).absolutePath());
+        QString error;
+        if (!savePaletteFile(path, &error))
+            showPaletteError(QStringLiteral("Cannot save palette"), error);
+    });
+    connect(resetPaletteButton_, &QPushButton::clicked, this, &ColorPanel::resetPalette);
+    connect(pickButton_, &QPushButton::clicked, this, [this] {
+        QString error;
+        if (!beginScreenPick(&error))
+            showPaletteError(QStringLiteral("Cannot pick from the screen"), error);
+    });
+
+    // Recent colours are written back on a timer so that dragging across the
+    // wheel does not touch the settings file on every pixel.
+    recentSaveTimer_ = new QTimer(this);
+    recentSaveTimer_->setSingleShot(true);
+    recentSaveTimer_->setInterval(800);
+    connect(recentSaveTimer_, &QTimer::timeout, this, &ColorPanel::saveRecentColors);
 
     const auto onSpin = [this] {
         if (updating_)
@@ -552,11 +778,20 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         syncControls();
     });
 
+    loadRecentColors();
     syncControls();
+}
+
+ColorPanel::~ColorPanel()
+{
+    // The debounce timer may still be pending when the window closes.
+    if (recentSaveTimer_ && recentSaveTimer_->isActive())
+        saveRecentColors();
 }
 
 void ColorPanel::applyActive(Rgba color, bool fromFields)
 {
+    noteUsed(color);
     if (activeIsPrimary_) {
         primary_ = color;
         emit primaryChanged(primary_);
@@ -619,6 +854,7 @@ void ColorPanel::syncControls()
 
 void ColorPanel::setPrimary(Rgba color)
 {
+    noteUsed(color);
     primary_ = color;
     syncControls();
     emit primaryChanged(primary_);
@@ -626,6 +862,7 @@ void ColorPanel::setPrimary(Rgba color)
 
 void ColorPanel::setSecondary(Rgba color)
 {
+    noteUsed(color);
     secondary_ = color;
     syncControls();
     emit secondaryChanged(secondary_);
@@ -642,6 +879,9 @@ void ColorPanel::setActiveColor(Rgba color)
 void ColorPanel::swapColors()
 {
     std::swap(primary_, secondary_);
+    // Most recent last, so the new primary colour ends up at the front.
+    noteUsed(secondary_);
+    noteUsed(primary_);
     syncControls();
     emit primaryChanged(primary_);
     emit secondaryChanged(secondary_);
@@ -651,6 +891,8 @@ void ColorPanel::resetColors()
 {
     primary_ = Rgba(0, 0, 0, 255);
     secondary_ = Rgba(255, 255, 255, 255);
+    noteUsed(secondary_);
+    noteUsed(primary_);
     syncControls();
     emit primaryChanged(primary_);
     emit secondaryChanged(secondary_);
@@ -659,5 +901,232 @@ void ColorPanel::resetColors()
 bool ColorPanel::detailsVisible() const { return details_->isVisible(); }
 
 void ColorPanel::setDetailsVisible(bool visible) { moreButton_->setChecked(visible); }
+
+// ----------------------------------------------------------------- recent
+
+void ColorPanel::noteUsed(Rgba color)
+{
+    if (!recentGrid_)
+        return;
+    for (int i = 0; i < recent_.size(); ++i) {
+        if (recent_[i] != color)
+            continue;
+        if (i == 0)
+            return;                 // already the most recent entry
+        recent_.remove(i);
+        break;
+    }
+    recent_.prepend(color);
+    while (recent_.size() > kRecentLimit)
+        recent_.removeLast();
+    recentGrid_->setColors(recent_);
+    if (recentSaveTimer_)
+        recentSaveTimer_->start();
+}
+
+void ColorPanel::clearRecentColors()
+{
+    recent_.clear();
+    if (recentGrid_)
+        recentGrid_->setColors(recent_);
+    saveRecentColors();
+}
+
+void ColorPanel::loadRecentColors()
+{
+    QSettings settings;
+    const QStringList stored =
+        settings.value(QStringLiteral("recentColors")).toStringList();
+    recent_.clear();
+    for (const QString& entry : stored) {
+        if (recent_.size() >= kRecentLimit)
+            break;
+        Rgba color;
+        // Anything unparsable is from an older or hand edited settings file and
+        // is simply dropped.
+        if (Palette::parseHexColor(entry, color) && !recent_.contains(color))
+            recent_.append(color);
+    }
+    if (recentGrid_)
+        recentGrid_->setColors(recent_);
+}
+
+void ColorPanel::saveRecentColors() const
+{
+    QStringList stored;
+    stored.reserve(int(recent_.size()));
+    for (Rgba color : recent_)
+        stored.append(Palette::toHexString(color));
+    QSettings settings;
+    settings.setValue(QStringLiteral("recentColors"), stored);
+}
+
+// ----------------------------------------------------------------- palette files
+
+QVector<Rgba> ColorPanel::paletteColors() const
+{
+    return palette_ ? palette_->colors() : QVector<Rgba>();
+}
+
+bool ColorPanel::loadPaletteFile(const QString& path, QString* error)
+{
+    const Palette loaded = Palette::load(path, error);
+    if (loaded.isEmpty())
+        return false;
+    paletteName_ = loaded.name();
+    palette_->setColumns(loaded.columns());
+    palette_->setColors(loaded.colors());
+    palette_->setToolTip(QStringLiteral("%1 (%2 colours). Click for the primary "
+                                       "colour, right click for the secondary "
+                                       "colour.")
+                             .arg(paletteName_)
+                             .arg(loaded.size()));
+    return true;
+}
+
+bool ColorPanel::savePaletteFile(const QString& path, QString* error) const
+{
+    Palette out(palette_ ? palette_->colors() : QVector<Rgba>(),
+                paletteName_.isEmpty() ? QStringLiteral("Tessel") : paletteName_);
+    out.setColumns(palette_ ? palette_->columns() : 16);
+    return out.save(path, error);
+}
+
+void ColorPanel::resetPalette()
+{
+    paletteName_.clear();
+    palette_->setColumns(16);
+    palette_->setColors(PaletteGrid::defaultPalette());
+    palette_->setToolTip(QStringLiteral("Click for the primary colour, right click "
+                                       "for the secondary colour."));
+}
+
+void ColorPanel::showPaletteError(const QString& title, const QString& message)
+{
+    QMessageBox::warning(this, title,
+                         message.isEmpty() ? QStringLiteral("Unknown error.") : message);
+}
+
+// ----------------------------------------------------------------- screen pick
+
+QRect ColorPanel::screenBounds()
+{
+    QRect bounds;
+    for (QScreen* screen : QGuiApplication::screens())
+        bounds = bounds.united(screen->geometry());
+    return bounds;
+}
+
+QImage ColorPanel::grabScreens()
+{
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    const QRect bounds = screenBounds();
+    if (screens.isEmpty() || bounds.isEmpty())
+        return QImage();
+
+    double ratio = 1.0;
+    for (QScreen* screen : screens)
+        ratio = std::max(ratio, double(screen->devicePixelRatio()));
+    QImage out(QSize(int(std::lround(bounds.width() * ratio)),
+                     int(std::lround(bounds.height() * ratio))),
+               QImage::Format_RGB32);
+    if (out.isNull())
+        return QImage();
+    out.fill(Qt::black);
+
+    QPainter painter(&out);
+    // Nearest neighbour keeps every sampled colour exact when one screen's own
+    // scale factor differs from the one the composite is built at.
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    bool any = false;
+    for (QScreen* screen : screens) {
+        // A window id of zero asks for the whole screen rather than a window.
+        const QPixmap shot = screen->grabWindow(0);
+        if (shot.isNull())
+            continue;
+        const QRect geometry = screen->geometry();
+        const QRectF target((geometry.x() - bounds.x()) * ratio,
+                            (geometry.y() - bounds.y()) * ratio,
+                            geometry.width() * ratio, geometry.height() * ratio);
+        painter.drawPixmap(target, shot, QRectF(shot.rect()));
+        any = true;
+    }
+    painter.end();
+    return any ? out : QImage();
+}
+
+bool ColorPanel::isUsableGrab(const QImage& grab)
+{
+    // Why this check exists: QScreen::grabWindow only works where the platform
+    // lets a client read the framebuffer, which means X11, Windows and macOS.
+    // Wayland deliberately does not: a client cannot see anything it did not
+    // draw itself, and capture has to go through the compositor or the portal.
+    // Qt's Wayland plugin has no screen capture, so the grab comes back either
+    // null or as a blank, fully black image. Without this test every pick on
+    // such a session would quietly hand back black and look like a bug in the
+    // picker, so the panel reports the limitation instead.
+    //
+    // A genuinely all black desktop is reported as unusable too. That is the
+    // right trade: the message is clear and a black screen is nothing anybody
+    // picks a colour from.
+    if (grab.isNull() || grab.width() < 2 || grab.height() < 2)
+        return false;
+    const int stepX = std::max(1, grab.width() / 64);
+    const int stepY = std::max(1, grab.height() / 64);
+    for (int y = 0; y < grab.height(); y += stepY) {
+        for (int x = 0; x < grab.width(); x += stepX) {
+            if ((grab.pixel(x, y) & 0x00ffffffu) != 0u)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool ColorPanel::beginScreenPick(QString* error)
+{
+    if (error)
+        error->clear();
+    if (overlay_)
+        return true;
+
+    const QImage grab = grabScreens();
+    if (!isUsableGrab(grab)) {
+        if (error) {
+            *error = QStringLiteral(
+                "Tessel could not read the screen.\n\nThis session does not allow "
+                "an application to capture the desktop, which is the case on most "
+                "Wayland compositors. Use the colour picker tool on the canvas "
+                "instead, or run Tessel on an X11 session.");
+        }
+        return false;
+    }
+
+    auto* overlay = new ScreenPickOverlay(grab, screenBounds());
+    overlay_ = overlay;
+    connect(overlay, &ScreenPickOverlay::picked, this, [this](Rgba color) {
+        setActiveColor(color);
+        cancelScreenPick();
+    });
+    connect(overlay, &ScreenPickOverlay::cancelled, this,
+            [this] { cancelScreenPick(); });
+    connect(overlay, &QObject::destroyed, this, [this] { overlay_ = nullptr; });
+    overlay->show();
+    overlay->raise();
+    overlay->activateWindow();
+    overlay->setFocus();
+    return true;
+}
+
+void ColorPanel::cancelScreenPick()
+{
+    if (!overlay_)
+        return;
+    ScreenPickOverlay* overlay = overlay_;
+    overlay_ = nullptr;
+    // Deferred, because this is reached from inside the overlay's own event
+    // handlers.
+    overlay->hide();
+    overlay->deleteLater();
+}
 
 } // namespace tessel

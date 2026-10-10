@@ -30,6 +30,7 @@ add_library(tessel_core STATIC
   src/core/History.cpp
   src/core/Zip.cpp
   src/core/Io.cpp
+  src/core/Palette.cpp
   src/effects/Effect.cpp
   src/effects/Adjustments.cpp
   src/effects/Blurs.cpp
