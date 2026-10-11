@@ -1,10 +1,10 @@
 # Tessel
 
-A layered raster image editor for Linux, written from scratch in C++20 with Qt 6.
-It follows the way of working that Paint.NET made popular: a tool palette on the
-left, History, Layers and Colors on the right, a tool options bar under the main
-toolbar, and a status bar that always tells you where the cursor is, how big the
-selection is and what the zoom level is.
+A layered raster image editor for Linux and Windows, written from scratch in C++20
+with Qt 6. It follows the way of working that Paint.NET made popular: a tool
+palette in one corner of the image, History, Layers and Colors in the others, a
+tool options bar under the main toolbar, and a status bar that always tells you
+where the cursor is, how big the selection is and what the zoom level is.
 
 ![The Tessel window](docs/screenshots/main-dark.png)
 
