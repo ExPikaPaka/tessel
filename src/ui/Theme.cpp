@@ -99,38 +99,21 @@ QToolButton:pressed, QToolButton:checked { background: %5; border-color: %5; col
 QToolButton:disabled { color: %4; }
 QStatusBar { background: %1; color: %4; border-top: 1px solid %6; }
 QStatusBar QLabel { color: %4; padding: 0 6px; }
-QDockWidget { background: %1; color: %3; }
-QDockWidget::close-button, QDockWidget::float-button {
-    background: transparent; border: 1px solid transparent; border-radius: 3px;
-    padding: 0; margin: 2px; }
-QDockWidget::close-button:hover, QDockWidget::float-button:hover {
-    background: %5; border-color: %5; }
-/* The title bar buttons are real widgets, direct children of the dock, so the
-   pseudo element rules above do not reach them once they carry our own icons.
-   A panel's own buttons sit inside its content widget and are left alone. */
-QDockWidget > QAbstractButton {
-    background: transparent; border: 1px solid transparent; border-radius: 3px; }
-QDockWidget > QAbstractButton:hover { background: %5; border-color: %5; }
-QDockWidget > QAbstractButton:pressed { background: %6; border-color: %6; }
-QDockWidget::title { background: %2; padding: 5px 8px; border-bottom: 1px solid %6;
-                     text-align: left; font-weight: 600; }
-/* The title bar is our own widget, so it is styled here rather than through
-   the pseudo element above, which only reaches the one Qt draws. */
-QWidget#dockTitleBar { background: %2; border-bottom: 1px solid %6; }
-/* The buttons sit inside that bar, so the rule above for the dock's direct
-   children does not reach them, and the plain QToolButton hover paints panel
-   grey on panel grey: the pointer landed on the button and nothing happened.
-   These light them up against the bar. */
-QWidget#dockTitleBar QToolButton { background: transparent;
+/* The panels stand over the canvas in the corners of the window, so each one
+   paints itself: a background, a line to say where it ends, and a title bar
+   to take hold of. */
+tessel--Panel { background: %1; border: 1px solid %6; }
+tessel--Panel > QWidget { background: %1; }
+tessel--Panel QScrollArea, tessel--Panel QScrollArea > QWidget { background: %1; }
+QWidget#panelTitleBar { background: %2; border-bottom: 1px solid %6; }
+QLabel#panelTitle { color: %3; font-weight: 600; }
+/* The buttons sit inside that bar, so the plain QToolButton hover would paint
+   panel grey on panel grey: the pointer lands on the button and nothing
+   happens. These light them up against the bar. */
+QWidget#panelTitleBar QToolButton { background: transparent;
     border: 1px solid transparent; border-radius: 3px; }
-QWidget#dockTitleBar QToolButton:hover { background: %5; border-color: %5; }
-QWidget#dockTitleBar QToolButton:pressed { background: %6; border-color: %6; }
-QLabel#dockTitle { color: %3; font-weight: 600; }
-/* The palette stops at its last row of buttons, and the window behind it is
-   the same shade, so a line is what says where the panel ends. */
-QWidget#toolsPalette { border: 1px solid %6; border-top: 0; }
-QDockWidget > QWidget { background: %1; }
-QDockWidget QScrollArea, QDockWidget QScrollArea > QWidget { background: %1; }
+QWidget#panelTitleBar QToolButton:hover { background: %5; border-color: %5; }
+QWidget#panelTitleBar QToolButton:pressed { background: %6; border-color: %6; }
 QTabBar { background: %1; }
 QTabBar::tab { background: %2; color: %4; padding: 5px 10px; margin-right: 2px;
                border: 1px solid %6; border-bottom: 0;

@@ -310,7 +310,7 @@ spelling, such as `blendModeLabel` beside `blendModeName`.
                   the loader that reads the plugins directories
     plugins       the example effect plugin
     src/tools     the Tool interface, the shared stroke engine and all 19 tools
-    src/ui        the window, canvas view, docks, colour panel and dialogs
+    src/ui        the window, canvas view, panels, colour panel and dialogs
     translations  one .ts file per language, compiled into the binary
     tests         the two test suites
 

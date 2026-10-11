@@ -3241,6 +3241,13 @@ The layers stay intact in this window. Save as .tessel or .ora to keep them in t
     </message>
 </context>
 <context>
+    <name>tessel::Panel</name>
+    <message>
+        <source>Close this panel</source>
+        <translation>Закрыть эту панель</translation>
+    </message>
+</context>
+<context>
     <name>tessel::PaletteGrid</name>
     <message>
         <source>Click for the primary colour, right click for the secondary colour.</source>

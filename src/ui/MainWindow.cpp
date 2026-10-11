@@ -10,7 +10,6 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
-#include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -30,6 +29,7 @@
 #include <QScreen>
 #include <QHBoxLayout>
 #include <QPointer>
+#include <QScopeGuard>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -44,7 +44,6 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QAbstractButton>
-#include <QDockWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -148,7 +147,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     createActions();
     createMenus();
     createToolBars();
-    createDocks();
+    createPanels();
     createStatusBar();
     stack_->lower(); // the docked panels stand over the canvas, not under it
     layOutCanvas();
@@ -939,106 +938,82 @@ void MainWindow::createToolBars()
             });
 }
 
-// ----------------------------------------------------------------- docks
+// ----------------------------------------------------------------- panels
 
-void MainWindow::createDocks()
+void MainWindow::createPanels()
 {
-    auto makeDock = [this](const QString& title, QWidget* content, const QString& name) {
-        auto* dock = new QDockWidget(title, this);
-        dock->setObjectName(name);
-        dock->setWidget(content);
-        dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable
-                          | QDockWidget::DockWidgetClosable);
-        // The canvas runs underneath the panels now, so any part of a panel
-        // that does not paint itself shows the image through it and the text
-        // on it stops being readable. The frame and its contents are opaque.
-        // A style sheet background does not reach a dock frame on its own, the
-        // way it does not reach a plain widget, so the attribute that makes the
-        // style paint it is set by hand.
-        dock->setAttribute(Qt::WA_StyledBackground, true);
-        dock->setAutoFillBackground(true);
-        if (content) {
-            content->setAttribute(Qt::WA_StyledBackground, true);
-            content->setAutoFillBackground(true);
-        }
-        styleDockButtons(dock);
-        return dock;
+    auto makePanel = [this](const QString& name, const QString& title, QWidget* content,
+                            Corner corner) {
+        auto* panel = new Panel(name, title, content, this);
+        panel->setCorner(corner);
+        connect(panel, &Panel::closeRequested, panel, &QWidget::hide);
+        // Queued, because the panel says this from inside a layout pass and
+        // moving it there would start another one.
+        connect(panel, &Panel::sizeChanged, this, [this] { layOutPanels(); },
+                Qt::QueuedConnection);
+        connect(panel, &Panel::dragging, this, [this, panel](const QPoint& pointer) {
+            showDropHint(panel, pointer);
+        });
+        connect(panel, &Panel::dropped, this, [this, panel](const QPoint& pointer) {
+            dropPanel(panel, pointer);
+        });
+        panels_.append(panel);
+        return panel;
     };
 
+    // Paint.NET keeps these four in the corners of the image window, and the
+    // corners are where they belong: a panel that takes only the room it
+    // needs has no business owning a column down the side of the window.
     tools_ = new ToolsPalette(this);
-    toolsDock_ = makeDock(tr("Tools"), tools_, QStringLiteral("toolsDock"));
+    toolsPanel_ = makePanel(QStringLiteral("toolsPanel"), tr("Tools"), tools_,
+                            Corner::TopLeft);
 
     colors_ = new ColorPanel(this);
     // The Colors panel is the tall one: wheel, value and alpha, the recent
-    // row and the palette. In a short dock the layout used to squeeze the
-    // rows of swatches down to nothing, so the panel keeps its own height and
-    // the dock scrolls to it instead.
+    // row and the palette. It keeps its own height and scrolls when the
+    // window is too short for it, rather than squeezing the rows of swatches
+    // down to nothing.
     auto* colorsScroll = new QScrollArea(this);
     colorsScroll->setWidget(colors_);
     colorsScroll->setWidgetResizable(true);
     // Without this a scroll area asks for the same default size whatever is
-    // in it, and the dock would be capped at that instead of at the panel.
+    // in it, and the panel would be sized to that instead of to the contents.
     colorsScroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     colorsScroll->setFrameShape(QFrame::NoFrame);
     colorsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    colorsDock_ = makeDock(tr("Colors"), colorsScroll, QStringLiteral("colorsDock"));
+    colorsPanel_ = makePanel(QStringLiteral("colorsPanel"), tr("Colors"), colorsScroll,
+                             Corner::BottomLeft);
 
     history_ = new HistoryPanel(this);
-    historyDock_ = makeDock(tr("History"), history_,
-                            QStringLiteral("historyDock"));
+    historyPanel_ = makePanel(QStringLiteral("historyPanel"), tr("History"), history_,
+                              Corner::TopRight);
 
     layers_ = new LayersPanel(this);
-    layersDock_ = makeDock(tr("Layers"), layers_, QStringLiteral("layersDock"));
+    layersPanel_ = makePanel(QStringLiteral("layersPanel"), tr("Layers"), layers_,
+                             Corner::BottomRight);
 
-    // A dock area is as wide as its widest panel, so pairing the narrow tool
-    // palette with the Colors panel made the entire left column as wide as the
-    // colour wheel and wasted most of it. The palette now has the left edge to
-    // itself, sized to its two columns of buttons, and the other three share
-    // the right. All four remain floatable, so any of them can be pulled off
-    // into a window of its own.
-    addDockWidget(Qt::LeftDockWidgetArea, toolsDock_);
-    addDockWidget(Qt::RightDockWidgetArea, historyDock_);
-    splitDockWidget(historyDock_, layersDock_, Qt::Vertical);
-    splitDockWidget(layersDock_, colorsDock_, Qt::Vertical);
+    dropHint_ = new PanelDropHint(this);
 
-    resizeDocks({toolsDock_}, {104}, Qt::Horizontal);
-    // The three on the right share one width, and the Colors panel is the one
-    // with something to show: at 248 the wheel ran off the edge of it, which
-    // is the panel not being fully visible that this column is here to fix.
-    const int colorsWidth = colors_->sizeHint().width()
-                            + style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 4;
-    resizeDocks({historyDock_}, {std::max(248, colorsWidth)}, Qt::Horizontal);
-
-    // A dock frame stretches down its column whatever is inside it, so a
-    // palette of sixteen buttons or a list of one layer still read as a tall
-    // empty box. Every panel is held to the height its contents ask for, and
-    // asks again whenever those contents change, so it grows with the list and
-    // never past it. What is left of the column is the window showing through,
-    // painted like the workspace rather than like a panel.
-    for (QDockWidget* dock : {toolsDock_, colorsDock_, historyDock_, layersDock_}) {
-        dock->installEventFilter(this);
-        capDockToContent(dock);
-    }
-    // Dragging a dock makes Qt grab the mouse. Wayland refuses the grab, and
-    // when the drag ends without Qt hearing of it the grab stays behind, so
-    // every later click goes to the dock rather than to the button under the
-    // pointer: the title bar buttons look dead until something else clears it.
-    // Nothing holds the mouse with no button down except a popup, so this
+    // Wayland refuses the mouse grabs Qt asks for, and a drag that ends
+    // without Qt hearing of it leaves the grab behind: every later click goes
+    // to whatever grabbed rather than to the button under the pointer, which
+    // is why a panel's buttons would look dead until something else cleared
+    // it. Nothing holds the mouse with no button down except a popup, so this
     // hands it back as soon as the pointer moves.
     qApp->installEventFilter(this);
 
     // The menu bar icons mirror whether each panel is showing.
-    const std::pair<QToolButton*, QDockWidget*> panels[] = {
-        {toolsButton_, toolsDock_}, {historyButton_, historyDock_},
-        {layersButton_, layersDock_}, {colorsButton_, colorsDock_}};
-    for (const auto& [button, dock] : panels) {
-        if (!button || !dock)
+    const std::pair<QToolButton*, Panel*> buttons[] = {
+        {toolsButton_, toolsPanel_}, {historyButton_, historyPanel_},
+        {layersButton_, layersPanel_}, {colorsButton_, colorsPanel_}};
+    for (const auto& [button, panel] : buttons) {
+        if (!button || !panel)
             continue;
-        button->setChecked(dock->isVisible());
-        connect(button, &QToolButton::toggled, dock, &QDockWidget::setVisible);
-        connect(dock, &QDockWidget::visibilityChanged, button, [button](bool visible) {
+        button->setChecked(panel->isVisible());
+        connect(button, &QToolButton::toggled, panel, &QWidget::setVisible);
+        connect(panel, &Panel::sizeChanged, button, [button, panel] {
             QSignalBlocker blocker(button);
-            button->setChecked(visible);
+            button->setChecked(panel->isVisible());
         });
     }
 
@@ -1207,103 +1182,172 @@ void MainWindow::layOutCanvas()
     if (!stack_ || !canvasHost_)
         return;
     // The canvas takes the whole width between the tool bars and the status
-    // bar. The docked panels stand on top of it at either edge, so the
-    // workspace carries on under them and beyond whatever height they end at.
+    // bar. The panels stand on top of it in the corners, so the workspace
+    // carries on under them and beyond whatever height they end at.
     QRect band = canvasHost_->geometry();
     band.setLeft(0);
     band.setRight(width() - 1);
     if (stack_->geometry() != band)
         stack_->setGeometry(band);
+    if (dropHint_ && dropHint_->geometry() != band)
+        dropHint_->setGeometry(band);
+    layOutPanels();
 }
 
-void MainWindow::capDockToContent(QDockWidget* dock)
+QRect MainWindow::panelArea() const
 {
-    QWidget* content = dock ? dock->widget() : nullptr;
-    if (!content)
+    if (stack_)
+        return stack_->geometry();
+    if (canvasHost_)
+        return canvasHost_->geometry();
+    return rect();
+}
+
+void MainWindow::layOutPanels()
+{
+    if (panels_.isEmpty() || layingOutPanels_)
         return;
-    int height = content->sizeHint().height();
-    if (QWidget* bar = dock->titleBarWidget())
-        height += bar->sizeHint().height();
-    height += 2; // the dock's own frame
-    // Only when the contents have actually changed shape, because a dock area
-    // answers a resize with a layout pass, which would ask us again.
-    static const char* kAsked = "tessel_capHeight";
-    if (dock->property(kAsked).toInt() == height)
+    // Placing a panel changes its shape, which is what asked for this in the
+    // first place: without the latch the two call each other for ever.
+    layingOutPanels_ = true;
+    const QScopeGuard done([this] { layingOutPanels_ = false; });
+    const QRect area = panelArea();
+    if (area.width() < 80 || area.height() < 80)
         return;
-    dock->setProperty(kAsked, height);
-    dock->setMaximumHeight(height);
-    // Raising the ceiling is not enough: a dock area hands out the height it
-    // handed out last time until it is asked for something else, so a list
-    // that has grown would scroll inside a panel with room above it.
-    // Asked for after this layout pass rather than inside it: a dock area
-    // that is in the middle of placing its panels puts the sizes back.
-    if (!dock->isFloating() && dock->isVisible()) {
-        QPointer<QDockWidget> target(dock);
-        QMetaObject::invokeMethod(
-            this,
-            [this, target, height] {
-                if (target && !target->isFloating() && target->isVisible())
-                    resizeDocks({target}, {height}, Qt::Vertical);
-            },
-            Qt::QueuedConnection);
+    constexpr int kMargin = 8;
+    constexpr int kGap = 6;
+
+    for (const Corner corner : {Corner::TopLeft, Corner::TopRight, Corner::BottomLeft,
+                                Corner::BottomRight}) {
+        QList<Panel*> here;
+        for (Panel* panel : panels_) {
+            if (panel->isVisible() && !panel->isBeingDragged() && panel->corner() == corner)
+                here.append(panel);
+        }
+        if (here.isEmpty())
+            continue;
+        const bool fromTop = corner == Corner::TopLeft || corner == Corner::TopRight;
+        const bool fromLeft = corner == Corner::TopLeft || corner == Corner::BottomLeft;
+        // Panels in one corner are stacked away from it, and share the height
+        // when they ask for more of it than there is.
+        int free = area.height() - 2 * kMargin - kGap * (here.size() - 1);
+        int edge = fromTop ? area.top() + kMargin : area.bottom() - kMargin;
+        for (int i = 0; i < here.size(); ++i) {
+            Panel* panel = here[i];
+            const QSize want = panel->wantedSize();
+            const int left = here.size() - i - 1; // panels still to place
+            const int width = std::clamp(want.width(), 120,
+                                         std::max(120, area.width() / 2 - kMargin));
+            const int height = std::clamp(want.height(), 48,
+                                          std::max(48, free - left * 48));
+            const int x = fromLeft ? area.left() + kMargin
+                                   : area.right() - kMargin - width + 1;
+            const int y = fromTop ? edge : edge - height + 1;
+            panel->setGeometry(x, y, width, height);
+            panel->raise();
+            free -= height;
+            edge += fromTop ? height + kGap : -(height + kGap);
+        }
     }
 }
 
-void MainWindow::styleDockButtons(QDockWidget* dock)
+void MainWindow::showDropHint(Panel* panel, const QPoint& pointer)
 {
-    // Qt's own title bar buttons draw their hover state themselves, through a
-    // style hint that a style sheet does not answer, so under this theme the
-    // only sign that the pointer was on one was the tooltip a second later.
-    // The title bar is ours instead: a label and two ordinary tool buttons,
-    // which the theme already lights up, and which can be given a size worth
-    // aiming at. The label accepts no mouse events, so the dock is still
-    // dragged and double clicked by its title the way it always was.
-    auto* bar = qobject_cast<QWidget*>(dock->titleBarWidget());
-    QLabel* label = nullptr;
-    if (!bar) {
-        bar = new QWidget(dock);
-        bar->setObjectName(QStringLiteral("dockTitleBar"));
-        bar->setAttribute(Qt::WA_StyledBackground, true);
-        auto* row = new QHBoxLayout(bar);
-        row->setContentsMargins(8, 3, 3, 3);
-        row->setSpacing(2);
-        label = new QLabel(dock->windowTitle(), bar);
-        label->setObjectName(QStringLiteral("dockTitle"));
-        label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-        row->addWidget(label, 1);
-
-        auto addButton = [&](const QString& name, const QString& tip, auto slot) {
-            auto* button = new QToolButton(bar);
-            button->setObjectName(name);
-            button->setAutoRaise(true);
-            button->setIconSize(QSize(16, 16));
-            button->setFixedSize(22, 22);
-            button->setToolTip(tip);
-            connect(button, &QToolButton::clicked, dock, slot);
-            row->addWidget(button, 0);
-            return button;
-        };
-        addButton(QStringLiteral("dockFloatButton"), tr("Float or dock this panel"),
-                  [dock] { dock->setFloating(!dock->isFloating()); });
-        addButton(QStringLiteral("dockCloseButton"), tr("Close this panel"),
-                  [dock] { dock->close(); });
-        dock->setTitleBarWidget(bar);
-        connect(dock, &QDockWidget::windowTitleChanged, label, &QLabel::setText);
+    if (!dropHint_ || !panel)
+        return;
+    dropHint_->setGeometry(panelArea());
+    dropHint_->setActive(PanelDropHint::cornerAt(dropHint_->rect(),
+                                                 pointer - dropHint_->pos()));
+    if (!dropHint_->isVisible()) {
+        dropHint_->show();
+        dropHint_->raise();
+        panel->raise();
     }
-    if (auto* found = bar->findChild<QLabel*>(QStringLiteral("dockTitle")))
-        found->setText(dock->windowTitle());
-    if (auto* button = bar->findChild<QToolButton*>(QStringLiteral("dockFloatButton")))
-        button->setIcon(icons::get(QStringLiteral("copy"), 16));
-    if (auto* button = bar->findChild<QToolButton*>(QStringLiteral("dockCloseButton")))
-        button->setIcon(icons::get(QStringLiteral("close"), 16));
+}
+
+void MainWindow::dropPanel(Panel* panel, const QPoint& pointer)
+{
+    if (!panel)
+        return;
+    if (dropHint_) {
+        dropHint_->hide();
+        panel->setCorner(PanelDropHint::cornerAt(dropHint_->rect(),
+                                                 pointer - dropHint_->pos()));
+    }
+    // Nearest the corner it was let go in: the panels already there move
+    // aside rather than the new one landing behind them.
+    panels_.removeOne(panel);
+    panels_.prepend(panel);
+    layOutPanels();
+}
+
+// The panels are ours rather than Qt's, so where they sit is written down
+// here: the corner each one is in, the order they are stacked in it, and
+// whether it is showing at all.
+void MainWindow::savePanels(QSettings& settings) const
+{
+    QStringList entries;
+    for (Panel* panel : panels_) {
+        entries.append(QStringLiteral("%1:%2:%3")
+                           .arg(panel->objectName())
+                           .arg(int(panel->corner()))
+                           .arg(panel->isVisible() ? 1 : 0));
+    }
+    settings.setValue(QStringLiteral("panels"), entries.join(QLatin1Char(';')));
+}
+
+void MainWindow::restorePanels(const QSettings& settings)
+{
+    const QString stored = settings.value(QStringLiteral("panels")).toString();
+    if (stored.isEmpty())
+        return;
+    QList<Panel*> order;
+    for (const QString& entry : stored.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+        const QStringList parts = entry.split(QLatin1Char(':'));
+        if (parts.size() != 3)
+            continue;
+        Panel* panel = nullptr;
+        for (Panel* candidate : panels_) {
+            if (candidate->objectName() == parts[0])
+                panel = candidate;
+        }
+        if (!panel || order.contains(panel))
+            continue;
+        const int corner = std::clamp(parts[1].toInt(), 0, 3);
+        panel->setCorner(Corner(corner));
+        panel->setVisible(parts[2].toInt() != 0);
+        order.append(panel);
+    }
+    // Anything the settings did not mention keeps the place it was given.
+    for (Panel* panel : panels_) {
+        if (!order.contains(panel))
+            order.append(panel);
+    }
+    panels_ = order;
+    layOutPanels();
+}
+
+void MainWindow::resetPanelLayout()
+{
+    const std::pair<Panel*, Corner> home[] = {{toolsPanel_, Corner::TopLeft},
+                                              {historyPanel_, Corner::TopRight},
+                                              {colorsPanel_, Corner::BottomLeft},
+                                              {layersPanel_, Corner::BottomRight}};
+    panels_.clear();
+    for (const auto& [panel, corner] : home) {
+        if (!panel)
+            continue;
+        panel->setCorner(corner);
+        panel->show();
+        panels_.append(panel);
+    }
+    layOutPanels();
 }
 
 void MainWindow::refreshIcons()
 {
-    for (QDockWidget* dock : {toolsDock_, colorsDock_, historyDock_, layersDock_}) {
-        if (dock)
-            styleDockButtons(dock);
-    }
+    for (Panel* panel : panels_)
+        panel->refreshIcons();
 
     // Icons are drawn in the current foreground colour, so after a theme change
     // every one of them has to be produced again.
@@ -2287,18 +2331,7 @@ void MainWindow::showSettings()
                                         size_t(memory->value()) * 1024 * 1024);
     }
     if (resetRequested) {
-        for (QDockWidget* dock : {toolsDock_, colorsDock_, historyDock_, layersDock_}) {
-            dock->setFloating(false);
-            dock->setVisible(true);
-        }
-        addDockWidget(Qt::LeftDockWidgetArea, toolsDock_);
-        addDockWidget(Qt::RightDockWidgetArea, historyDock_);
-        splitDockWidget(historyDock_, layersDock_, Qt::Vertical);
-        splitDockWidget(layersDock_, colorsDock_, Qt::Vertical);
-        resizeDocks({toolsDock_}, {104}, Qt::Horizontal);
-        resizeDocks({historyDock_}, {248}, Qt::Horizontal);
-        for (QDockWidget* dock : {toolsDock_, colorsDock_, historyDock_, layersDock_})
-            capDockToContent(dock);
+        resetPanelLayout();
     }
     updateEverything();
 }
@@ -2848,6 +2881,7 @@ void MainWindow::restoreSettings()
         restoreState(settings.value(QStringLiteral("windowState")).toByteArray(),
                      kLayoutVersion);
     }
+    restorePanels(settings);
     if (QAction* grid = actions_.value(QStringLiteral("grid")))
         grid->setChecked(settings.value(QStringLiteral("pixelGrid"), false).toBool());
     if (QAction* rulers = actions_.value(QStringLiteral("rulers")))
@@ -2862,6 +2896,7 @@ void MainWindow::storeSettings()
     settings.setValue(QStringLiteral("recentFiles"), recentFiles_);
     settings.setValue(QStringLiteral("geometry"), saveGeometry());
     settings.setValue(QStringLiteral("windowState"), saveState(kLayoutVersion));
+    savePanels(settings);
     settings.setValue(QStringLiteral("pixelGrid"),
                       actions_.value(QStringLiteral("grid"))->isChecked());
     settings.setValue(QStringLiteral("rulers"),
@@ -2922,15 +2957,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
         // The dock layout has just handed the central widget a new rectangle,
         // because the window was resized or a panel came or went.
         layOutCanvas();
-    } else if (event->type() == QEvent::LayoutRequest) {
-        // The panel inside has just changed shape: a layer added, a step of
-        // history recorded. The dock follows it.
-        if (auto* dock = qobject_cast<QDockWidget*>(watched))
-            capDockToContent(dock);
     } else if (event->type() == QEvent::MouseMove
                && QApplication::mouseButtons() == Qt::NoButton
                && !QApplication::activePopupWidget()) {
-        // A grab left over from a dock drag, see createDocks.
+        // A grab left behind, see createPanels.
         if (QWidget* grabber = QWidget::mouseGrabber())
             grabber->releaseMouse();
     }

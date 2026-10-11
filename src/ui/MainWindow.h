@@ -16,11 +16,12 @@
 #include "ui/ColorPanel.h"
 #include "ui/Dialogs.h"
 #include "ui/Docks.h"
+#include "ui/Panels.h"
 
 class QAction;
 class QComboBox;
-class QDockWidget;
 class QLabel;
+class QSettings;
 class QSlider;
 class QStackedWidget;
 class QToolButton;
@@ -36,6 +37,10 @@ class MainWindow : public QMainWindow {
 public:
     MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // Puts the four panels back in the corners they start in, showing. The
+    // settings dialog offers this, and a test wants a known arrangement.
+    void resetPanelLayout();
 
     void newDocument(int width, int height, Rgba background);
     bool openPath(const QString& path);
@@ -65,7 +70,7 @@ private:
     void createMenus();
     void createToolBars();
     void createMenuBarIcons();
-    void createDocks();
+    void createPanels();
     void createStatusBar();
     void installToolShortcuts();
     void restoreSettings();
@@ -97,9 +102,14 @@ private:
     void updateZoomControls();
     void refreshPanels();
     void refreshIcons();
-    void styleDockButtons(QDockWidget* dock);
-    void capDockToContent(QDockWidget* dock);
     void layOutCanvas();
+    // Where the panels live: the canvas band, with the four corners in it.
+    QRect panelArea() const;
+    void layOutPanels();
+    void showDropHint(Panel* panel, const QPoint& pointer);
+    void dropPanel(Panel* panel, const QPoint& pointer);
+    void savePanels(QSettings& settings) const;
+    void restorePanels(const QSettings& settings);
 
     // ---------------------------------------------------------- commands
     void chooseTool(const QString& toolId, bool fromShortcut = false);
@@ -148,10 +158,13 @@ private:
     LayersPanel* layers_ = nullptr;
     HistoryPanel* history_ = nullptr;
     ToolOptionsBar* options_ = nullptr;
-    QDockWidget* toolsDock_ = nullptr;
-    QDockWidget* colorsDock_ = nullptr;
-    QDockWidget* layersDock_ = nullptr;
-    QDockWidget* historyDock_ = nullptr;
+    QList<Panel*> panels_; // in the order they are stacked in their corners
+    Panel* toolsPanel_ = nullptr;
+    Panel* colorsPanel_ = nullptr;
+    Panel* layersPanel_ = nullptr;
+    Panel* historyPanel_ = nullptr;
+    PanelDropHint* dropHint_ = nullptr;
+    bool layingOutPanels_ = false;
     QToolButton* toolsButton_ = nullptr;
     QToolButton* historyButton_ = nullptr;
     QToolButton* layersButton_ = nullptr;

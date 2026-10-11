@@ -23,7 +23,6 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
-#include <QDockWidget>
 #include <QScrollBar>
 #include <QScrollArea>
 #include <QShortcut>
@@ -53,6 +52,7 @@
 #include "ui/ColorPanel.h"
 #include "ui/Dialogs.h"
 #include "ui/Docks.h"
+#include "ui/Panels.h"
 #include "ui/CurveWidget.h"
 #include "ui/EffectDialog.h"
 #include "ui/Icons.h"
@@ -2508,6 +2508,10 @@ int main(int argc, char** argv)
         window.resize(1400, 760);
         window.show();
         QApplication::processEvents();
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
 
         auto* colors = window.findChild<ColorPanel*>();
         CHECK(colors != nullptr);
@@ -2529,75 +2533,69 @@ int main(int argc, char** argv)
     });
 
     addTest("the tools palette is no taller than its buttons", [] {
-        // A dock fills its column, which left the palette stretched down the
-        // whole side of the window with most of it empty.
+        // A panel used to own a column of the window whatever it had in it,
+        // which left the palette stretched down the whole side with most of
+        // it empty.
         MainWindow window;
         window.newDocument(400, 300, Rgba(255, 255, 255, 255));
         window.resize(1400, 900);
         window.show();
         QApplication::processEvents();
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
         auto* tools = window.findChild<ToolsPalette*>();
-        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
-        CHECK(tools != nullptr && dock != nullptr);
-        if (!tools || !dock)
+        auto* panel = window.findChild<Panel*>(QStringLiteral("toolsPanel"));
+        CHECK(tools != nullptr && panel != nullptr);
+        if (!tools || !panel)
             return;
         CHECK(tools->height() <= tools->maximumHeight());
         CHECK(tools->height() < 500);          // not the height of the window
         CHECK(tools->height() > 250);          // but enough for ten rows
-        // The dock frame has to end there too, or the panel still reads as a
-        // tall empty box with the buttons pushed to the top of it.
-        CHECK(dock->height() <= tools->maximumHeight() + 60);
-        CHECK(dock->height() < 500);
-        // The title bar is ours, so its buttons are ordinary tool buttons the
-        // theme lights up, at a size worth aiming at, and they do their job.
-        QWidget* bar = dock->titleBarWidget();
+        CHECK(panel->height() <= tools->maximumHeight() + 60);
+        CHECK(panel->height() < 500);
+        // The title bar is ours, so its button is an ordinary tool button the
+        // theme lights up, at a size worth aiming at, and it does its job.
+        auto* bar = panel->findChild<QWidget*>(QStringLiteral("panelTitleBar"));
         CHECK(bar != nullptr);
         if (!bar)
             return;
-        auto* close = bar->findChild<QToolButton*>(QStringLiteral("dockCloseButton"));
-        auto* floatIt = bar->findChild<QToolButton*>(QStringLiteral("dockFloatButton"));
-        CHECK(close != nullptr && floatIt != nullptr);
-        if (!close || !floatIt)
+        auto* close = bar->findChild<QToolButton*>(QStringLiteral("panelCloseButton"));
+        auto* title = bar->findChild<QLabel*>(QStringLiteral("panelTitle"));
+        CHECK(close != nullptr && title != nullptr);
+        if (!close || !title)
             return;
-        for (QToolButton* button : {close, floatIt}) {
-            check(button->width() >= 22 && button->height() >= 22,
-                  "a dock title button is big enough to hit", __LINE__);
-            check(!button->icon().isNull(), "a dock title button has an icon",
-                  __LINE__);
-        }
-        CHECK(bar->findChild<QLabel*>(QStringLiteral("dockTitle"))->text()
-              == dock->windowTitle());
-        // The title itself takes no mouse events, so the dock still drags.
-        CHECK(bar->findChild<QLabel*>(QStringLiteral("dockTitle"))
-                  ->testAttribute(Qt::WA_TransparentForMouseEvents));
-        floatIt->click();
-        QApplication::processEvents();
-        CHECK(dock->isFloating());
-        floatIt->click();
-        QApplication::processEvents();
-        CHECK(!dock->isFloating());
+        check(close->width() >= 22 && close->height() >= 22,
+              "a panel title button is big enough to hit", __LINE__);
+        check(!close->icon().isNull(), "a panel title button has an icon", __LINE__);
+        CHECK(!title->text().isEmpty());
+        // The title itself takes no mouse events, so the whole bar drags.
+        CHECK(title->testAttribute(Qt::WA_TransparentForMouseEvents));
         close->click();
         QApplication::processEvents();
-        CHECK(!dock->isVisible());
-        dock->show();
+        CHECK(!panel->isVisible());
+        panel->show();
     });
 
-    addTest("the canvas runs under the panels rather than beside them", [] {
-        // A panel that takes only the height it needs used to leave a dead
-        // strip below it: the dock column kept the width to itself all the way
-        // down. The canvas is laid out across the whole window instead, with
-        // the panels standing on top of it, so the workspace carries on under
-        // and below them.
+    addTest("the panels sit in the corners and the canvas runs under them", [] {
+        // Qt's docking gives a panel a strip down one side of the window and
+        // that strip the full height, whatever is in the panel. These are in
+        // the four corners instead, over a canvas that runs the whole width.
         MainWindow window;
         window.newDocument(400, 300, Rgba(255, 255, 255, 255));
         window.resize(1400, 900);
         window.show();
         QApplication::processEvents();
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
 
         auto* view = window.findChild<CanvasView*>();
-        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
-        CHECK(view != nullptr && dock != nullptr);
-        if (!view || !dock)
+        auto* panel = window.findChild<Panel*>(QStringLiteral("toolsPanel"));
+        CHECK(view != nullptr && panel != nullptr);
+        if (!view || !panel)
             return;
         QWidget* canvas = view->parentWidget(); // the stack of open images
         CHECK(canvas != nullptr);
@@ -2605,41 +2603,116 @@ int main(int argc, char** argv)
             return;
         CHECK(canvas->x() == 0);
         CHECK(canvas->x() + canvas->width() == window.width());
-        // The panel stands over it, and is the one that answers the pointer.
-        CHECK(dock->geometry().intersects(canvas->geometry()));
-        const QPoint onPanel = dock->geometry().center();
-        QWidget* hit = window.childAt(onPanel);
-        CHECK(hit != nullptr && (hit == dock || dock->isAncestorOf(hit)));
+
+        // Each one is in its own corner of that band, near the edges.
+        const QRect area = canvas->geometry();
+        const std::pair<const char*, QPoint> corners[] = {
+            {"toolsPanel", QPoint(0, 0)},
+            {"historyPanel", QPoint(1, 0)},
+            {"colorsPanel", QPoint(0, 1)},
+            {"layersPanel", QPoint(1, 1)}};
+        for (const auto& [name, corner] : corners) {
+            auto* one = window.findChild<Panel*>(QString::fromLatin1(name));
+            if (!one) {
+                check(false, "the panel is there", __LINE__);
+                continue;
+            }
+            const QRect box = one->geometry();
+            check(box.width() < area.width() / 2,
+                  "a panel is not half the window wide", __LINE__);
+            check(corner.x() == 0 ? box.left() < area.left() + 24
+                                  : box.right() > area.right() - 24,
+                  "the panel is against the side it belongs to", __LINE__);
+            check(corner.y() == 0 ? box.top() < area.top() + 24
+                                  : box.bottom() > area.bottom() - 24,
+                  "the panel is against the end it belongs to", __LINE__);
+        }
+
+        // The panel stands over the canvas, and is the one that answers the
+        // pointer, while next to it the same band is canvas.
+        CHECK(panel->geometry().intersects(canvas->geometry()));
+        QWidget* hit = window.childAt(panel->geometry().center());
+        CHECK(hit != nullptr && (hit == panel || panel->isAncestorOf(hit)));
+        // Below where it ends, with the corner below it out of the way, the
+        // same column of the window is canvas.
+        if (auto* below = window.findChild<Panel*>(QStringLiteral("colorsPanel")))
+            below->hide();
+        QApplication::processEvents();
+        const QPoint under(panel->geometry().center().x(),
+                           panel->geometry().bottom() + 40);
+        hit = window.childAt(under);
+        CHECK(hit != nullptr && (hit == view || view->isAncestorOf(hit)));
+
         // And a panel paints itself. The image runs under the panels now, so
-        // any part of one that left its background to the window behind it
-        // shows the image through, with the text on it unreadable. The panel
+        // any part of one that left its background to the window behind would
+        // show the image through, with the text on it unreadable. The panel
         // is drawn over a colour nothing in the theme uses, with the window
         // behind left out of the drawing: whatever is left of that colour is
         // what the image would be seen through.
-        if (QWidget* inside = dock->widget())
+        if (QWidget* inside = panel->content())
             inside->setFixedSize(24, 24); // leave most of the frame bare
         QApplication::processEvents();
-        QPixmap sheet(dock->size());
+        QPixmap sheet(panel->size());
         sheet.fill(QColor(255, 0, 255));
-        dock->render(&sheet, QPoint(), QRegion(), QWidget::DrawChildren);
+        panel->render(&sheet, QPoint(), QRegion(), QWidget::DrawChildren);
         const QImage drawn = sheet.toImage();
-        const QPoint probes[] = {QPoint(dock->width() - 2, dock->height() - 2),
-                                 QPoint(dock->width() / 2, dock->height() / 2),
-                                 QPoint(1, dock->height() - 2)};
+        const QPoint probes[] = {QPoint(panel->width() - 2, panel->height() - 2),
+                                 QPoint(panel->width() / 2, panel->height() / 2),
+                                 QPoint(1, panel->height() - 2)};
         for (const QPoint& probe : probes) {
             check(drawn.pixelColor(probe) != QColor(255, 0, 255),
                   "the panel paints every part of itself", __LINE__);
         }
-        if (QWidget* inside = dock->widget()) {
-            inside->setMinimumSize(0, 0);
-            inside->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-        }
+    });
+
+    addTest("a panel dragged by its title lands in the corner it was let go in", [] {
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
         QApplication::processEvents();
-        // Below where the panel ends, the same column is canvas.
-        const QPoint under(dock->geometry().center().x(),
-                           dock->geometry().bottom() + 40);
-        hit = window.childAt(under);
-        CHECK(hit != nullptr && (hit == view || view->isAncestorOf(hit)));
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
+
+        auto* panel = window.findChild<Panel*>(QStringLiteral("toolsPanel"));
+        CHECK(panel != nullptr);
+        if (!panel)
+            return;
+        auto* bar = panel->findChild<QWidget*>(QStringLiteral("panelTitleBar"));
+        CHECK(bar != nullptr);
+        if (!bar)
+            return;
+        CHECK(panel->corner() == Corner::TopLeft);
+
+        // Taken by the title bar, carried to the far corner, let go of.
+        const QPoint grab(bar->width() / 2, bar->height() / 2);
+        QTest::mousePress(bar, Qt::LeftButton, Qt::NoModifier, grab);
+        const QPoint far(window.width() - 60, window.height() - 120);
+        QTest::mouseMove(bar, bar->mapFrom(&window, far));
+        QApplication::processEvents();
+        // The targets are shown while it is in the air.
+        auto* hint = window.findChild<PanelDropHint*>();
+        CHECK(hint != nullptr && hint->isVisible());
+        if (hint)
+            CHECK(hint->active() == Corner::BottomRight);
+        QTest::mouseRelease(bar, Qt::LeftButton, Qt::NoModifier,
+                            bar->mapFrom(&window, far));
+        QApplication::processEvents();
+
+        CHECK(panel->corner() == Corner::BottomRight);
+        CHECK(hint == nullptr || !hint->isVisible());
+        const QRect area = window.findChild<CanvasView*>()->parentWidget()->geometry();
+        CHECK(panel->geometry().right() > area.right() - 24);
+        // Right into the corner, with what was already there moved up.
+        CHECK(panel->geometry().bottom() > area.bottom() - 24);
+        // And the one that was already there made room for it rather than
+        // being covered by it.
+        auto* layers = window.findChild<Panel*>(QStringLiteral("layersPanel"));
+        CHECK(layers != nullptr);
+        if (layers)
+            CHECK(!layers->geometry().intersects(panel->geometry()));
     });
 
     addTest("a panel is no taller than what it holds", [] {
@@ -2648,70 +2721,63 @@ int main(int argc, char** argv)
         window.resize(1400, 900);
         window.show();
         QApplication::processEvents();
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
 
-        for (const char* name : {"toolsDock", "layersDock", "historyDock"}) {
-            auto* dock = window.findChild<QDockWidget*>(QString::fromLatin1(name));
-            if (!dock || !dock->widget() || !dock->titleBarWidget()) {
+        for (const char* name : {"toolsPanel", "layersPanel", "historyPanel"}) {
+            auto* panel = window.findChild<Panel*>(QString::fromLatin1(name));
+            if (!panel || !panel->content()) {
                 check(false, "the panel is there to measure", __LINE__);
                 continue;
             }
-            const int wanted = dock->widget()->sizeHint().height()
-                               + dock->titleBarWidget()->sizeHint().height() + 8;
-            check(dock->height() <= wanted,
+            check(panel->height() <= panel->wantedSize().height() + 8,
                   "the panel stops at the end of its contents", __LINE__);
-            check(dock->height() < window.height() - 200,
+            check(panel->height() < window.height() - 200,
                   "the panel is not the height of the window", __LINE__);
         }
 
         // And it follows what it holds: a longer list is a taller panel.
         auto* layers = window.findChild<LayersPanel*>();
-        auto* layersDock = window.findChild<QDockWidget*>(QStringLiteral("layersDock"));
-        CHECK(layers != nullptr && layersDock != nullptr);
-        if (!layers || !layersDock)
+        auto* panel = window.findChild<Panel*>(QStringLiteral("layersPanel"));
+        CHECK(layers != nullptr && panel != nullptr);
+        if (!layers || !panel)
             return;
-        // With the column to itself, so that what it asks for is what there
-        // is to give: three panels in one column share the height between
-        // them, and the Colors panel is taller than any window.
-        for (const char* name : {"colorsDock", "historyDock"}) {
-            if (auto* other = window.findChild<QDockWidget*>(QString::fromLatin1(name)))
-                other->hide();
-        }
-        QApplication::processEvents();
-        const int before = layersDock->height();
+        const int before = panel->height();
         for (int i = 0; i < 5; ++i)
             QMetaObject::invokeMethod(layers, "addLayerRequested");
-        // Twice: the panel asks for its new height in one turn and the dock
-        // area hands it over in the next.
         QApplication::processEvents();
-        QApplication::processEvents();
-        CHECK(layersDock->height() > before);
-        CHECK(layersDock->height() <= layers->sizeHint().height()
-                                      + layersDock->titleBarWidget()->sizeHint().height()
-                                      + 8);
+        CHECK(panel->height() > before);
+        CHECK(panel->height() <= panel->wantedSize().height() + 8);
     });
 
     addTest("a grab left behind does not deafen the panel buttons", [] {
-        // Dragging a dock makes Qt grab the mouse. Wayland refuses the grab,
-        // and a drag that ends without Qt hearing of it leaves the grab in
-        // place: every click then goes to the dock instead of to the button
-        // under the pointer, and the title bar buttons look dead until
-        // something else clears it.
+        // Wayland refuses the mouse grabs Qt asks for, and a drag that ends
+        // without Qt hearing of it leaves the grab in place: every click then
+        // goes to whatever grabbed instead of to the button under the
+        // pointer, and the title bar buttons look dead until something else
+        // clears it.
         MainWindow window;
         window.newDocument(400, 300, Rgba(255, 255, 255, 255));
         window.resize(1400, 900);
         window.show();
         QApplication::processEvents();
+        // The panels remember where they were left, and the settings carry
+        // over between runs, so this starts from the arrangement that ships.
+        window.resetPanelLayout();
+        QApplication::processEvents();
 
-        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
-        CHECK(dock != nullptr);
-        if (!dock)
+        auto* panel = window.findChild<Panel*>(QStringLiteral("toolsPanel"));
+        CHECK(panel != nullptr);
+        if (!panel)
             return;
-        dock->grabMouse();
-        CHECK(QWidget::mouseGrabber() == dock);
+        panel->grabMouse();
+        CHECK(QWidget::mouseGrabber() == panel);
         const QPointF at(4, 4);
-        QMouseEvent move(QEvent::MouseMove, at, at, dock->mapToGlobal(at),
+        QMouseEvent move(QEvent::MouseMove, at, at, panel->mapToGlobal(at),
                          Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-        QApplication::sendEvent(dock, &move);
+        QApplication::sendEvent(panel, &move);
         CHECK(QWidget::mouseGrabber() == nullptr);
         if (QWidget::mouseGrabber())
             QWidget::mouseGrabber()->releaseMouse();

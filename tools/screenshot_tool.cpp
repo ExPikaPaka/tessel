@@ -15,7 +15,6 @@
 #include <QApplication>
 #include <QDateTime>
 #include <QDir>
-#include <QDockWidget>
 #include <QEvent>
 #include <QFont>
 #include <QImage>
@@ -483,15 +482,10 @@ int main(int argc, char** argv)
         window->show();
         app.processEvents();
 
-        // The layer tree is taller than a flat list of three, so the Layers
-        // dock is given room for a group and its children.
-        auto* historyDock = window->findChild<QDockWidget*>(QStringLiteral("historyDock"));
-        auto* layersDock = window->findChild<QDockWidget*>(QStringLiteral("layersDock"));
-        auto* colorsDock = window->findChild<QDockWidget*>(QStringLiteral("colorsDock"));
-        if (historyDock && layersDock && colorsDock) {
-            window->resizeDocks({historyDock, layersDock, colorsDock},
-                                {210, 330, 350}, Qt::Vertical);
-        }
+        // The panels size themselves to what they hold and sit in the four
+        // corners; the pictures should show the arrangement the program
+        // ships with rather than whatever the last run was left in.
+        window->resetPanelLayout();
         app.processEvents();
 
         CanvasView* view = window->findChildren<CanvasView*>().last();

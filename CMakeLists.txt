@@ -88,6 +88,8 @@ qt_add_library(tessel_ui STATIC
   src/ui/CanvasView.h
   src/ui/Docks.cpp
   src/ui/Docks.h
+  src/ui/Panels.cpp
+  src/ui/Panels.h
   src/ui/ColorPanel.cpp
   src/ui/ColorPanel.h
   src/ui/Dialogs.cpp
