@@ -2582,6 +2582,141 @@ int main(int argc, char** argv)
         dock->show();
     });
 
+    addTest("the canvas runs under the panels rather than beside them", [] {
+        // A panel that takes only the height it needs used to leave a dead
+        // strip below it: the dock column kept the width to itself all the way
+        // down. The canvas is laid out across the whole window instead, with
+        // the panels standing on top of it, so the workspace carries on under
+        // and below them.
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
+        QApplication::processEvents();
+
+        auto* view = window.findChild<CanvasView*>();
+        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
+        CHECK(view != nullptr && dock != nullptr);
+        if (!view || !dock)
+            return;
+        QWidget* canvas = view->parentWidget(); // the stack of open images
+        CHECK(canvas != nullptr);
+        if (!canvas)
+            return;
+        CHECK(canvas->x() == 0);
+        CHECK(canvas->x() + canvas->width() == window.width());
+        // The panel stands over it, and is the one that answers the pointer.
+        CHECK(dock->geometry().intersects(canvas->geometry()));
+        const QPoint onPanel = dock->geometry().center();
+        QWidget* hit = window.childAt(onPanel);
+        CHECK(hit != nullptr && (hit == dock || dock->isAncestorOf(hit)));
+        // And a panel paints itself. The image runs under the panels now, so
+        // any part of one that left its background to the window behind it
+        // shows the image through, with the text on it unreadable. The panel
+        // is drawn over a colour nothing in the theme uses, with the window
+        // behind left out of the drawing: whatever is left of that colour is
+        // what the image would be seen through.
+        if (QWidget* inside = dock->widget())
+            inside->setFixedSize(24, 24); // leave most of the frame bare
+        QApplication::processEvents();
+        QPixmap sheet(dock->size());
+        sheet.fill(QColor(255, 0, 255));
+        dock->render(&sheet, QPoint(), QRegion(), QWidget::DrawChildren);
+        const QImage drawn = sheet.toImage();
+        const QPoint probes[] = {QPoint(dock->width() - 2, dock->height() - 2),
+                                 QPoint(dock->width() / 2, dock->height() / 2),
+                                 QPoint(1, dock->height() - 2)};
+        for (const QPoint& probe : probes) {
+            check(drawn.pixelColor(probe) != QColor(255, 0, 255),
+                  "the panel paints every part of itself", __LINE__);
+        }
+        if (QWidget* inside = dock->widget()) {
+            inside->setMinimumSize(0, 0);
+            inside->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        }
+        QApplication::processEvents();
+        // Below where the panel ends, the same column is canvas.
+        const QPoint under(dock->geometry().center().x(),
+                           dock->geometry().bottom() + 40);
+        hit = window.childAt(under);
+        CHECK(hit != nullptr && (hit == view || view->isAncestorOf(hit)));
+    });
+
+    addTest("a panel is no taller than what it holds", [] {
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
+        QApplication::processEvents();
+
+        for (const char* name : {"toolsDock", "layersDock", "historyDock"}) {
+            auto* dock = window.findChild<QDockWidget*>(QString::fromLatin1(name));
+            if (!dock || !dock->widget() || !dock->titleBarWidget()) {
+                check(false, "the panel is there to measure", __LINE__);
+                continue;
+            }
+            const int wanted = dock->widget()->sizeHint().height()
+                               + dock->titleBarWidget()->sizeHint().height() + 8;
+            check(dock->height() <= wanted,
+                  "the panel stops at the end of its contents", __LINE__);
+            check(dock->height() < window.height() - 200,
+                  "the panel is not the height of the window", __LINE__);
+        }
+
+        // And it follows what it holds: a longer list is a taller panel.
+        auto* layers = window.findChild<LayersPanel*>();
+        auto* layersDock = window.findChild<QDockWidget*>(QStringLiteral("layersDock"));
+        CHECK(layers != nullptr && layersDock != nullptr);
+        if (!layers || !layersDock)
+            return;
+        // With the column to itself, so that what it asks for is what there
+        // is to give: three panels in one column share the height between
+        // them, and the Colors panel is taller than any window.
+        for (const char* name : {"colorsDock", "historyDock"}) {
+            if (auto* other = window.findChild<QDockWidget*>(QString::fromLatin1(name)))
+                other->hide();
+        }
+        QApplication::processEvents();
+        const int before = layersDock->height();
+        for (int i = 0; i < 5; ++i)
+            QMetaObject::invokeMethod(layers, "addLayerRequested");
+        // Twice: the panel asks for its new height in one turn and the dock
+        // area hands it over in the next.
+        QApplication::processEvents();
+        QApplication::processEvents();
+        CHECK(layersDock->height() > before);
+        CHECK(layersDock->height() <= layers->sizeHint().height()
+                                      + layersDock->titleBarWidget()->sizeHint().height()
+                                      + 8);
+    });
+
+    addTest("a grab left behind does not deafen the panel buttons", [] {
+        // Dragging a dock makes Qt grab the mouse. Wayland refuses the grab,
+        // and a drag that ends without Qt hearing of it leaves the grab in
+        // place: every click then goes to the dock instead of to the button
+        // under the pointer, and the title bar buttons look dead until
+        // something else clears it.
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
+        QApplication::processEvents();
+
+        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
+        CHECK(dock != nullptr);
+        if (!dock)
+            return;
+        dock->grabMouse();
+        CHECK(QWidget::mouseGrabber() == dock);
+        const QPointF at(4, 4);
+        QMouseEvent move(QEvent::MouseMove, at, at, dock->mapToGlobal(at),
+                         Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(dock, &move);
+        CHECK(QWidget::mouseGrabber() == nullptr);
+        if (QWidget::mouseGrabber())
+            QWidget::mouseGrabber()->releaseMouse();
+    });
+
     addTest("no two commands claim the same key", [] {
         // Qt refuses to choose between two actions bound to one sequence, so a
         // clash does not pick a winner: it makes the key do nothing at all,

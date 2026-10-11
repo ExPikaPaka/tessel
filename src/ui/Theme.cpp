@@ -72,10 +72,15 @@ QString buildStyleSheet()
     const QString dim = c.dimText.name();
     const QString accent = c.accent.name();
     const QString border = c.border.name();
+    const QString backdrop = c.backdrop.name();
 
     return QStringLiteral(R"(
 QWidget { font-size: 10pt; }
-QMainWindow, QDialog { background: %1; color: %3; }
+/* Whatever is left over in a dock column once the panels have taken the room
+   they need is this window showing through. Painting it like the workspace
+   rather than like a panel is what says the panel ended there. */
+QMainWindow { background: %7; color: %3; }
+QDialog { background: %1; color: %3; }
 QMenuBar { background: %1; color: %3; border-bottom: 1px solid %6; padding: 2px; }
 QMenuBar::item { padding: 4px 9px; border-radius: 4px; background: transparent; }
 QMenuBar::item:selected { background: %5; color: white; }
@@ -94,7 +99,7 @@ QToolButton:pressed, QToolButton:checked { background: %5; border-color: %5; col
 QToolButton:disabled { color: %4; }
 QStatusBar { background: %1; color: %4; border-top: 1px solid %6; }
 QStatusBar QLabel { color: %4; padding: 0 6px; }
-QDockWidget { color: %3; }
+QDockWidget { background: %1; color: %3; }
 QDockWidget::close-button, QDockWidget::float-button {
     background: transparent; border: 1px solid transparent; border-radius: 3px;
     padding: 0; margin: 2px; }
@@ -112,11 +117,20 @@ QDockWidget::title { background: %2; padding: 5px 8px; border-bottom: 1px solid 
 /* The title bar is our own widget, so it is styled here rather than through
    the pseudo element above, which only reaches the one Qt draws. */
 QWidget#dockTitleBar { background: %2; border-bottom: 1px solid %6; }
+/* The buttons sit inside that bar, so the rule above for the dock's direct
+   children does not reach them, and the plain QToolButton hover paints panel
+   grey on panel grey: the pointer landed on the button and nothing happened.
+   These light them up against the bar. */
+QWidget#dockTitleBar QToolButton { background: transparent;
+    border: 1px solid transparent; border-radius: 3px; }
+QWidget#dockTitleBar QToolButton:hover { background: %5; border-color: %5; }
+QWidget#dockTitleBar QToolButton:pressed { background: %6; border-color: %6; }
 QLabel#dockTitle { color: %3; font-weight: 600; }
 /* The palette stops at its last row of buttons, and the window behind it is
    the same shade, so a line is what says where the panel ends. */
 QWidget#toolsPalette { border: 1px solid %6; border-top: 0; }
 QDockWidget > QWidget { background: %1; }
+QDockWidget QScrollArea, QDockWidget QScrollArea > QWidget { background: %1; }
 QTabBar { background: %1; }
 QTabBar::tab { background: %2; color: %4; padding: 5px 10px; margin-right: 2px;
                border: 1px solid %6; border-bottom: 0;
@@ -173,7 +187,7 @@ QProgressBar { border: 1px solid %6; border-radius: 4px; background: %2; text-al
                color: %3; }
 QProgressBar::chunk { background: %5; border-radius: 3px; }
 )")
-        .arg(window, panel, text, dim, accent, border);
+        .arg(window, panel, text, dim, accent, border, backdrop);
 }
 
 } // namespace

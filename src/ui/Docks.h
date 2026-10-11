@@ -99,6 +99,10 @@ public:
     void setDocument(Document* doc, History* history);
     void refresh();
 
+    // Asks for the room the rows actually need, so the dock around it can stop
+    // where the list stops instead of filling the column.
+    QSize sizeHint() const override;
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -141,6 +145,8 @@ public:
 
     void setDocument(Document* doc, History* history);
     void refresh();
+
+    QSize sizeHint() const override;
 
 signals:
     void undoRequested();

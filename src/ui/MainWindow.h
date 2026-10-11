@@ -98,6 +98,8 @@ private:
     void refreshPanels();
     void refreshIcons();
     void styleDockButtons(QDockWidget* dock);
+    void capDockToContent(QDockWidget* dock);
+    void layOutCanvas();
 
     // ---------------------------------------------------------- commands
     void chooseTool(const QString& toolId, bool fromShortcut = false);
@@ -139,6 +141,7 @@ private:
 
     // ---------------------------------------------------------- state
     QStackedWidget* stack_ = nullptr;
+    QWidget* canvasHost_ = nullptr;
     ImageStrip* strip_ = nullptr;
     ToolsPalette* tools_ = nullptr;
     ColorPanel* colors_ = nullptr;

@@ -1,5 +1,7 @@
 #include "ui/Docks.h"
 
+#include <algorithm>
+
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDropEvent>
@@ -523,6 +525,36 @@ void LayersPanel::refresh()
             list_->setCurrentItem(item);
     }
     updating_ = false;
+    // The list just changed height, so the dock is told to measure again.
+    updateGeometry();
+}
+
+namespace {
+// Rows inside a collapsed group are not on screen and do not count.
+int visibleRowCount(const QTreeWidgetItem* item)
+{
+    int rows = 1;
+    if (item->isExpanded()) {
+        for (int i = 0; i < item->childCount(); ++i)
+            rows += visibleRowCount(item->child(i));
+    }
+    return rows;
+}
+} // namespace
+
+QSize LayersPanel::sizeHint() const
+{
+    // Enough of the list to drop a layer into even when there is only one.
+    constexpr int kLeastRows = 3;
+    int rows = 0;
+    for (int i = 0; i < list_->topLevelItemCount(); ++i)
+        rows += visibleRowCount(list_->topLevelItem(i));
+    rows = std::max(kLeastRows, rows);
+    const int list = rows * kRowHeight + 2 * list_->frameWidth() + 2;
+    QSize hint = QWidget::sizeHint();
+    // Everything but the list keeps the height the layout asked for.
+    hint.setHeight(hint.height() - list_->sizeHint().height() + list);
+    return hint;
 }
 
 // ----------------------------------------------------------------- history panel
@@ -604,6 +636,18 @@ void HistoryPanel::refresh()
                            .arg(megabytes, 0, 'f', 1));
     }
     updating_ = false;
+    updateGeometry();
+}
+
+QSize HistoryPanel::sizeHint() const
+{
+    constexpr int kLeastRows = 4;
+    const int row = std::max(16, list_->sizeHintForRow(0));
+    const int rows = std::max(kLeastRows, list_->count());
+    const int list = rows * row + 2 * list_->frameWidth() + 2;
+    QSize hint = QWidget::sizeHint();
+    hint.setHeight(hint.height() - list_->sizeHint().height() + list);
+    return hint;
 }
 
 // ----------------------------------------------------------------- image strip
