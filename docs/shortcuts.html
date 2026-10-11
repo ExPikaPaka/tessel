@@ -154,11 +154,15 @@
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>I</kbd></th><td>Invert Selection</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></th><td>Copy Selection, the shape on its own</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></th><td>Paste Selection</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd></th><td>Selection, Feather</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>T</kbd></th><td>Selection, Free Transform, which is the Move Selected Pixels tool</td></tr>
           <tr><th scope="row" class="keys"><kbd>Delete</kbd></th><td>Erase Selection</td></tr>
           <tr><th scope="row" class="keys"><kbd>Backspace</kbd></th><td>Fill Selection with the primary colour</td></tr>
         </tbody>
       </table>
     </div>
+    <p class="muted">Grow, Shrink and Border, the other three entries of Edit &gt; Selection,
+      have no keys of their own.</p>
   </section>
 
   <section id="view">
@@ -181,7 +185,8 @@
       </table>
     </div>
     <p class="muted">Pixel Grid, Rulers and Selection Outline are switches in the View menu
-      with no key of their own.</p>
+      with no key of their own, and so are the three entries of View &gt; Units: Pixels,
+      Inches and Centimetres.</p>
   </section>
 
   <section id="image">
@@ -216,6 +221,7 @@
         </thead>
         <tbody>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></th><td>Add New Layer</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></th><td>Add Group, beside the active layer</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Delete</kbd></th><td>Delete Layer</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></th><td>Duplicate Layer</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>M</kbd></th><td>Merge Layer Down</td></tr>
@@ -231,7 +237,17 @@
     </div>
     <p class="muted">Import from File, Flip Layer Horizontal, Flip Layer Vertical, Move Layer
       Up and Move Layer Down have no keys; the last two have buttons under the layer
-      list.</p>
+      list. Neither has New Adjustment Layer, Edit Adjustment, nor any of the six entries of
+      Layers &gt; Layer Mask: Add Layer Mask, Paint in Mask, Enable Layer Mask, Invert Layer
+      Mask, Apply Layer Mask and Delete Layer Mask.</p>
+    <div class="note">
+      <p><strong>One key does two jobs.</strong>
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> is bound to Layers &gt; Add Group and
+        also, from before groups existed, to Adjustments &gt; Black and White. Qt will not
+        guess between two actions that claim the same key, so while both are bound the
+        combination does nothing at all and both entries have to be reached through their
+        menus.</p>
+    </div>
   </section>
 
   <section id="adjustments">
@@ -244,7 +260,7 @@
         </thead>
         <tbody>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></th><td>Auto Level</td></tr>
-          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></th><td>Black and White</td></tr>
+          <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></th><td>Black and White, which shares the key with Layers &gt; Add Group; see the note there</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></th><td>Brightness / Contrast</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></th><td>Curves</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></th><td>Hue / Saturation</td></tr>
@@ -291,7 +307,11 @@
           <tr><th scope="row" class="keys"><kbd>Enter</kbd></th><td>Commits what the current tool is holding: a moved selection, a line, a curve, a shape</td></tr>
           <tr><th scope="row" class="keys"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></th><td>Commits the text being typed</td></tr>
           <tr><th scope="row" class="keys"><kbd>Esc</kbd></th><td>Cancels it instead</td></tr>
-          <tr><th scope="row" class="keys">Double click a layer row</th><td>Opens Layer Properties</td></tr>
+          <tr><th scope="row" class="keys">Double click a layer row</th><td>Opens Layer Properties, or the parameters of an adjustment layer</td></tr>
+          <tr><th scope="row" class="keys">Click a layer thumbnail</th><td>Makes that layer active, and says whether painting lands in its pixels or in its mask</td></tr>
+          <tr><th scope="row" class="keys">Drag a layer row</th><td>Moves the layer up or down, into a group or out of one</td></tr>
+          <tr><th scope="row" class="keys">Click the eye</th><td>Shows or hides that layer without making it active</td></tr>
+          <tr><th scope="row" class="keys">Pen pressure</th><td>Sets the width of the stroke, its opacity, or both, if the Pressure switches in the options bar are on; they start off</td></tr>
         </tbody>
       </table>
     </div>

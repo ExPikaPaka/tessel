@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide - Tessel</title>
-<meta name="description" content="A tour of the Tessel interface, how each tool works, how selections and layers behave, and how the adjustment and effect dialogs preview live on the canvas.">
+<meta name="description" content="A tour of the Tessel interface, how each tool works, how selections, layers, groups and masks behave, what adjustment layers and effect stacks are for, and what happens after a crash.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 <script src="theme.js"></script>
@@ -43,10 +43,13 @@
       <li><a href="#tour">The interface</a></li>
       <li><a href="#tools">How the tools work</a></li>
       <li><a href="#selections">Selections</a></li>
-      <li><a href="#layers">Layers</a></li>
+      <li><a href="#layers">Layers, groups and masks</a></li>
       <li><a href="#effects">Adjustments and effects</a></li>
+      <li><a href="#nondestructive">Adjustment layers and effect stacks</a></li>
       <li><a href="#files">Files and formats</a></li>
-      <li><a href="#settings">Settings</a></li>
+      <li><a href="#recovery">Autosave and recovery</a></li>
+      <li><a href="#plugins">Plugins</a></li>
+      <li><a href="#settings">Settings and languages</a></li>
     </ul>
   </nav>
 
@@ -54,8 +57,8 @@
     <h2>The interface</h2>
 
     <figure>
-      <img src="screenshots/main-light.png" width="1280" height="820"
-           alt="The Tessel window in its light theme, showing the menu bar, main toolbar, tool options bar for the Paintbrush, the Tools palette and Colors panel down the left side, the History and Layers panels down the right side, an image with an elliptical selection on the canvas, and the status bar.">
+      <img src="screenshots/main-light.png" width="1760" height="1000"
+           alt="The Tessel window in its light theme, showing the menu bar, main toolbar, tool options bar for the Paintbrush, the Tools palette down the left side, the History, Layers and Colors panels down the right side, an image with an elliptical selection on the canvas, and the status bar.">
       <figcaption>The same window in the light theme. The layout is fixed in habit, not in
         place: every panel is a dock that can be moved, floated or closed.</figcaption>
     </figure>
@@ -68,23 +71,29 @@
       <dt>Edit</dt>
       <dd>Undo and Redo; Cut, Copy, Copy Merged, Paste, Paste Into New Layer and Paste Into
         New Image; Select All, Deselect All, Invert Selection, Copy Selection and Paste
-        Selection; Erase Selection and Fill Selection.</dd>
+        Selection; a Selection submenu holding Feather, Grow, Shrink, Border and Free
+        Transform; Erase Selection and Fill Selection.</dd>
       <dt>View</dt>
       <dd>Zoom In, Zoom Out, Fit to Window, Actual Size and Zoom to Selection; the Pixel Grid,
-        Rulers and Selection Outline switches; and Full Screen.</dd>
+        Rulers and Selection Outline switches; a Units submenu of Pixels, Inches and
+        Centimetres, which is what the rulers and the size dialogs then count in; and Full
+        Screen.</dd>
       <dt>Image</dt>
       <dd>Crop to Selection, Resize Image, Canvas Size, the four flips and rotations, and
         Flatten. These act on every layer at once.</dd>
       <dt>Layers</dt>
-      <dd>Add, Delete, Duplicate, Merge Layer Down and Import from File; Flip Layer Horizontal
-        and Vertical and Rotate / Zoom Layer; Move Layer Up and Down and Toggle Layer
-        Visibility; the four Go to Layer commands; and Layer Properties.</dd>
+      <dd>Add New Layer, Add Group and New Adjustment Layer; Delete, Duplicate, Merge Layer
+        Down and Import from File; a Layer Mask submenu holding Add, Paint in Mask, Enable,
+        Invert, Apply and Delete; Flip Layer Horizontal and Vertical and Rotate / Zoom Layer;
+        Move Layer Up and Down and Toggle Layer Visibility; the four Go to Layer commands;
+        and Layer Properties and Edit Adjustment.</dd>
       <dt>Adjustments</dt>
       <dd>The thirteen adjustments, built from the effect registry, so the menu and the
         program can never drift apart.</dd>
       <dt>Effects</dt>
       <dd>Repeat Last Effect at the top, then one submenu per category: Artistic, Blurs,
-        Color, Distort, Noise, Object, Photo, Render and Stylize.</dd>
+        Color, Distort, Noise, Object, Photo, Render and Stylize, and anything a plugin
+        brought. About the Plugins, at the bottom, says what actually loaded.</dd>
     </dl>
     <p>An entry whose name ends in three dots opens a dialog; the rest apply straight away.
       At the right hand end of the menu bar sit six icon buttons rather than menus of their
@@ -101,9 +110,15 @@
     <h3>The tool options bar</h3>
     <p>The row under the main toolbar belongs to the active tool. It starts with a button that
       drops down the full tool list (<kbd>Alt</kbd>+<kbd>T</kbd>) and the tool's name, and
-      then holds that tool's own controls: width, opacity, antialiasing, blending, tolerance,
-      shape, font and so on. Changing one takes effect on the next stroke, and the settings
-      stay put while you work.</p>
+      then holds that tool's own controls: width, opacity, antialiasing, blending, hardness,
+      stabilisation, brush tip, tolerance, shape, font and so on. Changing one takes effect on
+      the next stroke, and the settings stay put while you work.</p>
+    <figure class="strip">
+      <img src="screenshots/options-brush.png" width="877" height="76"
+           alt="The Paintbrush options bar: the tool list button, the name Paintbrush, then Width 12 px, Opacity 100 percent, an Antialiasing box reading Normal, a Blending box reading Normal, Hardness 75 percent, Stabilisation 0 percent, a Tip box reading Round, and the Pressure group with its Width and Opacity switches.">
+      <figcaption>The Paintbrush, which has the longest bar of the lot. It is one row in the
+        program; here it is cut in two and stacked so that the labels stay readable.</figcaption>
+    </figure>
 
     <h3>The Tools palette</h3>
     <p>Nineteen tools in a two column grid of icons, read left to right and then down:
@@ -112,6 +127,11 @@
       Pencil and Color Picker; Clone Stamp and Recolor; Text and Line / Curve; and Shapes.
       Hovering one shows its name and its key; the keys are listed in full on the
       <a href="shortcuts.html">shortcuts page</a>.</p>
+    <figure class="narrow">
+      <img src="screenshots/panel-tools.png" width="104" height="806"
+           alt="The Tools palette: nineteen tool icons in a two column grid, with the Paintbrush highlighted.">
+      <figcaption>The Tools palette, with the Paintbrush active.</figcaption>
+    </figure>
 
     <h3>Colors</h3>
     <p>The two swatches at the top left are the primary and secondary colours. Click one to
@@ -122,18 +142,41 @@
       the primary, right click as the secondary. <strong>More</strong> opens the numeric side:
       red, green and blue, hue, saturation and value, alpha, and a hex field.</p>
 
+    <figure class="narrow">
+      <img src="screenshots/panel-colors.png" width="349" height="295"
+           alt="The Colors panel: the primary and secondary swatches with the swap and reset arrows, a colour wheel, value and alpha ramps, a More button, a Screen pick button and the palette grid with Load, Save and Reset.">
+      <figcaption>Colors, with the palette grid along the bottom.</figcaption>
+    </figure>
+
     <h3>History</h3>
     <p>Every step of the session, from the image as it was opened or created down to the most
       recent edit. Click any entry to move the document to that point, forwards or backwards;
       the two buttons at the top are Undo and Redo, and beside them is a running count of
       steps and of how much memory they hold.</p>
+    <figure class="narrow">
+      <img src="screenshots/panel-history.png" width="349" height="166"
+           alt="The History panel: Undo and Redo buttons, a count of steps and memory, and the entry Original image.">
+      <figcaption>History, at the start of a session, where the only step is the image
+        itself.</figcaption>
+    </figure>
 
     <h3>Layers</h3>
-    <p>The layer list runs top layer first, which is the order they are composited in. Each row
-      shows an eye for visibility, a thumbnail, the layer name and, underneath it, the opacity
-      and the blend mode. Double click a row to open Layer Properties. The buttons along the
-      bottom are Add New Layer, Delete Layer, Duplicate Layer, Merge Layer Down, Move Layer Up,
-      Move Layer Down and Layer Properties.</p>
+    <p>The layer list runs top layer first, which is the order they are composited in, and it
+      is a tree: a group has a triangle that folds its children away, and a layer is dragged
+      into or out of a group by its row. Each row shows an eye for visibility, a thumbnail,
+      the layer name and, underneath it, the opacity and the blend mode, plus
+      <em>group</em> or <em>adjust</em> for the two kinds that are not ordinary layers and
+      <em>fx</em> for a layer carrying effects. A layer that has a mask shows a second
+      thumbnail beside the first: click either one to choose where painting lands. Double
+      click a row to open Layer Properties, or the parameters of an adjustment layer. The
+      buttons along the bottom are Add New Layer, Add Group, Delete Layer, Duplicate Layer,
+      Merge Layer Down, Move Layer Up, Move Layer Down and Layer Properties.</p>
+    <figure class="narrow">
+      <img src="screenshots/panel-layers.png" width="349" height="277"
+           alt="The Layers panel showing five rows: a Hue / Saturation adjustment layer at the top, a selected Brush work layer with a second mask thumbnail and the word fx, an expanded Sky group at 92 percent holding Sun and Clouds, and Background at the bottom.">
+      <figcaption>One of each: an adjustment layer, a layer with a mask and an effect stack,
+        a group holding two children, and the background.</figcaption>
+    </figure>
 
     <h3>The status bar</h3>
     <p>The left hand end is the hint for the active tool, or the last thing that happened, such
@@ -158,9 +201,14 @@
       <li><kbd>Ctrl</kbd> and the <strong>wheel</strong> zoom around the pointer; the wheel on
         its own scrolls.</li>
       <li>Most tools carry an <strong>Opacity</strong> percentage, an
-        <strong>Antialiasing</strong> switch and a <strong>Blending</strong> box holding the
+        <strong>Antialiasing</strong> level and a <strong>Blending</strong> box holding the
         same fourteen blend modes the layers use, so a stroke can be multiplied or screened
-        onto the layer without a second layer.</li>
+        onto the layer without a second layer. Antialiasing runs None, Low, Normal, High and
+        Maximum, which is how wide a ramp the edge of a stroke is given; Normal is what the
+        old yes or no switch used to mean. One entry past the blend modes sits
+        <strong>Overwrite</strong>, which is not a blend at all: the colour and the coverage
+        of the stroke become the pixel, so a soft brush can fade what is under it out to the
+        brush colour instead of only adding to it.</li>
       <li>Pressing a tool's letter again cycles through the tools that share it, and
         <kbd>Shift</kbd> with that letter cycles backwards.</li>
     </ul>
@@ -169,15 +217,18 @@
     <dl class="defs">
       <dt>Paintbrush (<kbd>B</kbd>)</dt>
       <dd>Drag to paint, right drag to paint with the secondary colour. Width, opacity,
-        antialiasing, blending and hardness. Hardness sets how wide the soft edge is: at the
+        antialiasing, blending, hardness, stabilisation, a tip and the two pressure switches.
+        Hardness sets how wide the soft edge is: at the
         top of the range the stroke has a crisp rim, and at the bottom it is a faint haze that
         fades across the whole width. One stroke lays down one coat, so passing back over your
         own stroke does not darken it; release and draw again to build the colour up.</dd>
       <dt>Pencil (<kbd>P</kbd>)</dt>
-      <dd>Single hard pixels, with no antialiasing. Only a blending box, since nothing else
-        would apply.</dd>
+      <dd>Single hard pixels, with no antialiasing. A blending box, stabilisation and the
+        pressure switch for opacity: the nib is one pixel wide, so there is no width for
+        pressure to work on.</dd>
       <dt>Eraser (<kbd>E</kbd>)</dt>
-      <dd>Erases to transparency; a right drag erases softly. Width, opacity and hardness.</dd>
+      <dd>Erases to transparency; a right drag erases softly. Width, opacity, antialiasing,
+        hardness, stabilisation and pressure.</dd>
       <dt>Clone Stamp (<kbd>L</kbd>)</dt>
       <dd><kbd>Ctrl</kbd>+click sets the source, then drag to paint copies of it.
         <strong>Aligned</strong> keeps the source at a fixed offset from the brush instead of
@@ -197,6 +248,46 @@
         dither and a blending box. A right drag runs the gradient the other way round, from
         the secondary colour to the primary.</dd>
     </dl>
+    <figure class="strip">
+      <img src="screenshots/options-gradient.png" width="877" height="76"
+           alt="The Gradient options bar: a Shape box reading Linear, a Mode box reading Colour, Opacity at 100 percent, a Dither checkbox and a Blending box reading Normal.">
+      <figcaption>The Gradient bar. Every tool brings its own row, built from what that tool
+        actually has.</figcaption>
+    </figure>
+
+    <h3>Tablets, pressure and a steadier line</h3>
+    <p>A graphics tablet is answered directly rather than through the mouse events the system
+      synthesises from it, so a pen reports its pressure to the stroke it is drawing. What
+      that pressure does is up to you, and the Paintbrush, the Pencil and the Eraser are the
+      three tools that ask. The <strong>Pressure</strong> group at the end of their bar holds a
+      <strong>Width</strong> switch and an <strong>Opacity</strong> switch, and
+      <em>both start off</em>, so a mouse, which reports a full press the whole time, behaves
+      exactly as it always did. Turn one or both on and the lightest touch the pen reports
+      still leaves a mark, rather than nothing at all.</p>
+    <p><strong>Stabilisation</strong> is a percentage beside them. It averages the last few
+      positions of the pointer, the newest weighing the most, so the line follows the hand
+      without the wobble: at 0 the stroke is exactly the positions that came in, and at 100 it
+      is smoothed over sixteen of them. A slow, deliberate curve is what it is for; a fast
+      stroke hardly notices it.</p>
+    <figure class="strip">
+      <img src="screenshots/options-pencil.png" width="877" height="76"
+           alt="The Pencil options bar: the tool list button, the name Pencil, a Blending box reading Normal, Stabilisation at 0 percent, and a Pressure group with a single Opacity switch.">
+      <figcaption>The Pencil has the shortest bar of the painting tools, and it still has
+        stabilisation and the one pressure switch that applies to it.</figcaption>
+    </figure>
+    <figure class="strip">
+      <img src="screenshots/options-eraser.png" width="901" height="76"
+           alt="The Eraser options bar: Width 24 px, Opacity 100 percent, an Antialiasing box reading Normal, Hardness 85 percent, Stabilisation 0 percent, and a Pressure group with Width and Opacity switches.">
+      <figcaption>The Eraser has both of them, and no Blending box: erasing to transparency
+        is not something a blend mode has anything to say about.</figcaption>
+    </figure>
+    <p>The <strong>Tip</strong> box on the Paintbrush paints with a shape of your own instead
+      of the built in round one. <em>Load from file</em> takes a PNG and uses its alpha, or
+      its luminance when it has none, as the stamp; the tip is trimmed to what it actually
+      marks, fitted to the brush width and given the hardness setting, then stamped along the
+      stroke closely enough that it reads as a line rather than a row of dots. Tips you have
+      loaded stay in the box between sessions, and <em>Round</em> at the top of the list is
+      always the way back.</p>
 
     <h3>Shapes, lines and text</h3>
     <dl class="defs">
@@ -217,6 +308,22 @@
         The text stays editable until it is committed, at which point it becomes pixels like
         everything else.</dd>
     </dl>
+    <ul class="shots">
+      <li>
+        <figure class="strip">
+          <img src="screenshots/options-shapes.png" width="917" height="76"
+               alt="The Shapes options bar: a Shape box reading Rectangle, a Style box reading Outline, Width 2 px, Opacity 100 percent, an Antialiasing checkbox and a Blending box reading Normal.">
+          <figcaption>Shapes.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure class="strip">
+          <img src="screenshots/options-text.png" width="888" height="76"
+               alt="The Text options bar: a font family box, a size box reading 24 pt, bold, italic and underline buttons, an Align box reading Left, Opacity 100 percent, an Antialiasing checkbox and a Blending box reading Normal.">
+          <figcaption>Text.</figcaption>
+        </figure>
+      </li>
+    </ul>
 
     <h3>Looking around and sampling</h3>
     <dl class="defs">
@@ -273,6 +380,23 @@
         leaving the selection in force.</li>
       <li>It is saved inside a <code>.tessel</code> file along with the layers.</li>
     </ul>
+    <figure>
+      <img src="screenshots/canvas-selection.png" width="1295" height="834"
+           alt="The canvas on its own, with an elliptical selection drawn as a dashed outline over the artwork.">
+      <figcaption>The selection as it is drawn on the canvas. View &gt; Selection Outline
+        hides the marching dashes while leaving the selection itself in force.</figcaption>
+    </figure>
+
+    <h3>Reshaping the outline</h3>
+    <p>Edit &gt; Selection works on the selection you already have, as one undoable step each:
+      <strong>Feather</strong> (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd>) softens the edge
+      by a radius in pixels, <strong>Grow</strong> and <strong>Shrink</strong> push it out or
+      pull it in, and <strong>Border</strong> replaces it with a band of a given width along
+      the inside of its edge, which is the quick way to outline something. Each asks for that
+      one number in pixels and nothing else. <strong>Free Transform</strong>
+      (<kbd>Ctrl</kbd>+<kbd>T</kbd>) in the same submenu is the Move Selected Pixels tool
+      under another name.</p>
+
     <h3>Moving what is selected</h3>
     <p><strong>Move Selected Pixels</strong> (<kbd>M</kbd>) lifts the selected pixels onto a
       floating buffer: drag it anywhere, nudge it with the arrow keys, or drag a corner handle
@@ -285,7 +409,7 @@
   </section>
 
   <section id="layers">
-    <h2>Layers</h2>
+    <h2>Layers, groups and masks</h2>
     <p>An image can hold any number of layers. Each one has a name, a visibility switch, an
       opacity from 0 to 100 percent and a blend mode, all four of which live in Layer
       Properties (<kbd>F4</kbd>) and preview on the canvas while the dialog is open.</p>
@@ -303,7 +427,59 @@
       (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>) collapses everything into one layer.</p>
     <p>Resizing and rotating are done in premultiplied alpha, so a transparent edge does not
       bleed a halo into the pixels next to it.</p>
+
+    <h3>Groups</h3>
+    <p><strong>Add Group</strong> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>) puts an
+      empty group beside the active layer, and dragging a row in the Layers panel moves a
+      layer into it or out of it again. A group is a layer in its own right: it has a name, a
+      visibility switch, an opacity, a blend mode and, if you want one, a mask. What it does
+      not have is pixels. Compositing flattens its children first and then applies the
+      group's own opacity, blend mode and mask to that result, which is the difference
+      between a group and the same layers loose: hiding the group hides them all at once, and
+      an opacity of 50 percent on the group fades the lot of them together rather than fading
+      each one into the next. A group can hold a group, as deep as you care to nest them, and
+      the triangle at the left of the row folds it away. Whether a group is folded is
+      remembered with the document rather than with the window, so it survives undo and
+      saving.</p>
+
+    <h3>Layer masks</h3>
+    <p>Any layer, a group included, can carry an <strong>8 bit mask</strong> that scales its
+      alpha while it is composited: white shows the layer, black hides it, and the greys in
+      between fade it. Nothing is thrown away, which is the point. Where a mask hides
+      something, taking the mask off brings it back.</p>
+    <figure>
+      <img src="screenshots/layer-mask.png" width="880" height="322"
+           alt="Three pictures side by side: the layer's own pixels, two brush strokes on a transparent checkerboard; its mask, a grey ramp running from black on the left to white on the right; and what is composited, the same strokes fading away towards the left.">
+      <figcaption>The layer, its mask, and what reaches the canvas. The third picture also
+        carries the layer's effect stack, which is the other thing that happens on the way
+        in.</figcaption>
+    </figure>
+    <p>The mask is an ordinary grey raster, so there is nothing new to learn to paint one:
+      <strong>Layers &gt; Layer Mask &gt; Add</strong> gives the layer a white mask and points
+      the tools at it, and from then on every brush, gradient, bucket fill, adjustment and
+      effect writes into the mask instead of into the pixels, clipped by the selection the
+      same way they would be anywhere else. The layer's row
+      in the Layers panel grows a second thumbnail beside the first; click either one to say
+      where the next stroke should land, and the one with the frame round it is the one you
+      are painting. <strong>Paint in Mask</strong> in the menu is the same switch. The rest of
+      the submenu:</p>
+    <dl class="defs">
+      <dt>Enable Layer Mask</dt>
+      <dd>Turns the mask off and on without losing it, so you can see what it is hiding.</dd>
+      <dt>Invert Layer Mask</dt>
+      <dd>Swaps what is hidden for what is shown.</dd>
+      <dt>Apply Layer Mask</dt>
+      <dd>Bakes the mask into the pixels and drops it. The picture does not change; it simply
+        stops being undoable without the history.</dd>
+      <dt>Delete Layer Mask</dt>
+      <dd>Throws the mask away and leaves the pixels as they were.</dd>
+    </dl>
+    <p>All of these are ordinary undoable steps. A mask painted in grey keeps the softness of
+      the brush that painted it, so a feathered edge is simply a soft stroke in the
+      mask.</p>
   </section>
+
+
 
   <section id="effects">
     <h2>Adjustments and effects</h2>
@@ -338,7 +514,7 @@
       choice, a colour, an angle, an offset or a curve. The dialog is generated from that list,
       which is why every effect in the program looks and behaves the same way and why no effect
       carries any widget code of its own.</p>
-    <figure>
+    <figure class="narrow">
       <img src="screenshots/dialog-effect.png" width="360" height="274"
            alt="The generated dialog for the Clouds effect: slider and value pairs for Scale, Roughness, Detail and Seed, a blend mode box, a checkbox for using the palette colours, and Reset, OK and Cancel buttons.">
       <figcaption>Clouds, as the registry describes it. Numbers appear as a slider and a value
@@ -352,6 +528,9 @@
       the layer untouched, and <strong>OK</strong> commits a single undoable step.
       <kbd>Ctrl</kbd>+<kbd>F</kbd> then repeats that effect on the next layer or the next
       image with the same settings, without opening the dialog again.</p>
+    <p>Applying an effect from these menus writes pixels, and that is sometimes exactly what
+      you do not want. The same effects can be kept live instead, on an adjustment layer or
+      in a layer's own stack: see <a href="#nondestructive">the next section</a>.</p>
 
     <h3>Curves and Levels</h3>
     <p>These two have hand written dialogs, because a generated one could not do them justice.
@@ -378,18 +557,80 @@
     </ul>
   </section>
 
+  <section id="nondestructive">
+    <h2>Adjustment layers and effect stacks</h2>
+    <p>There are two ways to keep an effect live rather than painted in, and the difference
+      between them is what the effect is about.</p>
+
+    <h3>An adjustment layer</h3>
+    <p><strong>Layers &gt; New Adjustment Layer</strong> lists every adjustment and then every
+      effect, in the same order the Adjustments and Effects menus list them, plugins included.
+      Pick one and a layer appears above the active layer holding that effect and no pixels at
+      all. What it does is apply the effect to everything composited below it inside its
+      group: put it at the top and it grades the whole image, put it inside a group and it
+      reaches no further than that group's other children.</p>
+    <p>It opens on its parameters straight away, and it is never finished with. Double click
+      the layer, or use Layers &gt; Edit Adjustment, and the same dialog comes back with the
+      values it had. Changing them changes the canvas while the dialog is open, and OK records
+      one undo step; Cancel puts the values back. Hide the layer, change its opacity, give it
+      a mask, drag it up or down the stack: it is a layer, and all of that works on it.</p>
+    <figure class="narrow">
+      <img src="screenshots/dialog-adjustment-layer.png" width="360" height="173"
+           alt="The parameters of a Hue / Saturation adjustment layer: sliders with value fields for Hue at minus 8 degrees, Saturation at 145 percent and Lightness at 0, with Reset, OK and Cancel.">
+      <figcaption>The parameters of a Hue / Saturation adjustment layer, reopened by double
+        clicking its row. There is no result to compute and nothing to write: the values go
+        into the layer and the document composites itself with them.</figcaption>
+    </figure>
+
+    <h3>A stack on an ordinary layer</h3>
+    <p>An ordinary layer can carry a list of effects of its own, applied to its pixels on the
+      way into the composite while the stored pixels are left exactly as they were. The list
+      lives in <strong>Layer Properties</strong> (<kbd>F4</kbd>), under the name and the blend
+      mode, and the Layers panel writes <em>fx</em> beside any layer that has one.</p>
+    <figure class="narrow">
+      <img src="screenshots/dialog-layer-properties.png" width="340" height="391"
+           alt="The Layer Properties dialog: a Name field reading Brush work, a Visible checkbox, a Blend mode box, an Opacity slider, and an Effects box listing Drop Shadow and Outer Glow, each with a tick, above a row of buttons for add, edit, move up, move down, remove and flatten.">
+      <figcaption>Layer Properties, with a two entry stack. The list is in the order they
+        run, the bottom one first, so moving an entry up the list moves it later in the
+        run.</figcaption>
+    </figure>
+    <p>The buttons under the list add an effect (from the same menu the adjustment layers come
+      from), reopen the parameters of the selected entry, move it up or down the order, remove
+      it, and flatten the lot. The tick beside each entry turns it off without losing its
+      settings, and a double click on an entry is the quick way to its parameters. Every one
+      of those is an undo step.</p>
+    <p><strong>Flatten</strong> writes the result of the stack into the pixels and empties the
+      list. The picture does not change; what was re-editable simply stops being so, which is
+      what you want once the look is settled and the stack is costing more than it is
+      worth.</p>
+    <div class="note">
+      <p>An entry that names an effect this build does not have, most likely a plugin that is
+        not installed, passes the pixels through untouched instead of being dropped. The
+        document still opens, composites and saves, the entry says
+        <em>(not installed)</em> in the list, and installing the plugin again brings it back
+        to life.</p>
+    </div>
+  </section>
+
   <section id="files">
     <h2>Files and formats</h2>
     <dl class="defs">
       <dt><code>.tessel</code></dt>
       <dd>The native format: a zip holding one PNG per layer, a JSON manifest with the names,
-        opacities and blend modes, the selection, a flattened image and a thumbnail. It is
-        written to a temporary file and moved into place, so an interrupted save cannot destroy
-        the previous one.</dd>
+        opacities and blend modes, the selection, a flattened image and a thumbnail. The
+        manifest nests, so a group is an entry holding its children, and a layer's mask, its
+        effect stack and the single effect an adjustment layer is are all written beside it.
+        Everything comes back as it went in. The file is written to a temporary name and
+        moved into place, so an interrupted save cannot destroy the previous one.</dd>
       <dt><code>.ora</code></dt>
       <dd>OpenRaster, which keeps layers, opacity and blend modes and is read by Krita, GIMP
         and MyPaint. This is the format to use when the image has to leave Tessel with its
-        layers intact.</dd>
+        layers intact. Groups travel as nested stacks, which is OpenRaster's own way of
+        holding them. The format has neither layer masks nor adjustment layers, so a mask is
+        baked into the pixels that are written, and everything below the topmost adjustment
+        layer on a level is written as the one layer it composites to, with the adjustment
+        already in those pixels. Read back, the image looks the same; what is lost is the
+        separation of the layers that were folded together.</dd>
       <dt>Flat images</dt>
       <dd>PNG, JPEG, BMP, TIFF, WebP, TGA, GIF and ICO, plus whatever else the Qt image plugins
         on the system can handle. Saving to one of these flattens the image. For the lossy
@@ -403,23 +644,103 @@
     </div>
   </section>
 
+  <section id="recovery">
+    <h2>Autosave and recovery</h2>
+    <p>Every image that has unsaved changes is written to a recovery copy on a timer, by
+      default every two minutes. The copy is a <code>.tessel</code> file without the merged
+      image and the thumbnail, since nothing but Tessel ever reads it back, and it is written
+      on a worker thread, so a large image does not make the program pause while you are
+      drawing in it. None of this touches the file you are editing: Save is still Save.</p>
+    <p>Each run of the program keeps its recovery copies in a directory of its own, under the
+      user data directory, with a lock file in it. That lock is how the next run tells a
+      session that crashed from one that is still going: the lock of a dead process can be
+      taken over, the lock of a live one cannot, so two copies of Tessel running at once never
+      fight over the same files. A run that ends cleanly deletes its directory on the way out,
+      which is what makes anything left behind mean <em>this run did not finish</em>.</p>
+    <figure class="narrow">
+      <img src="screenshots/dialog-recovery.png" width="484" height="302"
+           alt="The Recover Unsaved Images dialog: a sentence saying Tessel did not close cleanly last time, a table of two images with their sizes and when they were saved, and the buttons Recover, Discard and Decide Later.">
+      <figcaption>What a crashed session is met with at the next start.</figcaption>
+    </figure>
+    <p>The dialog lists what was found, with the size of each copy and how long ago it was
+      written, and the original path of each in its tooltip, since that is the one thing that
+      tells two images of the same name apart. It asks once, about all of it:</p>
+    <dl class="defs">
+      <dt>Recover</dt>
+      <dd>Opens every image as an unsaved document, so a Save writes it back where it came
+        from, or asks where to put it when it never had a home. A copy that could not be read
+        is kept rather than deleted, so there is still something to try again with.</dd>
+      <dt>Discard</dt>
+      <dd>Deletes the recovery files.</dd>
+      <dt>Decide Later</dt>
+      <dd>Leaves them alone and asks again next time. Files nobody ever decides about are
+        deleted once they are older than the number of days set in Settings, so the directory
+        does not grow for the lifetime of the installation.</dd>
+    </dl>
+    <p>Separately from all that, Tessel remembers which images were open when it closed and
+      offers to reopen them at the next start, with the one you were looking at in front.
+      Only images with a path on disk are worth remembering, so an unnamed one is a matter for
+      the recovery copies instead. Files named on the command line say plainly what you want
+      opened right now, so they take the place of the offer rather than queueing behind
+      it.</p>
+  </section>
+
+  <section id="plugins">
+    <h2>Plugins</h2>
+    <p>The effect list is not fixed. An effect can be written outside the program, as a shared
+      library, and whatever is found at startup appears in the Effects menu under the submenu
+      it asked for, with the same generated dialog, the same live preview and the same place
+      in New Adjustment Layer and in a layer's effect stack as the built in ones.</p>
+    <p>Tessel reads a <code>plugins</code> directory in three places, in this order: the per
+      user application data directory, which on Linux is
+      <code>~/.local/share/Tessel/Tessel/plugins</code>; the system wide ones, such as
+      <code>/usr/share/Tessel/Tessel/plugins</code>; and <code>plugins</code> beside the
+      executable, which is what makes a build tree work.</p>
+    <p><strong>Effects &gt; About the Plugins</strong> says what actually happened: the
+      directories that were read, every plugin that loaded with the effects it brought, and
+      every file that was refused together with the reason. A failure is announced in the
+      status bar at startup as well, so a plugin that quietly did not load is not quiet. A
+      plugin built against a different version of the interface is refused by name rather
+      than loaded, because the two sides pass C++ objects to each other.</p>
+    <p><a href="plugins.html">Writing an effect plugin</a> walks through the whole thing, with
+      the example plugin's source quoted in full.</p>
+  </section>
+
   <section id="settings">
-    <h2>Settings</h2>
+    <h2>Settings and languages</h2>
     <p>The cog at the right hand end of the menu bar opens Settings, which is short on
       purpose:</p>
     <ul>
-      <li><strong>Appearance</strong>: the theme, Dark or Light. It applies immediately,
-        icons and all, because they are redrawn in the new foreground colour rather than
-        reloaded.</li>
+      <li><strong>Appearance</strong>: the theme, Dark or Light, and the language. The theme
+        applies immediately, icons and all, because they are redrawn in the new foreground
+        colour rather than reloaded.</li>
       <li><strong>New images</strong>: the default width and height offered by File &gt;
         New.</li>
       <li><strong>History</strong>: the maximum number of steps and the memory budget in
         megabytes. The undo stack is capped by whichever it reaches first.</li>
+      <li><strong>Saving work</strong>: whether a recovery copy is kept of every changed
+        image and how many minutes apart, whether the images from the last session are
+        offered again at startup, and how long an abandoned recovery file is kept before it
+        is deleted unasked. See <a href="#recovery">Autosave and recovery</a>.</li>
       <li><strong>Window</strong>: reset the panel layout, if the docks have been dragged
         somewhere you would rather they were not.</li>
     </ul>
-    <p>Window geometry, dock layout, recent files and the view switches are remembered between
-      sessions.</p>
+    <p>Window geometry, dock layout, recent files, the measurement unit and the view switches
+      are remembered between sessions.</p>
+
+    <h3>Languages</h3>
+    <p>The interface is translated, and ships in English and Russian. The
+      <strong>Language</strong> box in Settings offers System, English and Russian: System
+      follows the system locale, which is what a fresh installation does. Qt's own
+      translations, which cover the buttons of the standard dialogs and the file chooser, are
+      loaded from the Qt installation for the same language.</p>
+    <p>The choice takes effect the next time Tessel starts, and the program says so when you
+      make it. That is deliberate rather than lazy: every menu, every panel and every undo
+      step already recorded was built in the language the window started in, and switching
+      halfway through would leave the two mixed.</p>
+    <p>All the languages are compiled into the executable, so there is nothing to install
+      beside it. Adding one means adding a file under <code>translations/</code> and
+      rebuilding; the repository's README has the steps.</p>
   </section>
 
   <p><a href="shortcuts.html">Next: the complete keyboard reference</a></p>
