@@ -2799,8 +2799,14 @@ int main(int argc, char** argv)
             return;
         for (int i = 0; i < 12; ++i)
             QMetaObject::invokeMethod(layers, "addLayerRequested");
-        QApplication::processEvents();
-        QApplication::processEvents();
+        // The panels are measured again on the next turn of the event loop, so
+        // this waits for the list to have given way rather than assuming one
+        // round of events is enough.
+        auto* tree = window.findChild<LayerTree*>();
+        CHECK(tree != nullptr);
+        if (!tree)
+            return;
+        CHECK(spinUntil([&] { return tree->verticalScrollBar()->maximum() > 0; }, 2000));
 
         QList<Panel*> shown;
         for (Panel* panel : window.findChildren<Panel*>()) {
@@ -2816,10 +2822,7 @@ int main(int argc, char** argv)
         }
         // And the list is what gave way: it scrolls rather than growing past
         // the panel above it.
-        auto* tree = window.findChild<LayerTree*>();
-        CHECK(tree != nullptr);
-        if (tree)
-            CHECK(tree->verticalScrollBar()->maximum() > 0);
+        CHECK(tree->verticalScrollBar()->maximum() > 0);
     });
 
     addTest("a panel is no taller than what it holds", [] {
@@ -2854,7 +2857,11 @@ int main(int argc, char** argv)
         const int before = panel->height();
         for (int i = 0; i < 5; ++i)
             QMetaObject::invokeMethod(layers, "addLayerRequested");
-        QApplication::processEvents();
+        // The panel is measured again on the next turn of the event loop
+        // rather than in the middle of the one that changed the list, so this
+        // waits for it to catch up with what it now wants instead of assuming
+        // one round of events is enough.
+        CHECK(spinUntil([&] { return panel->height() >= panel->wantedSize().height(); }, 2000));
         CHECK(panel->height() > before);
         CHECK(panel->height() <= panel->wantedSize().height() + 8);
     });
