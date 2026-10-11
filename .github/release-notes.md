@@ -90,6 +90,17 @@ suites, which run on Linux and on Windows before a build is published.
 * The preview no longer waits a fixed quarter of a second before sharpening:
   the wait follows what the last full resolution pass actually cost.
 
+### The window
+
+* **The panels sit in the corners.** Tools, Colours, History and Layers are
+  four panels standing over the canvas rather than strips down the sides of the
+  window, so the image is one piece and runs underneath them. Each one is only
+  as tall as what it holds, and a list grows to six rows before it scrolls.
+* **A panel is dragged by its title bar** into whichever of the four corners
+  the pointer is nearest, or let go of anywhere else to float there. The pin in
+  its title bar does the same without the dragging, and where each panel stands
+  is remembered between runs.
+
 ### Not losing work
 
 * **Autosave** writes every changed document to a recovery copy on a timer,
