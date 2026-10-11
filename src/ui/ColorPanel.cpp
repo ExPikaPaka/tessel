@@ -387,6 +387,18 @@ QSize PaletteGrid::sizeHint() const
     return QSize(columns() * 14, rowCount() * 14 + 2);
 }
 
+// The height a row of swatches is worth is not negotiable: a short panel
+// scrolls rather than squeezing the rows away to nothing, which is what used
+// to happen to the recent colours and the palette in a crowded column. The
+// width still is, since a cell is sized from the width that is going.
+QSize PaletteGrid::minimumSizeHint() const
+{
+    // Reserved at the largest a cell is ever drawn, since the panel asks for
+    // this before it knows how wide it will be, and a row half cut off is
+    // exactly the thing being fixed.
+    return QSize(columns() * 10, rowCount() * 18 + 2);
+}
+
 void PaletteGrid::paintEvent(QPaintEvent*)
 {
     QPainter painter(this);

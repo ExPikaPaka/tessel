@@ -28,6 +28,7 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QScreen>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QShortcut>
@@ -939,7 +940,16 @@ void MainWindow::createDocks()
     toolsDock_ = makeDock(tr("Tools"), tools_, QStringLiteral("toolsDock"));
 
     colors_ = new ColorPanel(this);
-    colorsDock_ = makeDock(tr("Colors"), colors_, QStringLiteral("colorsDock"));
+    // The Colors panel is the tall one: wheel, value and alpha, the recent
+    // row and the palette. In a short dock the layout used to squeeze the
+    // rows of swatches down to nothing, so the panel keeps its own height and
+    // the dock scrolls to it instead.
+    auto* colorsScroll = new QScrollArea(this);
+    colorsScroll->setWidget(colors_);
+    colorsScroll->setWidgetResizable(true);
+    colorsScroll->setFrameShape(QFrame::NoFrame);
+    colorsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    colorsDock_ = makeDock(tr("Colors"), colorsScroll, QStringLiteral("colorsDock"));
 
     history_ = new HistoryPanel(this);
     historyDock_ = makeDock(tr("History"), history_,
@@ -1148,16 +1158,19 @@ void MainWindow::styleDockButtons(QDockWidget* dock)
     for (QAbstractButton* button : dock->findChildren<QAbstractButton*>()) {
         const QString name = button->objectName();
         if (name == QLatin1String("qt_dockwidget_closebutton")) {
-            button->setIcon(icons::get(QStringLiteral("close"), 14));
+            button->setIcon(icons::get(QStringLiteral("close"), 16));
             button->setToolTip(tr("Close this panel"));
         } else if (name == QLatin1String("qt_dockwidget_floatbutton")) {
-            button->setIcon(icons::get(QStringLiteral("copy"), 14));
+            button->setIcon(icons::get(QStringLiteral("copy"), 16));
             button->setToolTip(tr("Float or dock this panel"));
         } else {
             continue;
         }
-        button->setIconSize(QSize(14, 14));
-        button->setFixedSize(18, 18);
+        button->setIconSize(QSize(16, 16));
+        button->setFixedSize(22, 22);
+        // Without this the only sign that the pointer is on the button is the
+        // tooltip, a second later, and the button feels dead until then.
+        button->setAttribute(Qt::WA_Hover, true);
     }
 }
 

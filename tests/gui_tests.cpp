@@ -23,6 +23,9 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QDockWidget>
+#include <QScrollBar>
+#include <QScrollArea>
 #include <QShortcut>
 #include <QSettings>
 #include <QSpinBox>
@@ -2493,6 +2496,68 @@ int main(int argc, char** argv)
         brush->optionChanged(QStringLiteral("antialias"), 2);
         brush->optionChanged(QStringLiteral("width"), 12);
         brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("a crowded column scrolls the Colors panel instead of flattening it", [] {
+        // The wheel, the value and alpha bars, the recent row and the palette
+        // do not all fit beside History and Layers in a short window. The
+        // layout used to squeeze the rows of swatches to nothing, which is
+        // what the panel loses first and misses most.
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 760);
+        window.show();
+        QApplication::processEvents();
+
+        auto* colors = window.findChild<ColorPanel*>();
+        CHECK(colors != nullptr);
+        auto* scroll = window.findChild<QScrollArea*>();
+        CHECK(scroll != nullptr);
+        if (!colors || !scroll)
+            return;
+        // Whatever the dock can spare, the panel keeps its own height.
+        CHECK(colors->height() >= colors->minimumSizeHint().height());
+        CHECK(colors->minimumSizeHint().height() > 300);
+        // Which means the swatches are drawn at a size worth clicking.
+        for (PaletteGrid* grid : window.findChildren<PaletteGrid*>()) {
+            check(grid->height() >= 14, "a row of swatches is not flattened",
+                  __LINE__);
+        }
+        // And when that does not fit, the dock scrolls to it.
+        if (scroll->viewport()->height() < colors->height())
+            CHECK(scroll->verticalScrollBar()->isVisible());
+    });
+
+    addTest("the tools palette is no taller than its buttons", [] {
+        // A dock fills its column, which left the palette stretched down the
+        // whole side of the window with most of it empty.
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
+        QApplication::processEvents();
+        auto* tools = window.findChild<ToolsPalette*>();
+        auto* dock = window.findChild<QDockWidget*>(QStringLiteral("toolsDock"));
+        CHECK(tools != nullptr && dock != nullptr);
+        if (!tools || !dock)
+            return;
+        CHECK(tools->height() <= tools->maximumHeight());
+        CHECK(tools->height() < 500);          // not the height of the window
+        CHECK(tools->height() > 250);          // but enough for ten rows
+        // The title bar buttons are big enough to hit without aiming.
+        int sized = 0;
+        for (QAbstractButton* button : dock->findChildren<QAbstractButton*>()) {
+            const QString name = button->objectName();
+            if (name != QLatin1String("qt_dockwidget_closebutton")
+                && name != QLatin1String("qt_dockwidget_floatbutton"))
+                continue;
+            ++sized;
+            check(button->width() >= 22 && button->height() >= 22,
+                  "a dock title button is big enough to hit", __LINE__);
+            check(button->testAttribute(Qt::WA_Hover),
+                  "a dock title button lights up under the pointer", __LINE__);
+        }
+        CHECK(sized == 2);
     });
 
     addTest("no two commands claim the same key", [] {

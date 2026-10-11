@@ -100,6 +100,10 @@ ToolsPalette::ToolsPalette(QWidget* parent) : QWidget(parent)
     // float and close buttons instead of eliding it away.
     setMinimumWidth(72);
     setMaximumWidth(118);
+    // And no taller than the buttons it holds. A dock fills its column, which
+    // left the palette stretched down the whole side of the window with most
+    // of it empty; capping the height keeps it the size it is floating.
+    setMaximumHeight(grid->minimumSize().height());
 }
 
 void ToolsPalette::setCurrentTool(const QString& toolId)

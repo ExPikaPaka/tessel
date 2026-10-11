@@ -100,6 +100,13 @@ QDockWidget::close-button, QDockWidget::float-button {
     padding: 0; margin: 2px; }
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
     background: %5; border-color: %5; }
+/* The title bar buttons are real widgets, direct children of the dock, so the
+   pseudo element rules above do not reach them once they carry our own icons.
+   A panel's own buttons sit inside its content widget and are left alone. */
+QDockWidget > QAbstractButton {
+    background: transparent; border: 1px solid transparent; border-radius: 3px; }
+QDockWidget > QAbstractButton:hover { background: %5; border-color: %5; }
+QDockWidget > QAbstractButton:pressed { background: %6; border-color: %6; }
 QDockWidget::title { background: %2; padding: 5px 8px; border-bottom: 1px solid %6;
                      text-align: left; font-weight: 600; }
 QDockWidget > QWidget { background: %1; }

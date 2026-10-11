@@ -135,6 +135,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
 
 private:
     int indexAt(QPoint pos) const;
