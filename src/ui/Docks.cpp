@@ -98,6 +98,11 @@ ToolsPalette::ToolsPalette(QWidget* parent) : QWidget(parent)
     // Two columns of 30 px buttons plus the grid margins. A little slack on
     // top of that, so the dock title bar has room for its name beside the
     // float and close buttons instead of eliding it away.
+    setObjectName(QStringLiteral("toolsPalette"));
+    // A plain QWidget draws no style sheet background or border of its own
+    // until it is told to, and the palette needs the border: it stops at its
+    // last row of buttons, and the window behind it is the same shade.
+    setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(72);
     setMaximumWidth(118);
     // And no taller than the buttons it holds. A dock fills its column, which

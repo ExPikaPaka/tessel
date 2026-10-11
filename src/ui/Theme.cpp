@@ -109,6 +109,13 @@ QDockWidget > QAbstractButton:hover { background: %5; border-color: %5; }
 QDockWidget > QAbstractButton:pressed { background: %6; border-color: %6; }
 QDockWidget::title { background: %2; padding: 5px 8px; border-bottom: 1px solid %6;
                      text-align: left; font-weight: 600; }
+/* The title bar is our own widget, so it is styled here rather than through
+   the pseudo element above, which only reaches the one Qt draws. */
+QWidget#dockTitleBar { background: %2; border-bottom: 1px solid %6; }
+QLabel#dockTitle { color: %3; font-weight: 600; }
+/* The palette stops at its last row of buttons, and the window behind it is
+   the same shade, so a line is what says where the panel ends. */
+QWidget#toolsPalette { border: 1px solid %6; border-top: 0; }
 QDockWidget > QWidget { background: %1; }
 QTabBar { background: %1; }
 QTabBar::tab { background: %2; color: %4; padding: 5px 10px; margin-right: 2px;

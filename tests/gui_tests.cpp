@@ -2544,20 +2544,42 @@ int main(int argc, char** argv)
         CHECK(tools->height() <= tools->maximumHeight());
         CHECK(tools->height() < 500);          // not the height of the window
         CHECK(tools->height() > 250);          // but enough for ten rows
-        // The title bar buttons are big enough to hit without aiming.
-        int sized = 0;
-        for (QAbstractButton* button : dock->findChildren<QAbstractButton*>()) {
-            const QString name = button->objectName();
-            if (name != QLatin1String("qt_dockwidget_closebutton")
-                && name != QLatin1String("qt_dockwidget_floatbutton"))
-                continue;
-            ++sized;
+        // The dock frame has to end there too, or the panel still reads as a
+        // tall empty box with the buttons pushed to the top of it.
+        CHECK(dock->height() <= tools->maximumHeight() + 60);
+        CHECK(dock->height() < 500);
+        // The title bar is ours, so its buttons are ordinary tool buttons the
+        // theme lights up, at a size worth aiming at, and they do their job.
+        QWidget* bar = dock->titleBarWidget();
+        CHECK(bar != nullptr);
+        if (!bar)
+            return;
+        auto* close = bar->findChild<QToolButton*>(QStringLiteral("dockCloseButton"));
+        auto* floatIt = bar->findChild<QToolButton*>(QStringLiteral("dockFloatButton"));
+        CHECK(close != nullptr && floatIt != nullptr);
+        if (!close || !floatIt)
+            return;
+        for (QToolButton* button : {close, floatIt}) {
             check(button->width() >= 22 && button->height() >= 22,
                   "a dock title button is big enough to hit", __LINE__);
-            check(button->testAttribute(Qt::WA_Hover),
-                  "a dock title button lights up under the pointer", __LINE__);
+            check(!button->icon().isNull(), "a dock title button has an icon",
+                  __LINE__);
         }
-        CHECK(sized == 2);
+        CHECK(bar->findChild<QLabel*>(QStringLiteral("dockTitle"))->text()
+              == dock->windowTitle());
+        // The title itself takes no mouse events, so the dock still drags.
+        CHECK(bar->findChild<QLabel*>(QStringLiteral("dockTitle"))
+                  ->testAttribute(Qt::WA_TransparentForMouseEvents));
+        floatIt->click();
+        QApplication::processEvents();
+        CHECK(dock->isFloating());
+        floatIt->click();
+        QApplication::processEvents();
+        CHECK(!dock->isFloating());
+        close->click();
+        QApplication::processEvents();
+        CHECK(!dock->isVisible());
+        dock->show();
     });
 
     addTest("no two commands claim the same key", [] {

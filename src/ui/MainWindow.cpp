@@ -28,6 +28,7 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QScreen>
+#include <QHBoxLayout>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -938,6 +939,11 @@ void MainWindow::createDocks()
 
     tools_ = new ToolsPalette(this);
     toolsDock_ = makeDock(tr("Tools"), tools_, QStringLiteral("toolsDock"));
+    // The palette is capped at the height of its own grid, but a dock frame
+    // stretches down its column whatever is inside it, so the panel still read
+    // as a tall empty box with the buttons at the top. Capping the dock as
+    // well ends it where the buttons end, docked or floating.
+    toolsDock_->setMaximumHeight(toolsDock_->sizeHint().height());
 
     colors_ = new ColorPanel(this);
     // The Colors panel is the tall one: wheel, value and alpha, the recent
@@ -1151,27 +1157,51 @@ void MainWindow::installToolShortcuts()
 
 void MainWindow::styleDockButtons(QDockWidget* dock)
 {
-    // The close and float buttons on a dock title bar carry no icon of their
-    // own once the title bar is styled, which left them invisible, and a
-    // floating panel then had no visible way to be closed or put back. Qt
-    // names both buttons, so they can be found and given one of our glyphs.
-    for (QAbstractButton* button : dock->findChildren<QAbstractButton*>()) {
-        const QString name = button->objectName();
-        if (name == QLatin1String("qt_dockwidget_closebutton")) {
-            button->setIcon(icons::get(QStringLiteral("close"), 16));
-            button->setToolTip(tr("Close this panel"));
-        } else if (name == QLatin1String("qt_dockwidget_floatbutton")) {
-            button->setIcon(icons::get(QStringLiteral("copy"), 16));
-            button->setToolTip(tr("Float or dock this panel"));
-        } else {
-            continue;
-        }
-        button->setIconSize(QSize(16, 16));
-        button->setFixedSize(22, 22);
-        // Without this the only sign that the pointer is on the button is the
-        // tooltip, a second later, and the button feels dead until then.
-        button->setAttribute(Qt::WA_Hover, true);
+    // Qt's own title bar buttons draw their hover state themselves, through a
+    // style hint that a style sheet does not answer, so under this theme the
+    // only sign that the pointer was on one was the tooltip a second later.
+    // The title bar is ours instead: a label and two ordinary tool buttons,
+    // which the theme already lights up, and which can be given a size worth
+    // aiming at. The label accepts no mouse events, so the dock is still
+    // dragged and double clicked by its title the way it always was.
+    auto* bar = qobject_cast<QWidget*>(dock->titleBarWidget());
+    QLabel* label = nullptr;
+    if (!bar) {
+        bar = new QWidget(dock);
+        bar->setObjectName(QStringLiteral("dockTitleBar"));
+        bar->setAttribute(Qt::WA_StyledBackground, true);
+        auto* row = new QHBoxLayout(bar);
+        row->setContentsMargins(8, 3, 3, 3);
+        row->setSpacing(2);
+        label = new QLabel(dock->windowTitle(), bar);
+        label->setObjectName(QStringLiteral("dockTitle"));
+        label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        row->addWidget(label, 1);
+
+        auto addButton = [&](const QString& name, const QString& tip, auto slot) {
+            auto* button = new QToolButton(bar);
+            button->setObjectName(name);
+            button->setAutoRaise(true);
+            button->setIconSize(QSize(16, 16));
+            button->setFixedSize(22, 22);
+            button->setToolTip(tip);
+            connect(button, &QToolButton::clicked, dock, slot);
+            row->addWidget(button, 0);
+            return button;
+        };
+        addButton(QStringLiteral("dockFloatButton"), tr("Float or dock this panel"),
+                  [dock] { dock->setFloating(!dock->isFloating()); });
+        addButton(QStringLiteral("dockCloseButton"), tr("Close this panel"),
+                  [dock] { dock->close(); });
+        dock->setTitleBarWidget(bar);
+        connect(dock, &QDockWidget::windowTitleChanged, label, &QLabel::setText);
     }
+    if (auto* found = bar->findChild<QLabel*>(QStringLiteral("dockTitle")))
+        found->setText(dock->windowTitle());
+    if (auto* button = bar->findChild<QToolButton*>(QStringLiteral("dockFloatButton")))
+        button->setIcon(icons::get(QStringLiteral("copy"), 16));
+    if (auto* button = bar->findChild<QToolButton*>(QStringLiteral("dockCloseButton")))
+        button->setIcon(icons::get(QStringLiteral("close"), 16));
 }
 
 void MainWindow::refreshIcons()
