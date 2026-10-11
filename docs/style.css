@@ -410,6 +410,25 @@ figcaption {
     font-size: .9rem;
 }
 
+/* A picture of something small, such as a dialog or the tool palette. Stretched
+   to the width of the column it only gets blurry, so it keeps its own size. */
+figure.narrow img {
+    width: auto;
+    max-width: 100%;
+    margin-inline: auto;
+}
+
+/* The tool options bar is one long row. Below the width it was grabbed at its
+   labels stop being readable, so it scrolls sideways rather than shrinking. */
+figure.strip {
+    overflow-x: auto;
+}
+
+figure.strip img {
+    width: auto;
+    max-width: none;
+}
+
 .shots {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

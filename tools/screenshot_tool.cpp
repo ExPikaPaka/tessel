@@ -9,8 +9,14 @@
 // reviewed:
 //
 //     tessel_screenshots --icons /tmp/icons.png
+#include <algorithm>
+#include <cmath>
+
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QDockWidget>
+#include <QEvent>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
@@ -19,6 +25,7 @@
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/ImageOps.h"
+#include "core/Recovery.h"
 #include "effects/Effect.h"
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
@@ -29,17 +36,28 @@
 #include "ui/Docks.h"
 #include "ui/Icons.h"
 #include "ui/MainWindow.h"
+#include "ui/RecoveryDialog.h"
 #include "ui/Theme.h"
 
 using namespace tessel;
 
 namespace {
 
+// The layers the shots reach back into after the artwork is built. Layers live
+// in a tree now, so a position in a flat list is no longer a way to find one.
+struct Sample {
+    int paintUid = 0;       // the layer carrying the mask and the effect stack
+    int adjustmentUid = 0;
+};
+
 // A small composition with several layers, a selection and some brushwork, so
-// the panels in the screenshots have something to show.
-void buildSampleArtwork(Document& doc)
+// the panels in the screenshots have something to show. It carries one of
+// everything the Layers panel can draw: a group with children, a layer with a
+// mask and a non destructive effect stack, and an adjustment layer on top.
+Sample buildSampleArtwork(Document& doc)
 {
     const int w = doc.width(), h = doc.height();
+    Sample sample;
 
     Layer* background = doc.layerAt(0);
     background->name = QStringLiteral("Background");
@@ -54,8 +72,13 @@ void buildSampleArtwork(Document& doc)
         }
     }
 
-    Layer* clouds = doc.addLayer(std::make_unique<Layer>(Image(w, h),
-                                                         QStringLiteral("Clouds")));
+    // The sky is a group, so the panel has a group to show and the group's own
+    // opacity and blend mode have something to act on.
+    Layer* sky = doc.addGroup(QStringLiteral("Sky"));
+    sky->opacity = 235;
+
+    Layer* clouds = doc.addChild(sky, std::make_unique<Layer>(
+                                          Image(w, h), QStringLiteral("Clouds")));
     EffectContext context;
     context.source = &clouds->image;
     context.region = clouds->image.rect();
@@ -68,8 +91,26 @@ void buildSampleArtwork(Document& doc)
     clouds->opacity = 150;
     clouds->mode = BlendMode::Screen;
 
-    Layer* paint = doc.addLayer(std::make_unique<Layer>(Image(w, h),
+    Layer* sun = doc.addChild(sky, std::make_unique<Layer>(Image(w, h),
+                                                           QStringLiteral("Sun")));
+    sun->mode = BlendMode::Screen;
+    const double sunX = w * 0.74, sunY = h * 0.24, sunR = h * 0.34;
+    for (int y = 0; y < h; ++y) {
+        Rgba* line = sun->image.row(y);
+        for (int x = 0; x < w; ++x) {
+            const double dx = x - sunX, dy = y - sunY;
+            const double d = std::sqrt(dx * dx + dy * dy) / sunR;
+            if (d >= 1.0)
+                continue;
+            const float falloff = float((1.0 - d) * (1.0 - d));
+            line[x] = Rgba(255, 228, 170, toByte(falloff * 0.85f));
+        }
+    }
+
+    Layer* paint = doc.addChild(doc.rootGroup(),
+                                std::make_unique<Layer>(Image(w, h),
                                                         QStringLiteral("Brush work")));
+    sample.paintUid = paint->uid();
     const std::vector<QPointF> stroke = {
         {w * 0.12, h * 0.72}, {w * 0.28, h * 0.42}, {w * 0.44, h * 0.62},
         {w * 0.60, h * 0.30}, {w * 0.78, h * 0.55}, {w * 0.90, h * 0.34}};
@@ -80,6 +121,44 @@ void buildSampleArtwork(Document& doc)
     Mask mask2 = ops::strokeMask(w, h, second, 14.0, 0.5);
     ops::colorOver(paint->image, mask2, Rgba(255, 110, 92, 230), BlendMode::Normal,
                    paint->image.rect());
+
+    // A mask that fades the strokes away towards the left edge. In the program
+    // it would be painted with the ordinary tools; here the grey is written
+    // straight in, which is the same thing by the time it is composited.
+    Image maskPixels(w, h);
+    for (int y = 0; y < h; ++y) {
+        Rgba* line = maskPixels.row(y);
+        for (int x = 0; x < w; ++x) {
+            const double u = double(x) / w;
+            const double ramp = std::clamp((u - 0.08) / 0.38, 0.0, 1.0);
+            const uint8_t grey = toByte(float(ramp));
+            line[x] = Rgba(grey, grey, grey, 255);
+        }
+    }
+    doc.setMask(paint, std::move(maskPixels));
+
+    // Two effects the layer carries rather than has baked in: the stored pixels
+    // stay the bare strokes, and the stack runs on the way into the composite.
+    EffectRegistry& registry = EffectRegistry::instance();
+    std::vector<LayerEffect> stack;
+    if (Effect* shadow = registry.byId(QStringLiteral("drop_shadow")))
+        stack.push_back({shadow->id(), ParamValues::defaults(shadow->params()), true});
+    if (Effect* glow = registry.byId(QStringLiteral("object_glow"))) {
+        ParamValues glowValues = ParamValues::defaults(glow->params());
+        glowValues.set(QStringLiteral("radius"), 18.0);
+        stack.push_back({glow->id(), glowValues, true});
+    }
+    doc.setLayerEffects(paint, stack);
+
+    // An adjustment layer on top, which acts on everything below it rather
+    // than on pixels of its own.
+    if (Effect* hue = registry.byId(QStringLiteral("hue_saturation"))) {
+        ParamValues hueValues = ParamValues::defaults(hue->params());
+        hueValues.set(QStringLiteral("saturation"), 145);
+        hueValues.set(QStringLiteral("hue"), -8);
+        Layer* adjustment = doc.addAdjustmentLayer(hue->id(), hueValues, hue->name());
+        sample.adjustmentUid = adjustment->uid();
+    }
 
     // An elliptical selection, so the marching ants and the status bar readout
     // both appear.
@@ -103,10 +182,11 @@ void buildSampleArtwork(Document& doc)
         }
     }
     doc.selection().setMask(std::move(selection));
-    doc.setActiveIndex(2);
+    doc.setActiveIndex(doc.indexOfUid(sample.paintUid));
     doc.setTitle(QStringLiteral("harbour.tessel"));
     doc.invalidate();
     doc.setModified(false);
+    return sample;
 }
 
 
@@ -187,6 +267,112 @@ void save(QWidget* widget, const QString& path)
 {
     widget->grab().save(path);
     qInfo("wrote %s", qPrintable(path));
+}
+
+// The tool options bar is one long row, and the brush filled it out when it
+// gained the tip, stabilisation and pressure controls: scaled down to the
+// width of a page column its labels stop being readable. So a bar that is too
+// wide to show at its own size is cut in two and the halves are stacked.
+//
+// The cut is made at a column that holds nothing but the bar's background, so
+// it never falls through a control. If there is no such column the bar is left
+// as it is, since a cut through the middle of a spin box would be worse than a
+// wide picture.
+QImage foldStrip(const QImage& strip)
+{
+    constexpr int kTooWide = 1200;
+    if (strip.width() <= kTooWide)
+        return strip;
+    const QRgb background = strip.pixel(strip.width() - 2, 2);
+    const int middle = strip.width() / 2;
+    int cut = -1;
+    for (int offset = 0; offset < strip.width() / 6; ++offset) {
+        for (int x : {middle + offset, middle - offset}) {
+            if (x < 1 || x >= strip.width() - 1)
+                continue;
+            bool clear = true;
+            for (int y = 1; y < strip.height() - 1 && clear; ++y)
+                clear = strip.pixel(x, y) == background;
+            if (clear) {
+                cut = x;
+                break;
+            }
+        }
+        if (cut >= 0)
+            break;
+    }
+    if (cut < 0)
+        return strip;
+
+    const int gap = 4;
+    const int width = std::max(cut, strip.width() - cut);
+    QImage folded(width, strip.height() * 2 + gap, QImage::Format_ARGB32);
+    folded.fill(background);
+    QPainter painter(&folded);
+    painter.drawImage(0, 0, strip, 0, 0, cut, strip.height());
+    painter.drawImage(0, strip.height() + gap, strip, cut, 0,
+                      strip.width() - cut, strip.height());
+    painter.end();
+    return folded;
+}
+
+// What a layer mask does, in three pictures: the pixels the layer stores, the
+// grey the mask holds, and what reaches the canvas. A mask is the one feature
+// here whose point is invisible in a screenshot of the window, because all the
+// window shows is the result.
+QImage buildMaskFigure(const Document& doc, const Layer& layer)
+{
+    struct Panel {
+        QImage picture;
+        const char* label;
+        bool checkered;
+    };
+    const Panel panels[] = {
+        {layer.image.toQImage(), "The layer", true},
+        {layer.maskImage() ? layer.maskImage()->toQImage() : QImage(), "Its mask", false},
+        {doc.renderLayer(layer).toQImage(), "What is composited", true},
+    };
+
+    const int cell = 280;
+    const int labelHeight = 22;
+    const int gap = 10;
+    QImage sheet(cell * 3 + gap * 4, cell + labelHeight + gap * 2,
+                 QImage::Format_ARGB32_Premultiplied);
+    sheet.fill(theme::windowColor());
+    QPainter painter(&sheet);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QFont font = painter.font();
+    font.setPointSizeF(9.0);
+    painter.setFont(font);
+
+    for (int i = 0; i < 3; ++i) {
+        const QRect box(gap + i * (cell + gap), gap, cell, cell);
+        const QImage shown = panels[i].picture.scaled(box.size(), Qt::KeepAspectRatio,
+                                                      Qt::SmoothTransformation);
+        const QRect at(box.x() + (box.width() - shown.width()) / 2,
+                       box.y() + (box.height() - shown.height()) / 2,
+                       shown.width(), shown.height());
+        if (panels[i].checkered) {
+            // The same checker the canvas uses, so transparent reads as
+            // transparent rather than as a colour the layer does not have.
+            for (int y = at.top(); y <= at.bottom(); y += 8) {
+                for (int x = at.left(); x <= at.right(); x += 8) {
+                    const bool odd = ((x - at.left()) / 8 + (y - at.top()) / 8) % 2;
+                    painter.fillRect(QRect(x, y, 8, 8).intersected(at),
+                                     odd ? QColor(0x4a, 0x4c, 0x52)
+                                         : QColor(0x3a, 0x3c, 0x42));
+                }
+            }
+        }
+        painter.drawImage(at.topLeft(), shown);
+        painter.setPen(theme::gridColor());
+        painter.drawRect(at.adjusted(0, 0, -1, -1));
+        painter.setPen(theme::textColor());
+        painter.drawText(QRect(box.x(), box.bottom(), box.width(), labelHeight),
+                         Qt::AlignCenter, QString::fromLatin1(panels[i].label));
+    }
+    painter.end();
+    return sheet;
 }
 
 
@@ -289,13 +475,27 @@ int main(int argc, char** argv)
         icons::clearCache();
 
         auto window = std::make_unique<MainWindow>();
-        window->resize(1280, 820);
+        // Wide enough for the whole tool options bar, which the brush filled
+        // out when it gained the tip, stabilisation and pressure controls. A
+        // narrower window only hides the very controls these pictures are for.
+        window->resize(1760, 1000);
         window->newDocument(900, 620, Rgba(255, 255, 255, 255));
         window->show();
         app.processEvents();
 
+        // The layer tree is taller than a flat list of three, so the Layers
+        // dock is given room for a group and its children.
+        auto* historyDock = window->findChild<QDockWidget*>(QStringLiteral("historyDock"));
+        auto* layersDock = window->findChild<QDockWidget*>(QStringLiteral("layersDock"));
+        auto* colorsDock = window->findChild<QDockWidget*>(QStringLiteral("colorsDock"));
+        if (historyDock && layersDock && colorsDock) {
+            window->resizeDocks({historyDock, layersDock, colorsDock},
+                                {210, 330, 350}, Qt::Vertical);
+        }
+        app.processEvents();
+
         CanvasView* view = window->findChildren<CanvasView*>().last();
-        buildSampleArtwork(*view->document());
+        const Sample sample = buildSampleArtwork(*view->document());
         view->zoomToFit();
         view->refresh();
         // The artwork was built behind the window's back, so the layer list,
@@ -338,6 +538,53 @@ int main(int argc, char** argv)
             shot(&effect, QStringLiteral("dialog-effect"));
             effect.reject();
 
+            // Layer Properties with the brush layer's effect stack in it. The
+            // dialog reads the active layer, so the document is pointed at it
+            // first and left there afterwards.
+            doc->setActiveIndex(doc->indexOfUid(sample.paintUid));
+            LayerPropertiesDialog properties(doc, history);
+            properties.show();
+            app.processEvents();
+            shot(&properties, QStringLiteral("dialog-layer-properties"));
+            properties.reject();
+
+            // The parameters of the adjustment layer, reopened the way a double
+            // click on its row reopens them.
+            if (Layer* adjustment = doc->layerByUid(sample.adjustmentUid)) {
+                Effect* stored = EffectRegistry::instance().byId(
+                    adjustment->effects().front().effectId);
+                StoredEffectDialog storedDialog(stored, doc, history, adjustment, 0);
+                storedDialog.show();
+                app.processEvents();
+                shot(&storedDialog, QStringLiteral("dialog-adjustment-layer"));
+                storedDialog.reject();
+            }
+
+            // The recovery offer, with the entries a crashed session would have
+            // left behind. Nothing is read from disk: the dialog is handed the
+            // same list findAbandoned() would have handed it.
+            {
+                std::vector<recovery::Entry> entries;
+                recovery::Entry first;
+                first.path = QStringLiteral("harbour.tessel");
+                first.originalPath = QStringLiteral("/home/you/Pictures/harbour.tessel");
+                first.title = QStringLiteral("harbour.tessel");
+                first.size = 4 * 1024 * 1024 + 310 * 1024;
+                first.savedAt = QDateTime::currentDateTime().addSecs(-180);
+                entries.push_back(first);
+                recovery::Entry second;
+                second.path = QStringLiteral("untitled.tessel");
+                second.title = QStringLiteral("Untitled 2");
+                second.size = 820 * 1024;
+                second.savedAt = QDateTime::currentDateTime().addSecs(-420);
+                entries.push_back(second);
+                RecoveryDialog recoveryDialog(entries);
+                recoveryDialog.show();
+                app.processEvents();
+                shot(&recoveryDialog, QStringLiteral("dialog-recovery"));
+                recoveryDialog.chooseLater();
+            }
+
             // Panel closeups.
             const QString dir = outDir + QLatin1Char('/');
             shotWidget(window->findChild<ToolsPalette*>(), dir + "panel-tools.png");
@@ -345,18 +592,32 @@ int main(int argc, char** argv)
             shotWidget(window->findChild<LayersPanel*>(), dir + "panel-layers.png");
             shotWidget(window->findChild<HistoryPanel*>(), dir + "panel-history.png");
 
-            // The tool options bar changes completely per tool, so show three.
+            // What a mask does, which the window alone cannot show.
+            if (const Layer* masked = doc->layerByUid(sample.paintUid)) {
+                buildMaskFigure(*doc, *masked).save(dir + "layer-mask.png");
+                qInfo("wrote %s", qPrintable(dir + "layer-mask.png"));
+            }
+
+            // The tool options bar changes completely per tool, so show several.
             auto* options = window->findChild<ToolOptionsBar*>();
-            const char* optionTools[] = {"brush", "gradient", "shapes", "text"};
+            const char* optionTools[] = {"brush",  "pencil", "eraser",
+                                         "gradient", "shapes", "text"};
             for (const char* id : optionTools) {
                 Tool* tool = ToolRegistry::instance().byId(QString::fromLatin1(id));
                 if (!tool || !options)
                     continue;
                 options->startTool(tool);
                 options->setToolList(ToolsPalette::toolOrder(), tool->id());
+                // The bar drops the previous tool's controls with deleteLater,
+                // which processEvents on its own does not act on, so without
+                // this the widgets of the tool before are still on top of the
+                // new ones when the grab is taken.
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
                 app.processEvents();
-                shotWidget(options, dir + QStringLiteral("options-%1.png")
-                                             .arg(QString::fromLatin1(id)));
+                const QString path = dir + QStringLiteral("options-%1.png")
+                                               .arg(QString::fromLatin1(id));
+                foldStrip(options->grab().toImage()).save(path);
+                qInfo("wrote %s", qPrintable(path));
             }
 
             // The canvas on its own, with the selection showing.
@@ -383,8 +644,21 @@ int main(int argc, char** argv)
             qInfo("wrote %s", qPrintable(dir + "effects-gallery.png"));
 
             // Frames for the animated demo: a stroke appearing, then an effect.
+            // The options bar is put back on the Paintbrush first, since that
+            // is the tool the frames are pretending to show.
+            if (Tool* brush = ToolRegistry::instance().byId(QStringLiteral("brush"))) {
+                if (options) {
+                    options->startTool(brush);
+                    options->setToolList(ToolsPalette::toolOrder(), brush->id());
+                    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+                    app.processEvents();
+                }
+            }
             QDir().mkpath(outDir + QStringLiteral("/demo"));
-            Layer* canvasLayer = doc->layerAt(doc->layerCount() - 1);
+            // The topmost layer is the adjustment layer now, and it has no
+            // pixels to paint into, so the stroke goes where it was always
+            // meant to go.
+            Layer* canvasLayer = doc->layerByUid(sample.paintUid);
             const Image clean = canvasLayer->image;
             const std::vector<QPointF> path = {
                 {120, 430}, {240, 250}, {380, 400}, {520, 210}, {680, 360}, {820, 200}};

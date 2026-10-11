@@ -236,6 +236,15 @@ target_link_libraries(scanlines PRIVATE /path/to/tessel/build/libtessel_core.a
     <p>Everything an effect is allowed to look at is in <code>EffectContext</code>: the source
       image, the selection mask, the region, the two palette colours, the seed and the
       document.</p>
+    <div class="note">
+      <p>Because it is a plain function of its inputs, an effect from a plugin can be used
+        everywhere a built in one can: applied to a layer from the menu, held live by an
+        <a href="guide.html#nondestructive">adjustment layer</a>, or kept as an entry in a
+        layer's effect stack. A document that stores such an entry records the effect's id,
+        not a pointer into the registry, so it still opens and composites on a machine where
+        the plugin is not installed: the entry passes the pixels through and says
+        <em>(not installed)</em> until the plugin comes back.</p>
+    </div>
   </section>
 
   <section id="trouble">

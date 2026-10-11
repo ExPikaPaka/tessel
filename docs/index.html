@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tessel - a layered raster image editor for Linux</title>
-<meta name="description" content="Tessel is a layered raster image editor for Linux, written from scratch in C++20 with Qt 6: 19 tools, 14 blend modes, 13 adjustments, 40 effects and a native layered file format.">
+<meta name="description" content="Tessel is a layered raster image editor for Linux, written from scratch in C++20 with Qt 6: 19 tools, 14 blend modes, 13 adjustments, 40 effects, layer groups and masks, adjustment layers and a native layered file format.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%233d8bfd'/%3E%3Cpath d='M3 11h10v2H3z' fill='%23e6e8eb'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 <script src="theme.js"></script>
@@ -36,7 +36,7 @@
     <p class="version">Version 1.0.0</p>
     <p class="lede">Tessel is a raster image editor written from scratch in C++20 with Qt 6.
       It follows the way of working that Paint.NET made popular: a tool palette on the left,
-      Colors below it, History and Layers on the right, a tool options bar under the main
+      History, Layers and Colors on the right, a tool options bar under the main
       toolbar, and a status bar that always tells you where the cursor is, how big the
       selection is and what the zoom level is.</p>
     <p class="actions">
@@ -47,8 +47,8 @@
   </div>
 
   <figure>
-    <img src="screenshots/main-dark.png" width="1280" height="820"
-         alt="The Tessel window in its dark theme: menu bar and main toolbar at the top, tool options bar beneath them, Tools palette and Colors panel on the left, History and Layers panels on the right, and an image open on the checkered canvas.">
+    <img src="screenshots/main-dark.png" width="1760" height="1000"
+         alt="The Tessel window in its dark theme: menu bar and main toolbar at the top, the Paintbrush options bar beneath them, the Tools palette on the left, the History, Layers and Colors panels on the right, and an image open on the canvas with an elliptical selection on it.">
     <figcaption>The main window. There is a
       <a href="screenshots/main-light.png">light theme</a> as well, and the theme is chosen
       in Settings.</figcaption>
@@ -64,7 +64,9 @@
     <p>The pixel engine has no GUI dependency, so it is tested headless; the interface is
       tested through the offscreen Qt platform plugin. Pixel work is spread over scanlines in
       parallel, blurs use a three pass box approximation of a gaussian, and resampling is done
-      in premultiplied alpha so transparent edges do not bleed.</p>
+      in premultiplied alpha so transparent edges do not bleed. The composite is cached in a
+      grid of 64 pixel tiles, so painting in the corner of a large image costs what the corner
+      costs rather than what the image costs.</p>
   </section>
 
   <section id="features">
@@ -92,6 +94,20 @@
           from any readable image file.</p>
       </li>
       <li>
+        <h3>Groups and masks</h3>
+        <p>Layers are a tree: a group has its own name, visibility, opacity, blend mode and
+          mask, and acts on its children together. Any layer can carry an 8 bit mask that
+          scales its alpha, painted with the ordinary tools and shown as a second thumbnail
+          beside the layer's own.</p>
+      </li>
+      <li>
+        <h3>Nothing baked in until you say so</h3>
+        <p>An adjustment layer holds an effect and applies it to everything below it inside
+          its group, re-editable for ever. An ordinary layer can carry a whole stack of
+          effects, applied when it is composited and flattened into the pixels only when you
+          ask.</p>
+      </li>
+      <li>
         <h3>13 adjustments</h3>
         <p>Auto Level, Black and White, Brightness / Contrast, Color Balance, Color
           Temperature, Curves, Hue / Saturation, Invert Alpha, Invert Colors, Levels,
@@ -115,22 +131,46 @@
       <li>
         <h3>Layered and flat file formats</h3>
         <p><code>.tessel</code> is the native format, a zip holding one PNG per layer, a JSON
-          manifest, the selection and a flattened preview. <code>.ora</code> (OpenRaster) keeps
-          layers, opacity and blend modes and is read by Krita, GIMP and MyPaint. PNG, JPEG,
+          manifest, the selection and a flattened preview; the manifest nests, so groups,
+          masks, adjustment layers and effect stacks all come back as they went in.
+          <code>.ora</code> (OpenRaster) keeps layers, opacity and blend modes, writes groups
+          as nested stacks, and is read by Krita, GIMP and MyPaint. PNG, JPEG,
           BMP, TIFF, WebP, TGA, GIF and ICO are there too, along with anything else the Qt
           image plugins on the system can handle.</p>
       </li>
       <li>
-        <h3>Dark and light themes</h3>
+        <h3>Tablets and brush options</h3>
+        <p>A pen's pressure can drive the width of a stroke, its opacity, or both, each a
+          switch of its own and both off by default. Beside them: stabilisation for a
+          steadier line, brush tips loaded from a PNG, an antialiasing level rather than a
+          switch, and Overwrite in the Blending box.</p>
+      </li>
+      <li>
+        <h3>Autosave and crash recovery</h3>
+        <p>Every changed image is written to a recovery copy on a timer, on a worker thread.
+          A run that ends cleanly leaves no trace; a run that does not is met at the next
+          start with a list of what it left behind and the choice to recover it, discard it,
+          or decide later. The images that were open are offered again too.</p>
+      </li>
+      <li>
+        <h3>Effect plugins</h3>
+        <p>Effects can be written outside the program and loaded at startup, and they appear
+          in the menus, the adjustment layers and the effect stacks exactly as the built in
+          ones do. <a href="plugins.html">Writing one</a> is one documented header and a
+          lambda.</p>
+      </li>
+      <li>
+        <h3>Dark and light themes, English and Russian</h3>
         <p>Both themes are built in and switch without a restart. Because the icons are drawn
           at runtime in the current foreground colour, they follow the theme instead of
-          needing a second set of files.</p>
+          needing a second set of files. The interface is translated and ships in English and
+          Russian, chosen in Settings and applied at the next start.</p>
       </li>
     </ul>
   </section>
 
   <section id="dialogs">
-    <h2>Dialogs</h2>
+    <h2>A closer look</h2>
     <ul class="shots">
       <li>
         <figure>
@@ -151,6 +191,27 @@
           <img src="screenshots/dialog-effect.png" width="360" height="274"
                alt="The generated dialog for the Clouds effect: slider and value pairs for Scale, Roughness, Detail and Seed, a blend mode box, a checkbox for using the palette colours, and Reset, OK and Cancel buttons.">
           <figcaption>A generated effect dialog, previewing live.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/dialog-layer-properties.png" width="340" height="391"
+               alt="The Layer Properties dialog: a Name field reading Brush work, a Visible checkbox, a Blend mode box, an Opacity slider, and an Effects box listing Drop Shadow and Outer Glow above a row of buttons.">
+          <figcaption>Layer Properties, with the layer's non destructive effect stack.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/dialog-recovery.png" width="484" height="302"
+               alt="The Recover Unsaved Images dialog: a sentence saying Tessel did not close cleanly last time, a table of two images with their sizes and when they were saved, and the buttons Recover, Discard and Decide Later.">
+          <figcaption>What a crashed session is met with at the next start.</figcaption>
+        </figure>
+      </li>
+      <li>
+        <figure>
+          <img src="screenshots/panel-layers.png" width="349" height="277"
+               alt="The Layers panel showing an adjustment layer, a layer with a mask thumbnail and the word fx, an expanded group holding two children, and the background.">
+          <figcaption>The Layers panel: an adjustment layer, a masked layer and a group.</figcaption>
         </figure>
       </li>
     </ul>
@@ -206,7 +267,8 @@ cmake --build build
     <h2>Where to go next</h2>
     <ul>
       <li><a href="guide.html">The usage guide</a>: a tour of the interface, how each tool
-        works, how selections and layers behave, and how the effect dialogs preview.</li>
+        works, how selections, layers, groups and masks behave, what an adjustment layer is
+        for, how the effect dialogs preview, and what happens after a crash.</li>
       <li><a href="shortcuts.html">The keyboard reference</a>: every shortcut, in tables.
         The same list is in the program under <kbd>F1</kbd>.</li>
       <li><a href="plugins.html">Writing an effect plugin</a>: effects can be written

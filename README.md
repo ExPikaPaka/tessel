@@ -2,17 +2,27 @@
 
 A layered raster image editor for Linux, written from scratch in C++20 with Qt 6.
 It follows the way of working that Paint.NET made popular: a tool palette on the
-left, Colors below it, History and Layers on the right, a tool options bar under
-the main toolbar, and a status bar that always tells you where the cursor is,
-how big the selection is and what the zoom level is.
+left, History, Layers and Colors on the right, a tool options bar under the main
+toolbar, and a status bar that always tells you where the cursor is, how big the
+selection is and what the zoom level is.
 
 ![The Tessel window](docs/screenshots/main-dark.png)
 
 ![Painting a stroke and warping it with an effect](docs/screenshots/demo.gif)
 
-| Panels | Rotate and zoom gizmo | Effects |
+The options bar belongs to whichever tool is active. The Paintbrush brings a
+width, an opacity, an antialiasing level, a blend mode, hardness, stabilisation,
+a brush tip and the two tablet pressure switches:
+
+![The Paintbrush options bar](docs/screenshots/options-brush.png)
+
+| Layers: a group, a masked layer, an adjustment layer | Layer Properties, with the layer's effect stack | What a layer mask does |
 | --- | --- | --- |
-| ![Layers panel](docs/screenshots/panel-layers.png) | ![The rotate and zoom gizmo](docs/screenshots/gizmo.png) | ![A gallery of effects](docs/screenshots/effects-gallery.png) |
+| ![The Layers panel](docs/screenshots/panel-layers.png) | ![Layer Properties](docs/screenshots/dialog-layer-properties.png) | ![A layer, its mask and the result](docs/screenshots/layer-mask.png) |
+
+| Rotate and zoom gizmo | Effects | Recovery after a crash |
+| --- | --- | --- |
+| ![The rotate and zoom gizmo](docs/screenshots/gizmo.png) | ![A gallery of effects](docs/screenshots/effects-gallery.png) | ![The recovery dialog](docs/screenshots/dialog-recovery.png) |
 
 | Curves | Levels | Effect dialogs |
 | --- | --- | --- |
@@ -73,7 +83,9 @@ Rectangle Select, Lasso Select, Ellipse Select and Magic Wand, each with the fiv
 combine modes (replace, union, subtract, intersect, exclusive or) and with Ctrl
 and Alt as live modifiers. Move Selected Pixels lifts the selection onto a
 floating buffer that can be dragged, nudged with the arrow keys and scaled from
-its corner handles; Move Selection slides the outline on its own.
+its corner handles; Move Selection slides the outline on its own. Edit >
+Selection feathers, grows, shrinks or reduces the outline to a border of a
+given width.
 
 Paintbrush, Pencil, Eraser, Paint Bucket, Gradient (linear, reflected, radial,
 conical and diamond, in colour or transparency mode, with optional dithering),
@@ -82,6 +94,16 @@ them), Zoom and Pan.
 
 The right mouse button draws with the secondary colour, the space bar pans with
 any tool, and every drawing tool is clipped to the active selection.
+
+The painting tools answer a graphics tablet. Pressure can drive the width of
+the stroke, its opacity, or both; each is a switch of its own in the options
+bar and both start off, so a mouse behaves exactly as it always did. Beside
+them sit stabilisation, which averages the last few positions of the pointer
+so a slow line stops wobbling, and a Tip box that paints with a brush shape
+loaded from a PNG instead of the built in round one. Antialiasing is a level
+now (None, Low, Normal, High, Maximum) rather than a switch, and the Blending
+box carries one entry past the blend modes, Overwrite, which replaces what is
+under the brush instead of compositing onto it.
 
 ### Adjustments
 
@@ -107,13 +129,41 @@ Every effect dialog is generated from the effect's parameter list and previews
 live on the canvas; Ctrl+F repeats the last one with the same settings. The list
 is not fixed: see Plugins below.
 
+Every adjustment and every effect can also be used without touching a pixel,
+as an adjustment layer or as an entry in a layer's effect stack: see Layers.
+
 ### Layers
 
-Any number of layers, each with its own name, visibility, opacity and blend
-mode. The fourteen blend modes are Normal, Multiply, Additive, Color Burn, Color
-Dodge, Reflect, Glow, Overlay, Difference, Negation, Lighten, Darken, Screen and
-Xor. Layers can be added, deleted, duplicated, reordered, merged down, flattened,
-flipped, rotated and zoomed, and imported from any readable image file.
+Layers are a tree. Any number of them, each with its own name, visibility,
+opacity and blend mode, and a group has all four as well: the group's children
+are flattened and then the group's own opacity, blend mode and mask are applied
+to the result. Add Group is Ctrl+Shift+G, and a layer is dragged into or out of
+a group in the Layers panel. The fourteen blend modes are Normal, Multiply,
+Additive, Color Burn, Color Dodge, Reflect, Glow, Overlay, Difference, Negation,
+Lighten, Darken, Screen and Xor. Layers can be added, deleted, duplicated,
+reordered, merged down, flattened, flipped, rotated and zoomed, and imported
+from any readable image file.
+
+Any layer, group included, can carry an **8 bit mask** that scales its alpha
+while it is composited. The mask is an ordinary grey raster, so it is painted
+with the same brushes, gradients and effects as everything else, clipped by the
+selection the same way: click the second thumbnail in the layer's row and the
+tools write there instead. Layers > Layer Mask holds Add, Paint in Mask, Enable, Invert, Apply
+(which bakes the mask into the pixels and drops it) and Delete.
+
+**Adjustment layers** hold an effect rather than pixels, and apply it to
+everything composited below them inside their group. Layers > New Adjustment
+Layer lists every adjustment and every effect, including the ones plugins
+brought. Double clicking the layer reopens its parameters, for as long as the
+layer exists.
+
+An ordinary layer can carry a **stack of effects** instead, applied to its
+pixels on the way into the composite while the stored pixels are left alone.
+The stack is edited in Layer Properties (F4): add, reorder, disable or remove
+an entry, reopen any entry's parameters, or Flatten the stack into the pixels
+when it is settled. An entry naming an effect this build does not have, a
+plugin that is not installed, passes the pixels through rather than dropping
+them, so the document still opens, composites and saves.
 
 ### History
 
@@ -124,15 +174,34 @@ so a long session stays cheap; the stack is capped by both step count and memory
 ### File formats
 
 * `.tessel`, the native format: a zip holding one PNG per layer, a JSON manifest,
-  the selection and a flattened preview
+  the selection and a flattened preview. The manifest nests, so groups, layer
+  masks, adjustment layers and effect stacks all come back as they went in
 * `.ora` (OpenRaster), which keeps layers, opacity and blend modes and is read by
-  Krita, GIMP and MyPaint
+  Krita, GIMP and MyPaint. Groups travel as nested stacks. OpenRaster has
+  neither masks nor adjustment layers, so a mask is baked into the pixels that
+  are written, and the layers under an adjustment layer are written as the one
+  layer they composite to, with the adjustment already in them. The file looks
+  the same when it is read back; what is lost is the separation
 * PNG, JPEG, BMP, TIFF, WebP, TGA, GIF, ICO and anything else the Qt image
   plugins on the system can handle
 
 Paint.NET's own `.pdn` files cannot be read, because the format is an
 undocumented serialisation of .NET objects. Tessel says so plainly when one is
 opened and suggests exporting `.ora` or `.png` from Paint.NET instead.
+
+### Autosave and recovery
+
+Every changed image is written to a recovery copy on a timer, by default every
+two minutes, on a worker thread so nothing waits for the disk. The copies live
+in a locked directory of their own under the user data directory, one per run.
+A run that ends cleanly deletes its directory; a run that does not leaves it
+behind, and the next start notices the lock of a dead process, lists what it
+found and offers to Recover it, Discard it, or decide later. Abandoned files
+are deleted unasked once they are older than the number of days in Settings.
+
+Tessel also remembers the images that were open and offers to reopen them at
+the next start. Autosave, its interval, the reopen offer and how long recovery
+files are kept are all in Settings, under Saving work.
 
 ## Plugins
 
@@ -181,7 +250,9 @@ clone stamp, R recolor, T text, O line and shapes, Z zoom and H pan. X swaps the
 palette colours and D resets them.
 
 Shortcuts that hold Ctrl or Alt are matched by the key's position, so they keep
-working while a non Latin keyboard layout is active.
+working while a non Latin keyboard layout is active. The complete list, with
+the new Add Group, Free Transform and Feather keys in it, is on
+[docs/shortcuts.html](docs/shortcuts.html).
 
 ## Languages
 
@@ -230,9 +301,10 @@ spelling, such as `blendModeLabel` beside `blendModeName`.
 
 ## How the code is laid out
 
-    src/core      pixel engine: Image, blend modes, ImageOps, Document, Layer,
-                  Selection, History, zip and file formats. No GUI dependency,
-                  which is why the core tests run headless.
+    src/core      pixel engine: Image, blend modes, ImageOps, Document, the
+                  layer tree with its masks and effect stacks, Selection,
+                  History, autosave and recovery, zip and file formats. No GUI
+                  dependency, which is why the core tests run headless.
     src/effects   the effect registry and the effects themselves, each one a
                   lambda plus a parameter list, plus the plugin interface and
                   the loader that reads the plugins directories
@@ -245,6 +317,15 @@ spelling, such as `blendModeLabel` beside `blendModeName`.
 Pixel work is parallelised over scanlines with a small `parallelFor`, blurs use a
 three pass box approximation of a gaussian, and resampling is done in
 premultiplied alpha so transparent edges do not bleed.
+
+The composite is cached in a grid of 64 pixel tiles: an edit dirties only the
+tiles its rectangle touches, so painting in the corner of a large image costs
+what the corner costs rather than what the image costs. Effects are the
+exception and are deliberately kept out of the tiles, because a blur or a
+distortion reads neighbouring pixels and a tile computed from its own backdrop
+would disagree with its neighbours along every seam; a layer carrying an
+enabled effect, and a level holding an adjustment layer, are built once at
+canvas size and the tiles window into that one result.
 
 ## Regenerating the screenshots
 
