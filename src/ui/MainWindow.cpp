@@ -957,6 +957,9 @@ void MainWindow::createPanels()
         connect(panel, &Panel::dropped, this, [this, panel](const QPoint& pointer) {
             dropPanel(panel, pointer);
         });
+        connect(panel, &Panel::floatToggled, this, [this, panel] {
+            togglePanelFloating(panel);
+        });
         panels_.append(panel);
         return panel;
     };
@@ -1211,42 +1214,106 @@ void MainWindow::layOutPanels()
     // first place: without the latch the two call each other for ever.
     layingOutPanels_ = true;
     const QScopeGuard done([this] { layingOutPanels_ = false; });
+
     const QRect area = panelArea();
     if (area.width() < 80 || area.height() < 80)
         return;
     constexpr int kMargin = 8;
     constexpr int kGap = 6;
+    constexpr int kLeast = 64; // a title bar and a little of what is under it
 
-    for (const Corner corner : {Corner::TopLeft, Corner::TopRight, Corner::BottomLeft,
-                                Corner::BottomRight}) {
-        QList<Panel*> here;
-        for (Panel* panel : panels_) {
-            if (panel->isVisible() && !panel->isBeingDragged() && panel->corner() == corner)
-                here.append(panel);
-        }
-        if (here.isEmpty())
+    const auto widthFor = [&area](Panel* panel) {
+        return std::clamp(panel->wantedSize().width(), 120,
+                          std::max(120, area.width() / 2 - kMargin));
+    };
+
+    // The ones left floating stand where they were let go of, kept inside the
+    // window, which is what their place is written down as a fraction for.
+    for (Panel* panel : panels_) {
+        if (!panel->isVisible() || !panel->isFloating() || panel->isBeingDragged())
             continue;
-        const bool fromTop = corner == Corner::TopLeft || corner == Corner::TopRight;
-        const bool fromLeft = corner == Corner::TopLeft || corner == Corner::BottomLeft;
-        // Panels in one corner are stacked away from it, and share the height
-        // when they ask for more of it than there is.
-        int free = area.height() - 2 * kMargin - kGap * (here.size() - 1);
-        int edge = fromTop ? area.top() + kMargin : area.bottom() - kMargin;
-        for (int i = 0; i < here.size(); ++i) {
-            Panel* panel = here[i];
-            const QSize want = panel->wantedSize();
-            const int left = here.size() - i - 1; // panels still to place
-            const int width = std::clamp(want.width(), 120,
-                                         std::max(120, area.width() / 2 - kMargin));
-            const int height = std::clamp(want.height(), 48,
-                                          std::max(48, free - left * 48));
-            const int x = fromLeft ? area.left() + kMargin
-                                   : area.right() - kMargin - width + 1;
-            const int y = fromTop ? edge : edge - height + 1;
-            panel->setGeometry(x, y, width, height);
-            panel->raise();
-            free -= height;
-            edge += fromTop ? height + kGap : -(height + kGap);
+        const int width = widthFor(panel);
+        const int height = std::clamp(panel->wantedSize().height(), kLeast,
+                                      std::max(kLeast, area.height() - 2 * kMargin));
+        const int x = area.left() + int(panel->anchor().x() * area.width());
+        const int y = area.top() + int(panel->anchor().y() * area.height());
+        panel->setGeometry(std::clamp(x, area.left(), area.right() - width + 1),
+                           std::clamp(y, area.top(), area.bottom() - height + 1),
+                           width, height);
+        panel->raise();
+    }
+
+    // Each side of the window shares its height between the panels standing
+    // at the top of it and the panels standing at the bottom, so a long list
+    // of layers pushes against the history above it rather than through it.
+    for (const bool left : {true, false}) {
+        QList<Panel*> top;
+        QList<Panel*> bottom;
+        for (Panel* panel : panels_) {
+            if (!panel->isVisible() || panel->isFloating() || panel->isBeingDragged())
+                continue;
+            const Corner corner = panel->corner();
+            const bool onThisSide = left ? (corner == Corner::TopLeft
+                                            || corner == Corner::BottomLeft)
+                                         : (corner == Corner::TopRight
+                                            || corner == Corner::BottomRight);
+            if (!onThisSide)
+                continue;
+            if (corner == Corner::TopLeft || corner == Corner::TopRight)
+                top.append(panel);
+            else
+                bottom.append(panel);
+        }
+        QList<Panel*> all = top;
+        all.append(bottom);
+        if (all.isEmpty())
+            continue;
+
+        QList<int> heights;
+        int total = kGap * (all.size() - 1);
+        for (Panel* panel : all) {
+            const int height = std::max(kLeast, panel->wantedSize().height());
+            heights.append(height);
+            total += height;
+        }
+        // Too much asked for: the tallest gives way first, so a palette of
+        // buttons keeps its size and a list is what ends up scrolling.
+        int over = total - (area.height() - 2 * kMargin);
+        while (over > 0) {
+            int tallest = -1;
+            int second = kLeast;
+            for (int i = 0; i < heights.size(); ++i) {
+                if (tallest < 0 || heights[i] > heights[tallest]) {
+                    second = tallest < 0 ? kLeast : std::max(second, heights[tallest]);
+                    tallest = i;
+                } else {
+                    second = std::max(second, heights[i]);
+                }
+            }
+            if (tallest < 0 || heights[tallest] <= kLeast)
+                break;
+            const int cut = std::min(over, std::max(1, heights[tallest]
+                                                          - std::max(second, kLeast)));
+            heights[tallest] -= cut;
+            over -= cut;
+        }
+
+        int edge = area.top() + kMargin;
+        for (int i = 0; i < top.size(); ++i) {
+            const int width = widthFor(top[i]);
+            const int x = left ? area.left() + kMargin : area.right() - kMargin - width + 1;
+            top[i]->setGeometry(x, edge, width, heights[i]);
+            top[i]->raise();
+            edge += heights[i] + kGap;
+        }
+        edge = area.bottom() - kMargin;
+        for (int i = 0; i < bottom.size(); ++i) {
+            const int height = heights[top.size() + i];
+            const int width = widthFor(bottom[i]);
+            const int x = left ? area.left() + kMargin : area.right() - kMargin - width + 1;
+            bottom[i]->setGeometry(x, edge - height + 1, width, height);
+            bottom[i]->raise();
+            edge -= height + kGap;
         }
     }
 }
@@ -1256,8 +1323,7 @@ void MainWindow::showDropHint(Panel* panel, const QPoint& pointer)
     if (!dropHint_ || !panel)
         return;
     dropHint_->setGeometry(panelArea());
-    dropHint_->setActive(PanelDropHint::cornerAt(dropHint_->rect(),
-                                                 pointer - dropHint_->pos()));
+    dropHint_->setActive(dropHint_->targetAt(pointer - dropHint_->pos()));
     if (!dropHint_->isVisible()) {
         dropHint_->show();
         dropHint_->raise();
@@ -1265,14 +1331,58 @@ void MainWindow::showDropHint(Panel* panel, const QPoint& pointer)
     }
 }
 
+void MainWindow::togglePanelFloating(Panel* panel)
+{
+    if (!panel)
+        return;
+    const QRect area = panelArea();
+    if (panel->isFloating()) {
+        // Back into whichever corner it is standing nearest.
+        const QPoint centre = panel->geometry().center();
+        const bool right = centre.x() > area.center().x();
+        const bool below = centre.y() > area.center().y();
+        panel->setCorner(below ? (right ? Corner::BottomRight : Corner::BottomLeft)
+                               : (right ? Corner::TopRight : Corner::TopLeft));
+        panel->setFloating(false);
+        panels_.removeOne(panel);
+        panels_.prepend(panel);
+    } else {
+        // Loose, a little way in from where it was pinned so that it is
+        // plainly off the edge rather than still against it.
+        const QRect box = panel->geometry();
+        const bool right = box.center().x() > area.center().x();
+        const bool below = box.center().y() > area.center().y();
+        const int x = box.left() + (right ? -32 : 32);
+        const int y = box.top() + (below ? -32 : 32);
+        panel->setFloating(true);
+        panel->setAnchor(QPointF(double(x - area.left()) / std::max(1, area.width()),
+                                 double(y - area.top()) / std::max(1, area.height())));
+    }
+    layOutPanels();
+}
+
 void MainWindow::dropPanel(Panel* panel, const QPoint& pointer)
 {
     if (!panel)
         return;
+    std::optional<Corner> corner;
     if (dropHint_) {
         dropHint_->hide();
-        panel->setCorner(PanelDropHint::cornerAt(dropHint_->rect(),
-                                                 pointer - dropHint_->pos()));
+        corner = dropHint_->targetAt(pointer - dropHint_->pos());
+    }
+    if (corner) {
+        panel->setCorner(*corner);
+        panel->setFloating(false);
+    } else {
+        // Let go of away from the corners: it stays where it was put. Its
+        // place is kept as a fraction of the workspace so that resizing the
+        // window moves it along rather than leaving it off the edge.
+        const QRect area = panelArea();
+        panel->setFloating(true);
+        panel->setAnchor(QPointF(double(panel->x() - area.left())
+                                     / std::max(1, area.width()),
+                                 double(panel->y() - area.top())
+                                     / std::max(1, area.height())));
     }
     // Nearest the corner it was let go in: the panels already there move
     // aside rather than the new one landing behind them.
@@ -1288,10 +1398,12 @@ void MainWindow::savePanels(QSettings& settings) const
 {
     QStringList entries;
     for (Panel* panel : panels_) {
-        entries.append(QStringLiteral("%1:%2:%3")
+        entries.append(QStringLiteral("%1:%2:%3:%4:%5")
                            .arg(panel->objectName())
-                           .arg(int(panel->corner()))
-                           .arg(panel->isVisible() ? 1 : 0));
+                           .arg(panel->isFloating() ? -1 : int(panel->corner()))
+                           .arg(panel->isVisible() ? 1 : 0)
+                           .arg(panel->anchor().x(), 0, 'f', 4)
+                           .arg(panel->anchor().y(), 0, 'f', 4));
     }
     settings.setValue(QStringLiteral("panels"), entries.join(QLatin1Char(';')));
 }
@@ -1304,7 +1416,7 @@ void MainWindow::restorePanels(const QSettings& settings)
     QList<Panel*> order;
     for (const QString& entry : stored.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
         const QStringList parts = entry.split(QLatin1Char(':'));
-        if (parts.size() != 3)
+        if (parts.size() < 3)
             continue;
         Panel* panel = nullptr;
         for (Panel* candidate : panels_) {
@@ -1313,8 +1425,14 @@ void MainWindow::restorePanels(const QSettings& settings)
         }
         if (!panel || order.contains(panel))
             continue;
-        const int corner = std::clamp(parts[1].toInt(), 0, 3);
-        panel->setCorner(Corner(corner));
+        const int corner = parts[1].toInt();
+        panel->setFloating(corner < 0);
+        if (corner >= 0)
+            panel->setCorner(Corner(std::clamp(corner, 0, 3)));
+        if (parts.size() >= 5) {
+            panel->setAnchor(QPointF(std::clamp(parts[3].toDouble(), 0.0, 0.95),
+                                     std::clamp(parts[4].toDouble(), 0.0, 0.95)));
+        }
         panel->setVisible(parts[2].toInt() != 0);
         order.append(panel);
     }
@@ -1338,6 +1456,7 @@ void MainWindow::resetPanelLayout()
         if (!panel)
             continue;
         panel->setCorner(corner);
+        panel->setFloating(false);
         panel->show();
         panels_.append(panel);
     }

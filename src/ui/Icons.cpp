@@ -625,6 +625,23 @@ void drawGlyph(QPainter& p, const QString& name, const QColor& color)
             p.setPen(strokePen(color, 2.2));
             p.drawPath(slash);
         }
+    } else if (name == QLatin1String("pin") || name == QLatin1String("unpin")) {
+        // A panel pinned into its corner, or let go to float: the same pin,
+        // upright or leaning out of its hole.
+        p.save();
+        p.translate(12, 12);
+        if (name == QLatin1String("unpin"))
+            p.rotate(35);
+        p.setPen(strokePen(color, 2.0));
+        p.drawLine(QPointF(0, 1), QPointF(0, 8));
+        QPainterPath head;
+        head.moveTo(-5, -6);
+        head.lineTo(5, -6);
+        head.lineTo(3.5, 1);
+        head.lineTo(-3.5, 1);
+        head.closeSubpath();
+        fillShape(p, head, color);
+        p.restore();
     } else if (name == QLatin1String("up") || name == QLatin1String("down")) {
         p.setPen(strokePen(color, 2.4));
         if (name == QLatin1String("up")) {

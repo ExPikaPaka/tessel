@@ -2,12 +2,14 @@
 
 #include <algorithm>
 
+#include <QAbstractScrollArea>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -52,6 +54,15 @@ Panel::Panel(const QString& name, const QString& title, QWidget* content,
     label_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     row->addWidget(label_, 1);
 
+    pinButton_ = new QToolButton(bar_);
+    pinButton_->setObjectName(QStringLiteral("panelPinButton"));
+    pinButton_->setAutoRaise(true);
+    pinButton_->setFocusPolicy(Qt::NoFocus);
+    pinButton_->setIconSize(QSize(16, 16));
+    pinButton_->setFixedSize(22, 22);
+    connect(pinButton_, &QToolButton::clicked, this, &Panel::floatToggled);
+    row->addWidget(pinButton_, 0);
+
     closeButton_ = new QToolButton(bar_);
     closeButton_->setObjectName(QStringLiteral("panelCloseButton"));
     closeButton_->setAutoRaise(true);
@@ -72,6 +83,14 @@ Panel::Panel(const QString& name, const QString& title, QWidget* content,
     refreshIcons();
 }
 
+void Panel::setFloating(bool floating)
+{
+    if (floating_ == floating)
+        return;
+    floating_ = floating;
+    refreshIcons(); // the pin says which way it would go next
+}
+
 void Panel::setTitle(const QString& title)
 {
     if (label_)
@@ -82,11 +101,25 @@ void Panel::refreshIcons()
 {
     if (closeButton_)
         closeButton_->setIcon(icons::get(QStringLiteral("close"), 16));
+    if (pinButton_) {
+        pinButton_->setIcon(icons::get(floating_ ? QStringLiteral("unpin")
+                                                 : QStringLiteral("pin"),
+                                       16));
+        pinButton_->setToolTip(floating_ ? tr("Pin this panel into the nearest corner")
+                                         : tr("Let this panel float where it stands"));
+    }
 }
 
 QSize Panel::wantedSize() const
 {
-    const QSize inside = content_ ? content_->sizeHint() : QSize(120, 80);
+    QSize inside = content_ ? content_->sizeHint() : QSize(120, 80);
+    // A panel whose contents scroll needs room for the scroll bar as well, or
+    // it takes that width out of the contents and the far edge of every row
+    // of buttons in them is cut off.
+    if (auto* scroller = qobject_cast<const QAbstractScrollArea*>(content_)) {
+        if (scroller->verticalScrollBarPolicy() != Qt::ScrollBarAlwaysOff)
+            inside.rwidth() += scroller->verticalScrollBar()->sizeHint().width();
+    }
     const int bar = bar_ ? bar_->sizeHint().height() : 24;
     return QSize(std::max(120, inside.width()), bar + std::max(40, inside.height()));
 }
@@ -168,7 +201,7 @@ PanelDropHint::PanelDropHint(QWidget* parent) : QWidget(parent)
     hide();
 }
 
-void PanelDropHint::setActive(Corner corner)
+void PanelDropHint::setActive(const std::optional<Corner>& corner)
 {
     if (active_ == corner && isVisible())
         return;
@@ -176,13 +209,16 @@ void PanelDropHint::setActive(Corner corner)
     update();
 }
 
-Corner PanelDropHint::cornerAt(const QRect& area, const QPoint& point)
+std::optional<Corner> PanelDropHint::targetAt(const QPoint& point) const
 {
-    const bool right = point.x() > area.center().x();
-    const bool bottom = point.y() > area.center().y();
-    if (bottom)
-        return right ? Corner::BottomRight : Corner::BottomLeft;
-    return right ? Corner::TopRight : Corner::TopLeft;
+    for (const Corner corner : {Corner::TopLeft, Corner::TopRight, Corner::BottomLeft,
+                                Corner::BottomRight}) {
+        // A little wider than it is drawn, because the pointer is aimed at a
+        // corner of the window rather than at a rectangle in it.
+        if (targetFor(corner).adjusted(-16, -16, 16, 16).contains(point))
+            return corner;
+    }
+    return std::nullopt;
 }
 
 QRect PanelDropHint::targetFor(Corner corner) const
@@ -213,7 +249,7 @@ void PanelDropHint::paintEvent(QPaintEvent*)
     for (const Corner corner : {Corner::TopLeft, Corner::TopRight, Corner::BottomLeft,
                                 Corner::BottomRight}) {
         const QRect target = targetFor(corner);
-        const bool chosen = corner == active_;
+        const bool chosen = active_ && *active_ == corner;
         QColor fill = chosen ? theme::accentColor() : theme::panelColor();
         fill.setAlpha(chosen ? 150 : 90);
         QColor line = chosen ? theme::accentColor() : theme::gridColor();

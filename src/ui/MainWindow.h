@@ -108,6 +108,7 @@ private:
     void layOutPanels();
     void showDropHint(Panel* panel, const QPoint& pointer);
     void dropPanel(Panel* panel, const QPoint& pointer);
+    void togglePanelFloating(Panel* panel);
     void savePanels(QSettings& settings) const;
     void restorePanels(const QSettings& settings);
 

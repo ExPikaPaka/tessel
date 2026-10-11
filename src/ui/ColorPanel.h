@@ -10,6 +10,7 @@
 class QCheckBox;
 class QLineEdit;
 class QPushButton;
+class QToolButton;
 class QSpinBox;
 class QTimer;
 class QWidget;
@@ -237,11 +238,11 @@ private:
     RampSlider* alphaSlider_ = nullptr;
     PaletteGrid* palette_ = nullptr;
     PaletteGrid* recentGrid_ = nullptr;
-    QPushButton* moreButton_ = nullptr;
-    QPushButton* pickButton_ = nullptr;
-    QPushButton* loadPaletteButton_ = nullptr;
-    QPushButton* savePaletteButton_ = nullptr;
-    QPushButton* resetPaletteButton_ = nullptr;
+    QToolButton* moreButton_ = nullptr;
+    QToolButton* pickButton_ = nullptr;
+    QToolButton* loadPaletteButton_ = nullptr;
+    QToolButton* savePaletteButton_ = nullptr;
+    QToolButton* resetPaletteButton_ = nullptr;
     ScreenPickOverlay* overlay_ = nullptr;
     QTimer* recentSaveTimer_ = nullptr;
     QWidget* details_ = nullptr;

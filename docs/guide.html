@@ -121,6 +121,19 @@
         program; here it is cut in two and stacked so that the labels stay readable.</figcaption>
     </figure>
 
+    <h3>The four panels</h3>
+    <p>Tools, Colors, History and Layers stand in the corners of the window over the canvas,
+      which runs the full width behind them: a panel is only as big as what it holds, and
+      what is beside it is workspace rather than an empty column. Drag a panel by its title
+      bar and the four corners light up; let it go over one and it pins itself there, with
+      anything already in that corner moving aside, or let it go anywhere else and it floats
+      where you put it. The pin in the title bar does the same without the dragging, and the
+      cross closes the panel; the four buttons at the right of the menu bar bring them back.
+      Where each panel sits is remembered between sessions, and <strong>Settings &gt;
+      Window</strong> puts them back where they started.</p>
+    <p>A list in a panel grows the panel as far as six rows and then scrolls, so a long
+      history or a tall stack of layers never pushes its panel through its neighbour.</p>
+
     <h3>The Tools palette</h3>
     <p>Nineteen tools in a two column grid of icons, read left to right and then down:
       Rectangle Select and Move Selected Pixels; Lasso Select and Move Selection; Ellipse
@@ -129,7 +142,7 @@
       Hovering one shows its name and its key; the keys are listed in full on the
       <a href="shortcuts.html">shortcuts page</a>.</p>
     <figure class="narrow">
-      <img src="screenshots/panel-tools.png" width="104" height="806"
+      <img src="screenshots/panel-tools.png" width="118" height="324"
            alt="The Tools palette: nineteen tool icons in a two column grid, with the Paintbrush highlighted.">
       <figcaption>The Tools palette, with the Paintbrush active.</figcaption>
     </figure>
@@ -141,11 +154,13 @@
       the hue and saturation of the active colour, the two ramps under it set value and alpha,
       and the palette grid at the bottom holds the fixed palette: left click takes a colour as
       the primary, right click as the secondary. <strong>More</strong> opens the numeric side:
-      red, green and blue, hue, saturation and value, alpha, and a hex field.</p>
+      red, green and blue, hue, saturation and value, alpha, and a hex field. The picker
+      beside it takes a colour from anywhere on the screen, and the three small buttons on
+      the palette row load a palette, save one and restore the built in one.</p>
 
     <figure class="narrow">
-      <img src="screenshots/panel-colors.png" width="349" height="295"
-           alt="The Colors panel: the primary and secondary swatches with the swap and reset arrows, a colour wheel, value and alpha ramps, a More button, a Screen pick button and the palette grid with Load, Save and Reset.">
+      <img src="screenshots/panel-colors.png" width="246" height="364"
+           alt="The Colors panel: the primary and secondary swatches with the swap and reset arrows, a colour wheel, value and alpha ramps, a More button with the screen picker beside it, the row of recent colours and the palette grid with its load, save and reset buttons.">
       <figcaption>Colors, with the palette grid along the bottom.</figcaption>
     </figure>
 
@@ -155,7 +170,7 @@
       the two buttons at the top are Undo and Redo, and beside them is a running count of
       steps and of how much memory they hold.</p>
     <figure class="narrow">
-      <img src="screenshots/panel-history.png" width="349" height="166"
+      <img src="screenshots/panel-history.png" width="262" height="147"
            alt="The History panel: Undo and Redo buttons, a count of steps and memory, and the entry Original image.">
       <figcaption>History, at the start of a session, where the only step is the image
         itself.</figcaption>
@@ -173,7 +188,7 @@
       buttons along the bottom are Add New Layer, Add Group, Delete Layer, Duplicate Layer,
       Merge Layer Down, Move Layer Up, Move Layer Down and Layer Properties.</p>
     <figure class="narrow">
-      <img src="screenshots/panel-layers.png" width="349" height="277"
+      <img src="screenshots/panel-layers.png" width="262" height="283"
            alt="The Layers panel showing five rows: a Hue / Saturation adjustment layer at the top, a selected Brush work layer with a second mask thumbnail and the word fx, an expanded Sky group at 92 percent holding Sun and Clouds, and Background at the bottom.">
       <figcaption>One of each: an adjustment layer, a layer with a mask and an effect stack,
         a group holding two children, and the background.</figcaption>
@@ -382,7 +397,7 @@
       <li>It is saved inside a <code>.tessel</code> file along with the layers.</li>
     </ul>
     <figure>
-      <img src="screenshots/canvas-selection.png" width="1295" height="834"
+      <img src="screenshots/canvas-selection.png" width="1760" height="834"
            alt="The canvas on its own, with an elliptical selection drawn as a dashed outline over the artwork.">
       <figcaption>The selection as it is drawn on the canvas. View &gt; Selection Outline
         hides the marching dashes while leaving the selection itself in force.</figcaption>

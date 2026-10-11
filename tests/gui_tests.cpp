@@ -2696,7 +2696,7 @@ int main(int argc, char** argv)
         auto* hint = window.findChild<PanelDropHint*>();
         CHECK(hint != nullptr && hint->isVisible());
         if (hint)
-            CHECK(hint->active() == Corner::BottomRight);
+            CHECK(hint->active().has_value() && *hint->active() == Corner::BottomRight);
         QTest::mouseRelease(bar, Qt::LeftButton, Qt::NoModifier,
                             bar->mapFrom(&window, far));
         QApplication::processEvents();
@@ -2713,6 +2713,113 @@ int main(int argc, char** argv)
         CHECK(layers != nullptr);
         if (layers)
             CHECK(!layers->geometry().intersects(panel->geometry()));
+    });
+
+    addTest("a panel let go of away from the corners floats where it was put", [] {
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1400, 900);
+        window.show();
+        QApplication::processEvents();
+        window.resetPanelLayout();
+        QApplication::processEvents();
+
+        auto* panel = window.findChild<Panel*>(QStringLiteral("toolsPanel"));
+        CHECK(panel != nullptr);
+        if (!panel)
+            return;
+        auto* bar = panel->findChild<QWidget*>(QStringLiteral("panelTitleBar"));
+        CHECK(bar != nullptr && !panel->isFloating());
+        if (!bar)
+            return;
+
+        const QPoint middle(window.width() / 2, window.height() / 2);
+        QTest::mousePress(bar, Qt::LeftButton, Qt::NoModifier,
+                          QPoint(bar->width() / 2, bar->height() / 2));
+        QTest::mouseMove(bar, bar->mapFrom(&window, middle));
+        QApplication::processEvents();
+        // Nothing is picked out, because the middle is not a corner.
+        auto* hint = window.findChild<PanelDropHint*>();
+        CHECK(hint != nullptr && hint->isVisible());
+        if (hint)
+            CHECK(!hint->active().has_value());
+        QTest::mouseRelease(bar, Qt::LeftButton, Qt::NoModifier,
+                            bar->mapFrom(&window, middle));
+        QApplication::processEvents();
+
+        CHECK(panel->isFloating());
+        // Where it was let go of, near enough: the pointer held the title bar
+        // rather than the top left of the panel.
+        CHECK(std::abs(panel->geometry().center().x() - middle.x()) < 200);
+        CHECK(panel->y() < middle.y() && panel->geometry().bottom() > middle.y() - 40);
+        // And it stays in the same part of the window when the window changes
+        // size, rather than being left off the edge of it.
+        const QRect area = window.findChild<CanvasView*>()->parentWidget()->geometry();
+        const double across = double(panel->x() - area.left()) / area.width();
+        window.resize(1000, 700);
+        QApplication::processEvents();
+        const QRect smaller = window.findChild<CanvasView*>()->parentWidget()->geometry();
+        CHECK(smaller.contains(panel->geometry()));
+        CHECK(std::abs(double(panel->x() - smaller.left()) / smaller.width() - across)
+              < 0.08);
+
+        // The pin in the title bar says the same thing without the dragging:
+        // it puts a floating panel back into the corner it stands nearest,
+        // and lets a pinned one go.
+        auto* pin = bar->findChild<QToolButton*>(QStringLiteral("panelPinButton"));
+        CHECK(pin != nullptr);
+        if (!pin)
+            return;
+        pin->click();
+        QApplication::processEvents();
+        CHECK(!panel->isFloating());
+        CHECK(panel->geometry().left() < smaller.left() + 24
+              || panel->geometry().right() > smaller.right() - 24);
+        pin->click();
+        QApplication::processEvents();
+        CHECK(panel->isFloating());
+    });
+
+    addTest("panels down one side of the window never stand on each other", [] {
+        // A list that grows used to push its panel through the one above it:
+        // each corner was given the whole height to share out.
+        // A short window, so the panels on one side have to share what there
+        // is between them rather than each taking what it would like.
+        MainWindow window;
+        window.newDocument(400, 300, Rgba(255, 255, 255, 255));
+        window.resize(1100, 600);
+        window.show();
+        QApplication::processEvents();
+        window.resetPanelLayout();
+        QApplication::processEvents();
+
+        auto* layers = window.findChild<LayersPanel*>();
+        CHECK(layers != nullptr);
+        if (!layers)
+            return;
+        for (int i = 0; i < 12; ++i)
+            QMetaObject::invokeMethod(layers, "addLayerRequested");
+        QApplication::processEvents();
+        QApplication::processEvents();
+
+        QList<Panel*> shown;
+        for (Panel* panel : window.findChildren<Panel*>()) {
+            if (panel->isVisible())
+                shown.append(panel);
+        }
+        CHECK(shown.size() == 4);
+        for (int i = 0; i < shown.size(); ++i) {
+            for (int j = i + 1; j < shown.size(); ++j) {
+                check(!shown[i]->geometry().intersects(shown[j]->geometry()),
+                      "two panels do not overlap", __LINE__);
+            }
+        }
+        // And the list is what gave way: it scrolls rather than growing past
+        // the panel above it.
+        auto* tree = window.findChild<LayerTree*>();
+        CHECK(tree != nullptr);
+        if (tree)
+            CHECK(tree->verticalScrollBar()->maximum() > 0);
     });
 
     addTest("a panel is no taller than what it holds", [] {
@@ -3584,10 +3691,10 @@ int main(int argc, char** argv)
         QTemporaryDir dir;
         CHECK(dir.isValid());
         ColorPanel panel;
-        QPushButton* load = panel.findChild<QPushButton*>(QStringLiteral("paletteLoad"));
-        QPushButton* save = panel.findChild<QPushButton*>(QStringLiteral("paletteSave"));
-        QPushButton* reset = panel.findChild<QPushButton*>(QStringLiteral("paletteReset"));
-        QPushButton* pick = panel.findChild<QPushButton*>(QStringLiteral("screenPick"));
+        auto* load = panel.findChild<QAbstractButton*>(QStringLiteral("paletteLoad"));
+        auto* save = panel.findChild<QAbstractButton*>(QStringLiteral("paletteSave"));
+        auto* reset = panel.findChild<QAbstractButton*>(QStringLiteral("paletteReset"));
+        auto* pick = panel.findChild<QAbstractButton*>(QStringLiteral("screenPick"));
         CHECK(load != nullptr);
         CHECK(save != nullptr);
         CHECK(reset != nullptr);

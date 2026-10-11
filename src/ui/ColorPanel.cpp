@@ -15,6 +15,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QToolButton>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QSettings>
@@ -567,23 +568,31 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     root->addLayout(valueRow);
     root->addLayout(alphaRow);
 
-    const auto makeSmallButton = [this](const QString& text, const QString& name,
-                                        const QString& tip) {
-        auto* button = new QPushButton(text, this);
+    // Rows of words took more width than the panel has and were cut off at
+    // its edge, so everything but the disclosure is an icon the size of the
+    // buttons everywhere else in the window, with the words in the tooltip.
+    const auto makeIconButton = [this](const QString& icon, const QString& name,
+                                       const QString& tip) {
+        auto* button = new QToolButton(this);
         button->setObjectName(name);
-        button->setFlat(true);
+        button->setProperty("iconName", icon);
+        button->setIcon(icons::get(icon, 16));
+        button->setIconSize(QSize(16, 16));
+        button->setAutoRaise(true);
+        button->setFixedSize(22, 22);
         button->setToolTip(tip);
-        button->setMaximumHeight(22);
-        // Hug the text, so the row keeps the buttons small and grouped.
-        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         return button;
     };
 
-    moreButton_ = new QPushButton(tr("More  >>"), this);
+    moreButton_ = new QToolButton(this);
+    moreButton_->setObjectName(QStringLiteral("moreColors"));
+    moreButton_->setText(tr("More"));
     moreButton_->setCheckable(true);
-    moreButton_->setFlat(true);
-    pickButton_ = makeSmallButton(
-        tr("Screen pick"), QStringLiteral("screenPick"),
+    moreButton_->setAutoRaise(true);
+    moreButton_->setMaximumHeight(22);
+    moreButton_->setToolTip(tr("The numbers behind the colour."));
+    pickButton_ = makeIconButton(
+        QStringLiteral("picker"), QStringLiteral("screenPick"),
         tr("Take a colour from anywhere on screen. Click to pick, "
            "Escape to cancel."));
     auto* actionRow = new QHBoxLayout;
@@ -649,14 +658,14 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     paletteRow->setSpacing(4);
     paletteRow->addWidget(new QLabel(tr("Palette"), this));
     paletteRow->addStretch(1);
-    loadPaletteButton_ = makeSmallButton(
-        tr("Load"), QStringLiteral("paletteLoad"),
+    loadPaletteButton_ = makeIconButton(
+        QStringLiteral("open"), QStringLiteral("paletteLoad"),
         tr("Load a .gpl or hex palette."));
-    savePaletteButton_ = makeSmallButton(
-        tr("Save"), QStringLiteral("paletteSave"),
+    savePaletteButton_ = makeIconButton(
+        QStringLiteral("save"), QStringLiteral("paletteSave"),
         tr("Save the palette as .gpl or hex."));
-    resetPaletteButton_ = makeSmallButton(
-        tr("Reset"), QStringLiteral("paletteReset"),
+    resetPaletteButton_ = makeIconButton(
+        QStringLiteral("undo"), QStringLiteral("paletteReset"),
         tr("Restore the built in palette."));
     paletteRow->addWidget(loadPaletteButton_);
     paletteRow->addWidget(savePaletteButton_);
@@ -668,9 +677,9 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     root->addStretch(1);
 
     // ---------------------------------------------------------- wiring
-    connect(moreButton_, &QPushButton::toggled, this, [this](bool on) {
+    connect(moreButton_, &QToolButton::toggled, this, [this](bool on) {
         details_->setVisible(on);
-        moreButton_->setText(on ? tr("Less  <<") : tr("More  >>"));
+        moreButton_->setText(on ? tr("Less") : tr("More"));
     });
     connect(swatches_, &SwatchPair::activeChanged, this, [this](bool primary) {
         activeIsPrimary_ = primary;
@@ -702,7 +711,7 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
     connect(palette_, &PaletteGrid::colorChosen, this, chooseColor);
     connect(recentGrid_, &PaletteGrid::colorChosen, this, chooseColor);
 
-    connect(loadPaletteButton_, &QPushButton::clicked, this, [this] {
+    connect(loadPaletteButton_, &QToolButton::clicked, this, [this] {
         QSettings settings;
         const QString last = settings.value(QStringLiteral("paletteDir")).toString();
         const QString path = QFileDialog::getOpenFileName(
@@ -714,7 +723,7 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         if (!loadPaletteFile(path, &error))
             showPaletteError(tr("Cannot load palette"), error);
     });
-    connect(savePaletteButton_, &QPushButton::clicked, this, [this] {
+    connect(savePaletteButton_, &QToolButton::clicked, this, [this] {
         QSettings settings;
         const QString last = settings.value(QStringLiteral("paletteDir")).toString();
         QString path = QFileDialog::getSaveFileName(
@@ -730,8 +739,8 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent)
         if (!savePaletteFile(path, &error))
             showPaletteError(tr("Cannot save palette"), error);
     });
-    connect(resetPaletteButton_, &QPushButton::clicked, this, &ColorPanel::resetPalette);
-    connect(pickButton_, &QPushButton::clicked, this, [this] {
+    connect(resetPaletteButton_, &QToolButton::clicked, this, &ColorPanel::resetPalette);
+    connect(pickButton_, &QToolButton::clicked, this, [this] {
         QString error;
         if (!beginScreenPick(&error))
             showPaletteError(tr("Cannot pick from the screen"), error);

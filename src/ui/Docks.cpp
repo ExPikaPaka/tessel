@@ -544,12 +544,15 @@ int visibleRowCount(const QTreeWidgetItem* item)
 
 QSize LayersPanel::sizeHint() const
 {
-    // Enough of the list to drop a layer into even when there is only one.
+    // Enough of the list to drop a layer into even when there is only one,
+    // and never so much of it that the panel walks over its neighbours: past
+    // six rows the list scrolls instead of growing.
     constexpr int kLeastRows = 3;
+    constexpr int kMostRows = 6;
     int rows = 0;
     for (int i = 0; i < list_->topLevelItemCount(); ++i)
         rows += visibleRowCount(list_->topLevelItem(i));
-    rows = std::max(kLeastRows, rows);
+    rows = std::clamp(rows, kLeastRows, kMostRows);
     const int list = rows * kRowHeight + 2 * list_->frameWidth() + 2;
     QSize hint = QWidget::sizeHint();
     // Everything but the list keeps the height the layout asked for.
@@ -642,8 +645,9 @@ void HistoryPanel::refresh()
 QSize HistoryPanel::sizeHint() const
 {
     constexpr int kLeastRows = 4;
+    constexpr int kMostRows = 6; // and then it scrolls
     const int row = std::max(16, list_->sizeHintForRow(0));
-    const int rows = std::max(kLeastRows, list_->count());
+    const int rows = std::clamp(list_->count(), kLeastRows, kMostRows);
     const int list = rows * row + 2 * list_->frameWidth() + 2;
     QSize hint = QWidget::sizeHint();
     hint.setHeight(hint.height() - list_->sizeHint().height() + list);
