@@ -23,6 +23,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSettings>
 #include <QSpinBox>
 #include <QMenuBar>
@@ -2492,6 +2493,38 @@ int main(int argc, char** argv)
         brush->optionChanged(QStringLiteral("antialias"), 2);
         brush->optionChanged(QStringLiteral("width"), 12);
         brush->optionChanged(QStringLiteral("hardness"), 75);
+    });
+
+    addTest("no two commands claim the same key", [] {
+        // Qt refuses to choose between two actions bound to one sequence, so a
+        // clash does not pick a winner: it makes the key do nothing at all,
+        // silently, and only the menu entries keep working. Ctrl+Shift+G was
+        // bound to both Add Group and the Black and White adjustment.
+        MainWindow window;
+        window.newDocument(64, 48, Rgba(255, 255, 255, 255));
+        QMap<QString, QStringList> owners;
+        for (QAction* action : window.findChildren<QAction*>()) {
+            for (const QKeySequence& key : action->shortcuts()) {
+                if (key.isEmpty())
+                    continue;
+                owners[key.toString()].append(
+                    action->objectName().isEmpty() ? action->text()
+                                                   : action->objectName());
+            }
+        }
+        for (QShortcut* shortcut : window.findChildren<QShortcut*>()) {
+            const QKeySequence key = shortcut->key();
+            if (!key.isEmpty())
+                owners[key.toString()].append(QStringLiteral("shortcut"));
+        }
+        QStringList clashes;
+        for (auto it = owners.cbegin(); it != owners.cend(); ++it) {
+            if (it.value().size() > 1)
+                clashes.append(it.key() + QStringLiteral(": ") + it.value().join(QStringLiteral(", ")));
+        }
+        if (!clashes.isEmpty())
+            std::printf("    clashes: %s\n", clashes.join(QStringLiteral(" | ")).toUtf8().constData());
+        CHECK(clashes.isEmpty());
     });
 
     addTest("the rotate zoom shortcut reaches the transform tool", [] {

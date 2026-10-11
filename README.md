@@ -137,7 +137,7 @@ as an adjustment layer or as an entry in a layer's effect stack: see Layers.
 Layers are a tree. Any number of them, each with its own name, visibility,
 opacity and blend mode, and a group has all four as well: the group's children
 are flattened and then the group's own opacity, blend mode and mask are applied
-to the result. Add Group is Ctrl+Shift+G, and a layer is dragged into or out of
+to the result. Add Group is Ctrl+Alt+G, and a layer is dragged into or out of
 a group in the Layers panel. The fourteen blend modes are Normal, Multiply,
 Additive, Color Burn, Color Dodge, Reflect, Glow, Overlay, Difference, Negation,
 Lighten, Darken, Screen and Xor. Layers can be added, deleted, duplicated,

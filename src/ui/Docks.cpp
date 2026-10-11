@@ -283,7 +283,7 @@ LayersPanel::LayersPanel(QWidget* parent) : QWidget(parent)
     const ButtonSpec specs[] = {
         {"layer-add", QT_TR_NOOP("Add New Layer (Ctrl+Shift+N)"),
          &LayersPanel::addLayerRequested},
-        {"layer", QT_TR_NOOP("Add Group (Ctrl+Shift+G)"),
+        {"layer", QT_TR_NOOP("Add Group (Ctrl+Alt+G)"),
          &LayersPanel::addGroupRequested},
         {"layer-delete", QT_TR_NOOP("Delete Layer (Ctrl+Shift+Delete)"),
          &LayersPanel::deleteLayerRequested},

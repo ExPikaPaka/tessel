@@ -448,7 +448,7 @@ void MainWindow::createActions()
          QStringLiteral("layer-add"), QKeySequence(QStringLiteral("Ctrl+Shift+N")),
          [this] { addLayer(); });
     make(QStringLiteral("addgroup"), tr("Add &Group"),
-         QStringLiteral("layer"), QKeySequence(QStringLiteral("Ctrl+Shift+G")), [this] {
+         QStringLiteral("layer"), QKeySequence(QStringLiteral("Ctrl+Alt+G")), [this] {
              if (Document* doc = currentDocument()) {
                  structuralEdit(tr("Add Group"), QStringLiteral("layer"),
                                 [doc] { doc->addGroup(); });

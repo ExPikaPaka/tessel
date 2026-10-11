@@ -2143,8 +2143,8 @@ This session does not allow an application to capture the desktop, which is the 
         <translation>Добавить слой (Ctrl+Shift+N)</translation>
     </message>
     <message>
-        <source>Add Group (Ctrl+Shift+G)</source>
-        <translation>Добавить группу (Ctrl+Shift+G)</translation>
+        <source>Add Group (Ctrl+Alt+G)</source>
+        <translation>Добавить группу (Ctrl+Alt+G)</translation>
     </message>
     <message>
         <source>Delete Layer (Ctrl+Shift+Delete)</source>
